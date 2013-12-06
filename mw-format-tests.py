@@ -2,7 +2,12 @@
 
 """Format FreeIPA declarative tests as Mediawiki text for freeipa.org
 
-Usage: get-tests <test>...
+Usage: get-tests [options] <test>...
+
+Options:
+    --run                   Actually run the tests while gathering info
+    --permission-acishow    After aci_show commands, print permission info
+                                (requires --run)
 
 <test> may be a Python module name; if it doesn't contain a dot,
 'ipatests.test_xmlrpc.' is prepended.
@@ -25,9 +30,10 @@ import json
 import docopt  # sudo dnf install python-docopt
 
 from ipalib import parameters
-from ipalib import api
+from ipalib import api, errors
 from ipalib.cli import cli_plugins
-from ipapython import ipautil
+from ipapython import ipautil, ipaldap
+from ipapython.dn import DN
 from ipalib.rpc import json_encode_binary
 
 argv = list(sys.argv[1:])
@@ -148,7 +154,7 @@ def to_json(dct, method=None):
         return Bad()
 
 
-def make_wikitests(declarative_test_class):
+def make_wikitests(declarative_test_class, run=False, permission_acishow=False):
     yield '<h2>%s</h2>' % declarative_test_class.__name__.replace('_', ' ').capitalize()
     yield 'Implemented in <tt>%s.%s</tt>' % (
         declarative_test_class.__module__,
@@ -162,9 +168,30 @@ def make_wikitests(declarative_test_class):
     yield 'Like other tests in the test_xmlrpc suite, these tests should run '
     yield 'on a clean IPA installation, or possibly after other similar tests.'
 
+    if run:
+        ldap = ipaldap.IPAdmin()
+
+        for cmd_name, args, opts in declarative_test_class.cleanup_commands:
+            print '<!-- Run %s %s %s -->' % (cmd_name, args, opts)
+            try:
+                api.Command[cmd_name](*args, **opts)
+            except Exception, e:
+                print '<!-- %s: Err, %s: %s -->' % (cmd_name,
+                                                    type(e).__name__, e)
+            else:
+                print '<!-- %s: OK -->' % cmd_name
+
     for test in declarative_test_class.tests:
         cmd_name, args, opts = test['command']
         command = api.Command[cmd_name]
+
+        if run:
+            try:
+                command(*args, **opts)
+            except Exception, e:
+                print '<!-- %s: %s -->' % (cmd_name, type(e).__name__)
+            else:
+                print '<!-- %s: OK -->' % cmd_name
 
         expected = test['expected']
         if isinstance(expected, Exception):
@@ -196,6 +223,26 @@ def make_wikitests(declarative_test_class):
             json_out=to_json(expected),
         ).replace(str(api.env.basedn), '$SUFFIX')
 
+
+        if run and permission_acishow and cmd_name == 'aci_show':
+            dn = DN(('cn', args[0]), api.env.container_permission, api.env.basedn)
+            yield '<noinclude>'
+            yield ''
+            dn_display = str(dn).replace(str(api.env.basedn), '$SUFFIX')
+            try:
+                entry = ldap.get_entry(dn)
+            except errors.NotFound:
+                yield 'Note: the permission entry %s will not be present' % dn_display
+            else:
+                yield 'Note: the permission entry will look like this:'
+                yield ''
+                yield ' dn: %s' % dn_display
+                for attrname, values in sorted(entry.items()):
+                    for value in sorted(values):
+                        yield ' %s: %s' % (attrname, str(value).replace(str(api.env.basedn), '$SUFFIX'))
+            yield '</noinclude>'
+            yield ''
+
     yield '<h3>Cleanup</h3>'
     for cmd_tuple in declarative_test_class.cleanup_commands:
         yield ' %s' % get_commandline(cmd_tuple)
@@ -215,6 +262,7 @@ if __name__ == '__main__':
     from ipatests.test_xmlrpc.xmlrpc_test import Declarative
     opts = docopt.docopt(__doc__, argv)
     print '__NOTOC__'
+    print '<!-- generated with: %s -->' % argv
     for module_name in opts['<test>']:
         module_name, sep, cls_names = module_name.partition(':')
         cls_names = [n for n in cls_names.split(',') if n]
@@ -229,5 +277,9 @@ if __name__ == '__main__':
                     cls_names.append(cls.__name__)
         cls_names.sort(key=lambda n: get_class_order_key(module, n))
         for cls_name in cls_names:
-            for s in make_wikitests(getattr(module, cls_name)):
+            for s in make_wikitests(
+                    getattr(module, cls_name),
+                    run=opts['--run'],
+                    permission_acishow=opts['--permission-acishow'],
+                    ):
                 print s
