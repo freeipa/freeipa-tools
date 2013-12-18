@@ -182,6 +182,11 @@ def make_wikitests(declarative_test_class, run=False, permission_acishow=False):
                 print '<!-- %s: OK -->' % cmd_name
 
     for test in declarative_test_class.tests:
+        if callable(test):
+            print '{{:{{subst:FULLPAGENAME}}/%s}}' % test.__name__
+            if run:
+                test(None)
+            continue
         cmd_name, args, opts = test['command']
         command = api.Command[cmd_name]
 
