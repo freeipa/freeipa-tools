@@ -78,7 +78,7 @@ def git_current_branch():
     print_debug_cmd(cmd)
     output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
 
-    m = re.match(r'# On branch (\S+)', output)
+    m = re.match(r'On branch (\S+)', output)
 
     if m is None:
         raise Exception("Error when matching `git status` output: " + output)
