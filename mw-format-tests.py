@@ -80,7 +80,7 @@ TEMPLATES = {
             |setup=See beginning of the Tests section
             |actions=Search for ACI named <tt>{opts[aciprefix]}:{args[0]}</tt> in <tt>{opts[location]}</tt>
             |results=The following ACI is found:
-             {expected[result][aci]}
+             <nowiki>{expected[result][aci]}</nowiki>
             }}}}
         """),
     ('aci_show', False): textwrap.dedent("""
