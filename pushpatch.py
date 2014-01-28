@@ -33,7 +33,7 @@ DEBUG               = False
 WEB_BROWSER         = "google-chrome"
 
 ALL_BRANCHES = ['master', 'ipa-3-2', 'ipa-3-1', 'ipa-3-0', 'ipa-2-2', 'ipa-2-1']
-TARGET_BRANCHES = ['master', 'ipa-3-2']
+TARGET_BRANCHES = ['master', 'ipa-3-3']
 
 def print_debug(obj):
     if DEBUG:
