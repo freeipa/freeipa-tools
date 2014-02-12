@@ -48,6 +48,7 @@ import pprint
 import docopt     # yum install python3-docopt
 import yaml       # yum install python3-PyYAML
 import blessings  # yum install python3-blessings
+import unidecode  # yum install python3-unidecode
 
 MILESTONES = {
     "^FreeIPA 3\.4 .*": ['master'],
@@ -303,7 +304,8 @@ class Pusher(object):
                 print('- %s' % name)
             self.die('Multiple matches found for reviewer')
         else:
-            return names[0]
+            name = unidecode.unidecode(names[0])
+            return name
 
     def apply_patches(self, patches, branch):
         """Apply patches to the given branch
