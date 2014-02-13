@@ -228,7 +228,7 @@ class Pusher(object):
 
     def runcommand(self, *argv, check_stdout=None, check_stderr=None,
                    check_returncode=0, stdin_string='', fail_message=None,
-                   timeout=1, verbosity=None):
+                   timeout=5, verbosity=None):
         """Run a command in a subprocess, check & return result"""
         argv_repr = ' '.join(shellquote(a) for a in argv)
         if verbosity is None:
