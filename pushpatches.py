@@ -185,7 +185,7 @@ class Pusher(object):
     def __init__(self, options):
         self.options = options
         with open(os.path.expanduser(options['--config'])) as conf_file:
-            self.config = yaml.load(conf_file)
+            self.config = yaml.safe_load(conf_file)
         self.term = blessings.Terminal(
             force_styling=COLOR_OPT_MAP[options['--color']])
         self.verbosity = self.options['--verbose']
