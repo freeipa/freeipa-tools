@@ -6,7 +6,7 @@ Usage:
   commit-report.py [options] [-v...] [-c KEY=VAL...]
 
 Options:
-  --since=WHEN            Start date [default: one.week.ago]
+  --since=WHEN            Start date [default: one.month.ago]
   --until=WHEN            End commit
   --from=COMMIT           Starting commit
   --to=COMMIT             Ending commit (defaults to {remote}/master)
