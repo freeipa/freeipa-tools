@@ -50,6 +50,8 @@ import functools
 import datetime
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import csv
 
 import docopt     # yum install python3-docopt
 import yaml       # yum install python3-PyYAML
@@ -162,6 +164,11 @@ class CLIHelper(object):
         if file == sys.stdout:
             self.output.append(sep.join(str(o) for o in objects) + end)
         print(*objects, sep=sep, end=end, file=file)
+
+    def write(self, string, file=sys.stdout):
+        self.output.append(string)
+        print(string, end='')
+        sys.stdout.flush()
 
     def runcommand(self, argv, *, check_stdout=None, check_stderr=None,
                    check_returncode=0, stdin_string='', fail_message=None,
@@ -300,6 +307,10 @@ class Commit(object):
     def removed(self):
         return sum(r for a, r in self.files.values())
 
+    @property
+    def summary(self):
+        return self.message[0]
+
 
 def shorten_author(author):
     match = re.match(r'^.*<(.*)@.*> *$', author)
@@ -403,6 +414,7 @@ def run(cli):
         cli.print('* {c.sha1:7.7} ({c.commit_date}) [{c.author_short};{c.reviewers_short}] {c.message[0]}'.format(c=commit))
     for commit in boundary_commits:
         cli.print('^ {c.sha1:7.7} ({c.commit_date}) [{c.author_short};{c.reviewers_short}] {c.message[0]}'.format(c=commit))
+    cli.print(len(commits), 'commits')
     cli.print()
 
     rep = lambda title, key: print_report(cli, commits, title, key)
@@ -410,17 +422,46 @@ def run(cli):
     rep('By patch author', lambda commit: [commit.author])
     rep('By reviewer', lambda commit: commit.reviewers)
 
+    report_text = cli.output
+    cli.output = []
+
+    print(cli.term.cyan('=== CSV report ==='))
+
+    if until:
+        subject_date = git_date(cli, until).date()
+    else:
+        subject_date = datetime.date.today()
+    commmit_range = '%s..%s' % (boundary_commits[0].sha1[:7],
+                                commits[0].sha1[:7])
+
+    outputter = csv.writer(cli)
+    outputter.writerow(['id', 'summary', '+', '-',
+                        'author', 'reviewer'])
+    for commit in commits:
+        outputter.writerow([commit.sha1[:7], commit.summary,
+                            commit.added, commit.removed,
+                            commit.author] +
+                           list(commit.reviewers))
+
     if cli.options['--mailto']:
-        msg = MIMEText(''.join(cli.output))
-        if until:
-            subject_date = git_date(cli, until).date()
-        else:
-            subject_date = datetime.date.today()
-        msg['Subject'] = '{project} commit report {date} ({start}..{end})'.format(
-            project=cli.config['project-name'],
+        project_name = cli.config['project-name']
+
+        msg = MIMEMultipart('mixed')
+
+        text_part = MIMEText(''.join(report_text), 'plain')
+        msg.attach(text_part)
+
+        csv_part = MIMEText(''.join(cli.output), 'csv')
+        csv_part.add_header('Content-Disposition',
+                            'attachment; filename="{}-commits-{}.csv"'.format(
+                                project_name.lower(),
+                                subject_date.strftime('%Y-%m')))
+        msg.attach(csv_part)
+
+        msg['Subject'] = '{project} commit report {date} ({commmit_range})'.format(
+            project=project_name,
             date=subject_date,
-            start=boundary_commits[0].sha1[:7],
-            end=commits[0].sha1[:7])
+            commmit_range=commmit_range)
         msg['From'] = cli.options['--mailfrom']
         to = cli.options['--mailto']
         msg['To'] = to
@@ -442,7 +483,7 @@ def print_report(cli, commits, title, keyfunc):
     for group in groupby(commits, keyfunc):
         cli.print('{g.info[num_commits]:4}  {g.info[key]} (+{g.info[added]} -{g.info[removed]})'.format(g=group))
         for commit in group.commits:
-            cli.print('        {c.sha1:7.7} [{c.author_short};{c.reviewers_short}] {c.message[0]} (+{c.added} -{c.removed})'.format(url=cli.config['commit-url'], c=commit))
+            cli.print('        {c.sha1:7.7} [{c.author_short};{c.reviewers_short}] {c.summary} (+{c.added} -{c.removed})'.format(url=cli.config['commit-url'], c=commit))
         for ticket in sorted(group.info['tickets']):
             if cli.trac:
                 if ticket.attributes['status'] == 'closed':
