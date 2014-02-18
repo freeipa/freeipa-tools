@@ -478,7 +478,7 @@ class Pusher(object):
                         print('Pushing')
                         self.git('push', remote, *push_args,
                                 timeout=60, verbosity=2)
-                    break
+                        break
 
         finally:
             print('Cleaning up')
