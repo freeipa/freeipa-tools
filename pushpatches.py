@@ -3,7 +3,7 @@
 """Push patches to the FreeIPA repository
 
 Usage:
-  pushpatches.py [options] [-v...] [--branch=<branch>...] --reviewer=NAME [--] [<patch> ...]
+  pushpatches.py [options] [-v...] [--branch=BRANCH...] [--reviewer=NAME] [--] [<patch> ...]
 
 Options:
   -h, --help           Display this help and exit
@@ -20,8 +20,12 @@ Options:
 
 The given patches are applied on top of the given upstream branches,
 and pushed.
-A "Reviewed-By" line with the name given by --reviewer is added to all patches 
-unless --no-reviewer is given). If the reviewer name is not in the
+A "Reviewed-By" line with the name given by --reviewer is added to all patches
+unless --no-reviewer is given).
+If neither --reviewer nor --no-reviewer is given, a reviewer is looked up in
+the "Reviewed by" field of the Trac ticket(s). If that does not yield one
+reviewer, the pushpatches command fails..
+If the reviewer name is not in the
 form "Name Last <mail@address.example>", it is looked up in the contributors
 as listed in `git shortlog -se`.
 
@@ -105,7 +109,7 @@ class Patch(object):
     * lines - iterator of lines with the patch
     * ticket_numbers - numbers of referenced Trac tickets
     """
-    def __init__(self, config, filename, reviewer):
+    def __init__(self, config, filename):
         if filename:
             self.filename = filename
             with open(filename) as file:
@@ -140,16 +144,16 @@ class Patch(object):
                 self.head_lines.append(line)
         self.patch_lines.extend(lines_iter)
 
-        if reviewer:
-            if not re.match('^[-_a-zA-Z0-9]+: .*$', self.head_lines[-1]):
-                self.head_lines.append('\n')
-            self.head_lines.append('Reviewed-By: %s\n' % reviewer)
-
         self.ticket_numbers = []
         for line in self.lines:
             regex = '%s(\d*)' % re.escape(config['ticket-url'])
             for match in re.finditer(regex, line):
                 self.ticket_numbers.append(int(match.group(1)))
+
+    def add_reviewer(self, reviewer):
+        if not re.match('^[-_a-zA-Z0-9]+: .*$', self.head_lines[-1]):
+            self.head_lines.append('\n')
+        self.head_lines.append('Reviewed-By: %s\n' % reviewer)
 
     @property
     def lines(self):
@@ -211,16 +215,16 @@ class Pusher(object):
         print(self.term.red(message))
         exit(1)
 
-    def get_patches(self, reviewer):
+    def get_patches(self):
         paths = self.options['<patch>'] or [self.config['patchdir']]
         for path in paths:
             path = cleanpath(path)
             if os.path.isdir(path):
                 filenames = glob.glob(os.path.join(path, '*.patch'))
                 for filename in sorted(filenames):
-                    yield Patch(self.config, filename, reviewer=reviewer)
+                    yield Patch(self.config, filename)
             else:
-                yield Patch(self.config, path, reviewer=reviewer)
+                yield Patch(self.config, path)
 
     def git(self, *argv, **kwargs):
         """Run a git command"""
@@ -280,7 +284,7 @@ class Pusher(object):
                  check_stderr='',
                  fail_message='Repository %s not clean' % os.getcwd())
 
-    def get_rewiewer(self):
+    def get_rewiewer(self, tickets):
         """Get reviewer name & address, or None for --no-reviewer
 
         Raises if a suitable reviewer is not found
@@ -288,6 +292,21 @@ class Pusher(object):
         if self.options['--no-reviewer']:
             return None
         reviewer = self.options['--reviewer']
+        if self.trac and not reviewer:
+            reviewers = set()
+            for ticket in tickets:
+                if ticket.attributes.get('reviewer'):
+                    reviewers.add(ticket.attributes['reviewer'])
+            if len(reviewers) > 1:
+                print('Reviewers found: %s' % ', '.join(reviewers))
+                self.die('Too many reviewers found in ticket(s), '
+                         'specify --reviewer explicitly')
+            if not reviewers:
+                self.die('No reviewer found in ticket(s), '
+                         'specify --reviewer explicitly')
+            [reviewer] = reviewers
+        if not reviewer:
+            self.die('No reviewer found, please specify --reviewer')
         name_re = re.compile(r'^\w+ [^<]+ <.*@.*\..*>$')
         if name_re.match(reviewer):
             return reviewer
@@ -395,10 +414,7 @@ class Pusher(object):
         os.chdir(cleanpath(self.config['clean-repo-path']))
         self.ensure_clean_repo()
 
-        reviewer = self.get_rewiewer()
-        print('Reviewer: %s' % reviewer)
-
-        patches = list(self.get_patches(reviewer=reviewer))
+        patches = list(self.get_patches())
         if not patches:
             self.die('No patches to push')
 
@@ -409,6 +425,13 @@ class Pusher(object):
             tickets = [Ticket(self.trac, n) for n in ticket_numbers]
         else:
             tickets = []
+
+        reviewer = self.get_rewiewer(tickets)
+        print('Reviewer: %s' % reviewer)
+
+        if reviewer:
+            for patch in patches:
+                patch.add_reviewer(reviewer)
 
         branches = self.options['--branch']
         if not branches:
