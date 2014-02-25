@@ -5,7 +5,8 @@
 Usage:
   ipatool --help
   ipatool [options] [-v...] sample-config
-  ipatool [options] [-v...] push [--branch=BRANCH...] [--reviewer=NAME] [--] [<patch> ...]
+  ipatool [options] [-v...] push [--branch=BRANCH...] [--reviewer=NAME] [--] [PATCH ...]
+  ipatool [options] [-v...] start-review [--force] [--ticket=NUMBER...] [--] [PATCH ...]
 
 Common Options:
   -h, --help           Display this help and exit
@@ -16,7 +17,7 @@ Common Options:
   --no-trac            Do not contact Trac
   --no-fetch           Do not synchronize before pushing
   --color=(auto|always|never)  Colorize output [default: auto]
-  <patch>              Patch to push, or directory with *.patch files
+  PATCH                Patch to push, or directory with *.patch files
 
 Configuration is specified in the file given by --config.
 Run ipatool sample-config to see what neds to go in it.
@@ -35,6 +36,16 @@ ipatool push:
 
   -b, --branch=BRANCH  Branch to push to (detected from ticket if not given here)
   -r, --reviewer=NAME  Reviewer of the patches
+
+ipatool start-review:
+  Sets yourself as the reviewer for given tickets, and also adds you to CC.
+  Tickets may be mentioned by number with the --ticket option,
+  and are searched in any patches given on the command line.
+  If no tickets and no patches are specified, all patches from the configured
+  patchdir are searched.
+
+  -t, --ticket NUMBER  Number of ticket to update
+  -f, --force          Force setting reviewer even if already set
 """
 
 SAMPLE_CONFIG = """
@@ -51,7 +62,9 @@ commit-url: https://fedorahosted.org/freeipa/changeset/
 bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 
 # Trac XML login details
-trac-xmlrpc-url: https://fedorahosted.org/freeipa/xmlrpc
+trac-protocol: https
+trac-host: fedorahosted.org
+trac-path: freeipa
 trac-username: pviktori
 trac-password: "!@#$%^&*"
 
@@ -214,7 +227,8 @@ class Context(object):
         if self.options['--no-trac']:
             self.trac = None
         else:
-            url = self.config['trac-xmlrpc-url']
+            url = ('{c[trac-protocol]}://{c[trac-host]}/{c[trac-path]}'
+                   '/xmlrpc').format(c=self.config)
             self.trac = xmlrpc.client.ServerProxy(url)
 
         self.color_arg = self.options['--color']
@@ -223,6 +237,12 @@ class Context(object):
                 self.color_arg = 'always'
             else:
                 self.color_arg = 'never'
+
+    def trac_login(self):
+        url = ('{c[trac-protocol]}://{c[trac-username]}:{c[trac-password]}'
+               '@{c[trac-host]}/{c[trac-path]}'
+               '/login/xmlrpc').format(c=self.config)
+        self.trac = xmlrpc.client.ServerProxy(url)
 
     commands = {}
     @classmethod
@@ -235,14 +255,17 @@ class Context(object):
     def run(self):
         for name, func in self.commands.items():
             if self.options[name]:
-                func(self)
+                return func(self)
+        else:
+            print('Regstered commands: %s' % ', '.join(self.commands))
+            self.die('Internal error: No command found')
 
     def die(self, message):
         print(self.term.red(message))
         exit(1)
 
     def get_patches(self):
-        paths = self.options['<patch>'] or [self.config['patchdir']]
+        paths = self.options['PATCH'] or [self.config['patchdir']]
         for path in paths:
             path = cleanpath(path)
             if os.path.isdir(path):
@@ -544,6 +567,71 @@ def push_command(ctx):
         ctx.runprocess(['git', 'reset', '--hard'], check_returncode=None)
         ctx.runprocess(['git', 'checkout', old_branch], check_returncode=None)
         ctx.runprocess(['git', 'clean', '-fxd'], check_returncode=None)
+
+
+@Context.command('start-review')
+def start_review_command(ctx):
+    ticket_numbers = list(ctx.options['--ticket'])
+    if ctx.options['PATCH']:
+        patches = ctx.get_patches()
+    if not ticket_numbers:
+        print(ctx.term.yellow('Using patches from %s' % ctx.config['patchdir']))
+        patches = ctx.get_patches()
+    else:
+        patches = ()
+    for patch in patches:
+        ticket_numbers.extend(patch.ticket_numbers)
+    if ctx.verbosity:
+        print('Tickets selected: %s' % ticket_numbers)
+    ctx.trac_login()
+    tickets = [Ticket(ctx.trac, int(n)) for n in ticket_numbers]
+    if not tickets:
+        ctx.die('No tickets selected')
+    if not ctx.trac:
+        ctx.die('Cannot work with --no-trac')
+    [ticket.attributes for ticket in tickets]
+
+    existing_reviewers = []
+    for ticket in tickets:
+        print(ctx.term.blue('Ticket #%s' % ticket.number))
+        print('- summary:', ticket.attributes['summary'])
+        reviewer = ticket.attributes.get('reviewer')
+        print('- reviewer:', ctx.term.yellow(str(reviewer or '')) or 'none')
+        if reviewer:
+            existing_reviewers.append(reviewer)
+        print('- cc:', ticket.attributes['cc'])
+    if existing_reviewers:
+        if ctx.options['--force']:
+            print(ctx.term.yellow('Existing reviewer(s) found'))
+        else:
+            ctx.die("Existing reviewer(s) found; "
+                    "won't overwrite without --force")
+
+    if ctx.options['--dry-run']:
+        ctx.die('Exiting, --dry-run specified')
+    else:
+        while True:
+            response = input('Start review on these tickets? [y/n] ')
+            if response.lower() == 'n':
+                return
+            elif response.lower() == 'y':
+                break
+
+    for ticket in tickets:
+        print('Starting review: #%s' % ticket.number)
+        old_cc = ticket.attributes.get('cc')
+        if old_cc:
+            new_cc = '%s, %s' % (old_cc, ctx.config['trac-username'])
+        else:
+            new_cc = ctx.config['trac-username']
+        ctx.trac.ticket.update(ticket.number,
+                               'Starting review',
+                               {
+                                    'reviewer': ctx.config['trac-username'],
+                                    'cc': new_cc,
+                               },
+                               True)
+        print(ctx.term.green('OK'))
 
 
 if __name__ == '__main__':
