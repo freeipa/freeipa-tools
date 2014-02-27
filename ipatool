@@ -96,7 +96,7 @@ import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
 
 MILESTONES = {
-    r"^FreeIPA 3\.4 .*": ['master'],
+    r"^FreeIPA 4\.0 .*": ['master'],
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-3-3']
 }
 
@@ -522,7 +522,7 @@ def push_command(ctx):
                 break
         else:
             ctx.die('No branches correspond to `%s`. ' % milestone +
-                        'Update MILESTONES in the pushpatches script.')
+                        'Update MILESTONES in the ipatool script.')
     print('Will apply %s patches to: %s' %
             (len(patches), ', '.join(branches)))
 
