@@ -374,7 +374,9 @@ def get_rewiewer(ctx, tickets):
     if name_re.match(reviewer):
         return reviewer
     rbranch = '%s/master' % ctx.config['remote']
-    cmd = ['git', 'shortlog', '-sen', rbranch]
+    cmd = ['git',
+           '-c', 'mailmap.blob=origin/master:.mailmap',
+           'shortlog', '-sen', rbranch]
     names = ctx.runprocess(cmd).stdout.splitlines()
     names = (name.split('\t', 1)[-1] for name in names)
     names = (name for name in names if name_re.match(name))

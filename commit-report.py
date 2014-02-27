@@ -399,8 +399,10 @@ def run(cli):
                 current_commit.tickets.add(ticket)
             mheader, sep, mcontent = line.strip().partition(' ')
             if mheader.lower() == 'reviewed-by:':
-                cmd = cli.runcommand(['git', 'check-mailmap', mcontent],
-                                     check_returncode=None)
+                cmd = cli.runcommand(
+                    ['git', '-c', 'mailmap.blob=origin/master:.mailmap',
+                     'check-mailmap', mcontent],
+                    check_returncode=None)
                 if cmd.returncode == 0:
                     current_commit.reviewers.append(cmd.stdout.strip())
                 else:
