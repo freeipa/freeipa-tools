@@ -275,7 +275,9 @@ class Commit(object):
 
     @staticmethod
     def parse_commit_info(line):
-        match = re.match(r'(.+) <(.+@.+)> (\d+) ([+-])(\d\d)(\d\d)', line)
+        match = re.match(r'(.+) <([^>]+)> (\d+) ([+-])(\d\d)(\d\d)', line)
+        if not match:
+            print(line)
         offset = 60 * int(match.group(5)) + int(match.group(6))
         if match.group(4) == '-':
             offset = -offset
@@ -364,7 +366,7 @@ def run(cli):
 
     static_argv = ['git', 'log', '--boundary', '--format=raw', '--numstat',
                    '--use-mailmap']
-    output = cli.runcommand(static_argv + log_args).stdout
+    output = cli.runcommand(static_argv + log_args, timeout=60).stdout
 
     ticket_re = re.compile(re.escape(cli.config['ticket-url']) + '(\d+)')
 
@@ -409,7 +411,12 @@ def run(cli):
                     current_commit.reviewers.append(mcontent + ' <bad-entry@invalid>')
         else:
             added, removed, filename = line.split('\t')
-            current_commit.files[filename] = int(added), int(removed)
+            try:
+                added_removed = int(added), int(removed)
+            except ValueError:
+                print(line)
+                added_removed = 0, 0
+            current_commit.files[filename] = added_removed
 
     cli.print('git log:', ' '.join(cli.shell_quote(arg) for arg in log_args))
     for commit in commits:

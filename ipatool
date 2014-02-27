@@ -74,6 +74,10 @@ trac-path: freeipa
 trac-username: pviktori
 trac-password: "!@#$%^&*"
 
+# Mapping of Trac logins to Git-style author lines
+trac-username-map:
+    abbra: Alexander Bokovoy <abokovoy@redhat.com>
+
 # Command to run "git am" on the development tree (as argv list)
 am-command: ["ssh", "ipa-devel-vm.local", "cd ~/freeipa/ ; git am -3"]
 
@@ -368,6 +372,11 @@ def get_rewiewer(ctx, tickets):
             ctx.die('No reviewer found in ticket(s), '
                         'specify --reviewer explicitly')
         [reviewer] = reviewers
+        username_map = ctx.config.get('trac-username-map', {})
+        if reviewer in username_map:
+            if ctx.verbosity:
+                print('Using Trac login map from config')
+            reviewer = username_map[reviewer]
     if not reviewer:
         ctx.die('No reviewer found, please specify --reviewer')
     name_re = re.compile(r'^\w+ [^<]+ <.*@.*\..*>$')
