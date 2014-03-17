@@ -449,13 +449,16 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
             bugzilla_urls.append(match.group(0))
 
     for branch in branches:
+        print(ctx.term.cyan('=== Diffstat for %s ===' % branch))
+        log_result = ctx.runprocess(
+            ['git', 'diff', '--stat', '--color=%s' % ctx.color_arg,
+             '%s/%s..%s' % (remote, branch, sha1s[branch])],
+            verbosity=2)
         print(ctx.term.cyan('=== Log for %s ===' % branch))
         log_result = ctx.runprocess(
             ['git', 'log', '--reverse', '--color=%s' % ctx.color_arg,
              '%s/%s..%s' % (remote, branch, sha1s[branch])],
-            verbosity=1)
-        if ctx.verbosity < 2:
-            print(log_result.stdout)
+            verbosity=2)
 
     print(ctx.term.cyan('=== Patches pushed ==='))
     for patch in patches:
