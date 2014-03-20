@@ -3,7 +3,7 @@
 """Push patches to the FreeIPA repository
 
 Usage:
-  pushpatches.py [options] [-v...] [--branch=BRANCH...] [--reviewer=NAME] [--] [<patch> ...]
+  pushpatches.py [options] [-v...] [--branch=BRANCH...] [--reviewer=NAME...] [--] [<patch> ...]
 
 Options:
   -h, --help           Display this help and exit
@@ -236,7 +236,7 @@ class Pusher(object):
         """Run a command in a subprocess, check & return result"""
         argv_repr = ' '.join(shellquote(a) for a in argv)
         if verbosity is None:
-           verbosity = self.verbosity 
+            verbosity = self.verbosity
         if verbosity:
             print(self.term.blue(argv_repr))
         if verbosity > 2:
@@ -269,7 +269,7 @@ class Pusher(object):
                 print(self.term.yellow(stderr.rstrip()))
             print('→ %s' % self.term.blue(str(proc.returncode)))
         if failed:
-            if timeout_expired: 
+            if timeout_expired:
                 self.die('Git command timeout expired')
             elif fail_message:
                 self.die(fail_message)
@@ -284,15 +284,15 @@ class Pusher(object):
                  check_stderr='',
                  fail_message='Repository %s not clean' % os.getcwd())
 
-    def get_rewiewer(self, tickets):
+    def get_rewiewers(self, tickets):
         """Get reviewer name & address, or None for --no-reviewer
 
         Raises if a suitable reviewer is not found
         """
         if self.options['--no-reviewer']:
             return None
-        reviewer = self.options['--reviewer']
-        if self.trac and not reviewer:
+        reviewers = self.options['--reviewer']
+        if self.trac and not reviewers:
             reviewers = set()
             for ticket in tickets:
                 if ticket.attributes.get('reviewer'):
@@ -304,9 +304,15 @@ class Pusher(object):
             if not reviewers:
                 self.die('No reviewer found in ticket(s), '
                          'specify --reviewer explicitly')
-            [reviewer] = reviewers
-        if not reviewer:
+        if not reviewers:
             self.die('No reviewer found, please specify --reviewer')
+
+        normalized = set()
+        for reviewer in reviewers:
+            normalized.add(self.normalize_reviewer(reviewer))
+        return normalized
+
+    def normalize_reviewer(self, reviewer):
         name_re = re.compile(r'^\w+ [^<]+ <.*@.*\..*>$')
         if name_re.match(reviewer):
             return reviewer
@@ -426,12 +432,14 @@ class Pusher(object):
         else:
             tickets = []
 
-        reviewer = self.get_rewiewer(tickets)
-        print('Reviewer: %s' % reviewer)
-
-        if reviewer:
-            for patch in patches:
-                patch.add_reviewer(reviewer)
+        reviewers = self.get_rewiewers(tickets)
+        if reviewers:
+            for reviewer in reviewers:
+                print('Reviewer: %s' % reviewer)
+                for patch in patches:
+                    patch.add_reviewer(reviewer)
+        else:
+            print('Reviewer: None')
 
         branches = self.options['--branch']
         if not branches:
