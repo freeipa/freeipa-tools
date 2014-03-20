@@ -5,7 +5,7 @@
 Usage:
   ipatool --help
   ipatool [options] [-v...] sample-config
-  ipatool [options] [-v...] push [--branch=BRANCH...] [--reviewer=NAME] [--] [PATCH ...]
+  ipatool [options] [-v...] push [--branch=BRANCH...] [--reviewer=NAME...] [--] [PATCH ...]
   ipatool [options] [-v...] start-review [-f] [--am] [--ticket=NUMBER...] [--] [PATCH ...]
   ipatool [options] [-v...] am [--] [PATCH ...]
 
@@ -26,17 +26,17 @@ Run ipatool sample-config to see what neds to go in it.
 ipatool push:
   The given patches are applied on top of the given upstream branches,
   and pushed upstream.
-  A "Reviewed-By" line with the name given by --reviewer is added to all patches
-  unless --no-reviewer is given).
+  A "Reviewed-By" line with the name(s) given by --reviewer is added
+  to all patches unless --no-reviewer is given).
   If neither --reviewer nor --no-reviewer is given, a reviewer is looked up in
   the "Reviewed by" field of the Trac ticket(s). If that does not yield one
-  reviewer, the pushpatches command fails..
+  reviewer, the pushpatches command fails.
   If the reviewer name is not in the
   form "Name Last <mail@address.example>", it is looked up in the contributors
   as listed in `git shortlog -se`.
 
   -b, --branch=BRANCH  Branch to push to (detected from ticket if not given here)
-  -r, --reviewer=NAME  Reviewer of the patches
+  -r, --reviewer=NAME  Reviewer(s) of the patches
 
 ipatool start-review:
   Sets yourself as the reviewer for given tickets, and also adds you to CC.
@@ -351,15 +351,15 @@ def ensure_clean_repo(ctx):
                    check_stderr='',
                    fail_message='Repository %s not clean' % os.getcwd())
 
-def get_rewiewer(ctx, tickets):
-    """Get reviewer name & address, or None for --no-reviewer
+def get_rewiewers(ctx, tickets):
+    """Get name & address of reviewers, or empty list for --no-reviewer
 
     Raises if a suitable reviewer is not found
     """
     if ctx.options['--no-reviewer']:
-        return None
-    reviewer = ctx.options['--reviewer']
-    if ctx.trac and not reviewer:
+        return []
+    reviewers = ctx.options['--reviewer']
+    if ctx.trac and not reviewers:
         reviewers = set()
         for ticket in tickets:
             if ticket.attributes.get('reviewer'):
@@ -371,14 +371,18 @@ def get_rewiewer(ctx, tickets):
         if not reviewers:
             ctx.die('No reviewer found in ticket(s), '
                         'specify --reviewer explicitly')
-        [reviewer] = reviewers
         username_map = ctx.config.get('trac-username-map', {})
-        if reviewer in username_map:
-            if ctx.verbosity:
-                print('Using Trac login map from config')
-            reviewer = username_map[reviewer]
-    if not reviewer:
+        reviewers = [username_map.get(r, username_map)
+                     for r in reviewers]
+    if not reviewers:
         ctx.die('No reviewer found, please specify --reviewer')
+    return [normalize_reviewer(ctx, r) for r in reviewers]
+
+def normalize_reviewer(ctx, reviewer):
+    """Expand a partial reviewer name to a full name + address
+
+    Uses the list of contributors from git's mailmap
+    """
     name_re = re.compile(r'^\w+ [^<]+ <.*@.*\..*>$')
     if name_re.match(reviewer):
         return reviewer
@@ -506,12 +510,13 @@ def push_command(ctx):
     else:
         tickets = []
 
-    reviewer = get_rewiewer(ctx, tickets)
-    print('Reviewer: %s' % reviewer)
-
-    if reviewer:
-        for patch in patches:
+    reviewers = get_rewiewers(ctx, tickets)
+    if reviewers:
+        for reviewer in reviewers:
+            print('Reviewer: %s' % reviewer)
             patch.add_reviewer(reviewer)
+    else:
+        print('No reviewer')
 
     branches = ctx.options['--branch']
     if not branches:
