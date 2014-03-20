@@ -49,6 +49,7 @@ import xmlrpc.client
 import functools
 import datetime
 import smtplib
+import math
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import csv
@@ -275,15 +276,18 @@ class Commit(object):
 
     @staticmethod
     def parse_commit_info(line):
-        match = re.match(r'(.+) <([^>]+)> (\d+) ([+-])(\d\d)(\d\d)', line)
+        match = re.match(r'(.+ <[^>]+>) (\d+) ([+-])(\d\d)(\d\d)', line)
         if not match:
             print(line)
-        offset = 60 * int(match.group(5)) + int(match.group(6))
-        if match.group(4) == '-':
+        offset = 60 * int(match.group(4)) + int(match.group(5))
+        if match.group(3) == '-':
             offset = -offset
-        date = datetime.datetime.fromtimestamp(int(match.group(3)),
+        date = datetime.datetime.fromtimestamp(int(match.group(2)),
                                                pytz.FixedOffset(offset))
-        return AuthorInfo(match.group(1), match.group(2), date)
+        name_mail = check_mailmap(match.group(1))
+        name, _sep, mail = name_mail.partition(' <')
+        mail = mail.strip('>')
+        return AuthorInfo(name, mail, date)
 
     @property
     def reviewers_short(self):
@@ -333,6 +337,45 @@ def git_describe(cli, commit):
     return cli.runcommand(argv).stdout.strip()
 
 
+def check_mailmap(name):
+    cmd = cli.runcommand(
+        ['git', '-c', 'mailmap.blob=origin/master:.mailmap',
+            'check-mailmap', name],
+        check_returncode=None)
+    if cmd.returncode == 0:
+        return cmd.stdout.strip()
+    else:
+        return name + ' <bad-entry@invalid>'
+
+
+def safelogdiv(numerator, denominator):
+    if not denominator:
+        return 'inf'
+    if not numerator:
+        return '-inf'
+    else:
+        return math.log(numerator / denominator)
+
+
+def safediv(numerator, denominator):
+    if not denominator:
+        return 'inf'
+    else:
+        return numerator / denominator
+
+
+def csv_num_repr(number):
+    if isinstance(number, (int, float)):
+        if number == int(number):
+            return int(number)
+        elif abs(number) > 1:
+            return round(number, 2)
+        else:
+            return round(number, int(-math.log(abs(number), 10) + 3))
+    else:
+        return number
+
+
 def run(cli):
     cli.print('Generated:', datetime.datetime.now())
 
@@ -364,7 +407,8 @@ def run(cli):
         cli.print('Until:    ', git_date(cli, until))
     cli.print()
 
-    static_argv = ['git', 'log', '--boundary', '--format=raw', '--numstat',
+    static_argv = ['git', '-c', 'mailmap.blob=origin/master:.mailmap',
+                   'log', '--boundary', '--format=raw', '--numstat',
                    '--use-mailmap']
     output = cli.runcommand(static_argv + log_args, timeout=60).stdout
 
@@ -401,14 +445,7 @@ def run(cli):
                 current_commit.tickets.add(ticket)
             mheader, sep, mcontent = line.strip().partition(' ')
             if mheader.lower() == 'reviewed-by:':
-                cmd = cli.runcommand(
-                    ['git', '-c', 'mailmap.blob=origin/master:.mailmap',
-                     'check-mailmap', mcontent],
-                    check_returncode=None)
-                if cmd.returncode == 0:
-                    current_commit.reviewers.append(cmd.stdout.strip())
-                else:
-                    current_commit.reviewers.append(mcontent + ' <bad-entry@invalid>')
+                current_commit.reviewers.append(check_mailmap(mcontent))
         else:
             added, removed, filename = line.split('\t')
             try:
@@ -452,6 +489,51 @@ def run(cli):
                             commit.author] +
                            list(commit.reviewers))
 
+    main_csv_text = cli.output
+    cli.output = []
+
+    print(cli.term.cyan('=== People report ==='))
+
+    outputter = csv.writer(cli)
+    outputter.writerow(['name', 'patches', 'reviews',
+                        'lines changed', 'lines reviewed',
+                        'patches:reviews',
+                        'lines changed:reviewed'])
+    people = set(c.author for c in commits)
+    for commit in commits:
+        people.update(commit.reviewers)
+    people_info = {p: {'authored': [c for c in commits if c.author == p],
+                       'reviewed': [c for c in commits if p in c.reviewers]}
+                   for p in people}
+    # In case of multiple reviewers, the patch is counted for all of them,
+    # but the lines changed are split between the reviewers.
+    for info in people_info.values():
+        info['lines_authored'] = sum(c.added + c.removed
+                                     for c in info['authored'])
+        info['lines_reviewed'] = sum((c.added + c.removed) / len(c.reviewers)
+                                     for c in info['reviewed'])
+    def sort_key(k_v):
+        k, v = k_v
+        if v['reviewed']:
+            backup_key = -len(v['authored']), -len(v['reviewed'])
+            backup_key += -v['lines_authored'], -v['lines_reviewed']
+            return 0, len(v['authored']) / len(v['reviewed']), backup_key
+        else:
+            return 1, len(v['authored']), v['lines_authored']
+    for person, info in sorted(people_info.items(), key=sort_key):
+        outputter.writerow([
+            person,
+            len(info['authored']),
+            len(info['reviewed']),
+            info['lines_authored'],
+            csv_num_repr(info['lines_reviewed']),
+            csv_num_repr(safediv(len(info['authored']), len(info['reviewed']))),
+            csv_num_repr(safediv(info['lines_authored'], info['lines_reviewed'])),
+        ])
+
+    people_csv_text = cli.output
+    cli.output = []
+
     if cli.options['--mailto']:
         project_name = cli.config['project-name']
 
@@ -460,12 +542,19 @@ def run(cli):
         text_part = MIMEText(''.join(report_text), 'plain')
         msg.attach(text_part)
 
-        csv_part = MIMEText(''.join(cli.output), 'csv')
+        csv_part = MIMEText(''.join(main_csv_text), 'csv')
         csv_part.add_header('Content-Disposition',
                             'attachment; filename="{}-commits-{}.csv"'.format(
                                 project_name.lower(),
                                 subject_date.strftime('%Y-%m')))
         msg.attach(csv_part)
+
+        ppl_part = MIMEText(''.join(people_csv_text), 'csv')
+        ppl_part.add_header('Content-Disposition',
+                            'attachment; filename="{}-people-{}.csv"'.format(
+                                project_name.lower(),
+                                subject_date.strftime('%Y-%m')))
+        msg.attach(ppl_part)
 
         msg['Subject'] = '{project} commit report {date} ({commmit_range})'.format(
             project=project_name,
