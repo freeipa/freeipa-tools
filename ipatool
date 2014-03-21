@@ -372,8 +372,7 @@ def get_rewiewers(ctx, tickets):
             ctx.die('No reviewer found in ticket(s), '
                         'specify --reviewer explicitly')
         username_map = ctx.config.get('trac-username-map', {})
-        reviewers = [username_map.get(r, username_map)
-                     for r in reviewers]
+        reviewers = [username_map.get(r, r) for r in reviewers]
     if not reviewers:
         ctx.die('No reviewer found, please specify --reviewer')
     return [normalize_reviewer(ctx, r) for r in reviewers]
