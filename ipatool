@@ -513,7 +513,8 @@ def push_command(ctx):
     if reviewers:
         for reviewer in reviewers:
             print('Reviewer: %s' % reviewer)
-            patch.add_reviewer(reviewer)
+            for patch in patches:
+                patch.add_reviewer(reviewer)
     else:
         print('No reviewer')
 
