@@ -8,9 +8,9 @@
 # It requires the "colorize" script from:
 #  https://github.com/encukou/bin/blob/master/colorize
 # (is there a better way to simply colorize stuff?)
-# Also needs /usr/bin/pep8
+# Also needs /usr/bin/pep8 and /usr/bin/sfood-checker
 # Assumes I'm in the root dir of the repository
-# To use, put it into .git/hooks and `chmod +x` it
+# To use, put it into .git/hooks/post-commit and `chmod +x` it
 
 
 # Uncomment to make large rebases faster:
