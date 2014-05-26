@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# A post-commit hook for FreeIPA
+
+# This is a post-commit hook, so it can only show information.
+# It will never prevent me from committing, only warn
+#
+# It requires the "colorize" script from:
+#  https://github.com/encukou/bin/blob/master/colorize
+# (is there a better way to simply colorize stuff?)
+# Also needs /usr/bin/pep8
+# Assumes I'm in the root dir of the repository
+# To use, put it into .git/hooks and `chmod +x` it
+
+
+# Uncomment to make large rebases faster:
+#  if [ -e $(git rev-parse --git-dir)/rebase-merge ]; then
+#     echo "It looks like you're rebasing. Skipping post-commit hook." | colorize 1
+#     exit 0
+#  fi
+
+# Figure out against what we'll be diffing this
+
+if git rev-parse --verify HEAD~ >/dev/null 2>&1
+then
+        against=HEAD~
+else
+        # Initial commit: diff against an empty tree object
+        against=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+fi
+
+# Check unused imports, in all files where import lines changed
+
+IMPORT_FILES=`git diff --cached --name-only $against -Gimport | grep '\.py$'`
+#IMPORT_FILES=`git diff --cached --name-only $against | grep '\.py$'`
+if [ -n "$IMPORT_FILES" ]; then
+    echo 'Changed imports:' $IMPORT_FILES
+    (sfood-checker $IMPORT_FILES 2>&1 | colorize 3) &
+fi
+
+# Run pep8 and lint in diff mode
+
+FILES=`git diff --cached --name-only $against | grep '\.py$'`
+echo $FILES
+(git show -M -U0 | pep8 --diff | colorize 6) &
+if [ -n "$FILES" ]; then
+    echo Commit `git rev-parse --verify HEAD`. Linting...
+    (./make-lint $FILES || sleep 1) 2> >(colorize 7) | colorize 4
+else
+    echo Commit `git rev-parse --verify HEAD` did not change Python files.
+fi
+
+# Highlight added XXXs/TODOs
+git show | grep --color --perl 'XXX|TODO'
+
+# Highlight added internal hostnames/DNs
+git show | grep --color -i 'brq'
+
+# Run makeapi so that if API.txt is not up to date, it is shown below
+./makeapi
+
+# Show modified files, mainly for the case of modified API.txt
+git status --short
