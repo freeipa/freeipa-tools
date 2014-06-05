@@ -599,7 +599,7 @@ def push_command(ctx):
 
 @Context.command('start-review')
 def start_review_command(ctx):
-    ticket_numbers = list(ctx.options['--ticket'])
+    ticket_numbers = set(ctx.options['--ticket'])
     if ctx.options['PATCH']:
         patches = ctx.get_patches()
     if not ticket_numbers:
@@ -608,7 +608,8 @@ def start_review_command(ctx):
     else:
         patches = ()
     for patch in patches:
-        ticket_numbers.extend(patch.ticket_numbers)
+        ticket_numbers.update(patch.ticket_numbers)
+    ticket_numbers = sorted(ticket_numbers)
     if ctx.verbosity:
         print('Tickets selected: %s' % ticket_numbers)
     ctx.trac_login()
