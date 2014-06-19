@@ -21,7 +21,7 @@ Common Options:
   PATCH                Patch to push, or directory with *.patch files
 
 Configuration is specified in the file given by --config.
-Run ipatool sample-config to see what neds to go in it.
+Run ipatool sample-config to see what needs to go in it.
 
 ipatool push:
   The given patches are applied on top of the given upstream branches,

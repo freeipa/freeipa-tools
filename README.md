@@ -1,8 +1,44 @@
 ipa-tools
 =========
 
-My personal set of tools for FreeIPA upstream development. Simply clone the
-git tree and add it to your $PATH to use the scripts.
+This repository contains tools that automate some tasks in FreeIPA development.
 
-You will need to enter your Fedora credentials to patchtotrac.py to make
-uploading patches to Trac working and your upstream user name in sendpatch.py.
+For guidelines, see: http://www.freeipa.org/page/Contribute/Code
+TLDR:
+
+- we mail patches around before committing to git
+- we use Trac for tracking bugs
+- and some Trac tickets are cloned to Bugzilla
+
+These tools might work for other projects that work similarly.
+
+
+ipatool
+=======
+
+The most documented script is the all-in-one "ipatool", which can:
+
+- apply given patches, adding "Reviewed-By:" lines, and push them upstream
+- apply given patches to a remote VM
+- mark tickets as "on-review" based on patches for those tickets
+
+Dependencies:
+
+    yum install python3 python3-PyYAML python3-blessings python3-unidecode \
+        python3-docopt
+
+See docs in the script itself
+
+
+other tools
+===========
+
+See docs in the tools themselves, if any.
+
+
+
+see also
+========
+
+Tomáš has a set of scripts to manage VMs for testing IPA on:
+https://github.com/tbabej/labtool
