@@ -251,6 +251,15 @@ class Context(object):
             else:
                 self.color_arg = 'never'
 
+        # ipatool sets GIT_COMMITTER_DATE to a fixed value, so
+        # commits to parallel branches hopefully end up identical.
+        # Getting the current date with timezone info is a pain in Python
+        # (needs extra dependencies), so just run date
+        self.isodate_now = ''
+        date_result = self.runprocess(['date', '-Iseconds'],
+                                      env={'GIT_COMMIT_DATE': ''})
+        self.isodate_now = date_result.stdout.strip()
+
     def trac_login(self):
         url = ('{c[trac-protocol]}://{c[trac-username]}:{c[trac-password]}'
                '@{c[trac-host]}/{c[trac-path]}'
@@ -290,8 +299,11 @@ class Context(object):
 
     def runprocess(self, argv, check_stdout=None, check_stderr=None,
                    check_returncode=0, stdin_string='', fail_message=None,
-                   timeout=5, verbosity=None):
+                   timeout=5, verbosity=None, env=None):
         """Run a command in a subprocess, check & return result"""
+        if env is None:
+            env = os.environ
+        env.setdefault('GIT_COMMITTER_DATE', self.isodate_now)
         argv_repr = ' '.join(shellquote(a) for a in argv)
         if verbosity is None:
             verbosity = self.verbosity
@@ -300,7 +312,8 @@ class Context(object):
         if verbosity > 2:
             print(self.term.yellow(stdin_string.rstrip()))
         PIPE = subprocess.PIPE
-        proc = subprocess.Popen(argv, stdout=PIPE, stderr=PIPE, stdin=PIPE)
+        proc = subprocess.Popen(argv, stdout=PIPE, stderr=PIPE, stdin=PIPE,
+                                env=env)
         try:
             stdout, stderr = proc.communicate(stdin_string.encode('utf-8'),
                                               timeout=timeout)
