@@ -100,8 +100,10 @@ import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
 
 MILESTONES = {
-    r"^FreeIPA 4\.0 .*": ['master'],
-    r"^FreeIPA 3\.3\..*": ['master', 'ipa-3-3']
+    r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
+    r"^FreeIPA 4\.0.*": ['master', 'ipa-4-1', 'ipa-4-0'],
+    r"^FreeIPA 4\.1.*": ['master', 'ipa-4-1'],
+    r"^FreeIPA 4\.2.*": ['master'],
 }
 
 COLOR_OPT_MAP = {'auto': False, 'always': True, 'never': None}
