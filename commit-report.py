@@ -477,8 +477,14 @@ def run(cli):
         subject_date = git_date(cli, until).date()
     else:
         subject_date = datetime.date.today()
-    commmit_range = '%s..%s' % (boundary_commits[0].sha1[:7],
-                                commits[0].sha1[:7])
+    if commits:
+        commmit_range = '%s..%s' % (boundary_commits[0].sha1[:7],
+                                    commits[0].sha1[:7])
+    else:
+        # Use empty trees
+        empty_tree = cli.runcommand(['git', 'hash-object',
+                                     '-t', 'tree', '/dev/null']).stdout
+        commmit_range = '{0}..{0}'.format(empty_tree)
 
     outputter = csv.writer(cli)
     outputter.writerow(['id', 'summary', '+', '-',
