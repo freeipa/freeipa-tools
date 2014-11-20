@@ -333,7 +333,7 @@ def git_date(cli, spec):
 
 
 def git_describe(cli, commit):
-    argv = ['git', 'describe', commit]
+    argv = ['git', 'describe', '--tags', commit]
     return cli.runcommand(argv).stdout.strip()
 
 
