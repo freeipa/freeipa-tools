@@ -103,7 +103,8 @@ MILESTONES = {
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
     r"^FreeIPA 4\.0.*": ['master', 'ipa-4-1', 'ipa-4-0'],
     r"^FreeIPA 4\.1.*": ['master', 'ipa-4-1'],
-    r"^FreeIPA 4\.2.*": ['master'],
+    r"^FreeIPA 4\.2.*": ['master', 'ipa-4-2'],
+    r"^FreeIPA 4\.3.*": ['master'],
 }
 
 COLOR_OPT_MAP = {'auto': False, 'always': True, 'never': None}
