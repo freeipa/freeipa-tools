@@ -418,9 +418,9 @@ class IPAData(object):
         # create N groups per entry, <num_of_nested_groups> of them are nested
         #   User/Host (max nesting level = 2)
         #   |
-        #   +--- G3 --- G2 (nested) --- G1 (nested, max level)
+        #   +--- G1 --- G2 (nested) --- G3 (nested, max level)
         #   |
-        #   +--- G6 --- G5 (nested)
+        #   +--- G5 --- G6 (nested)
         #   |
         #   ......
         #   |
@@ -450,18 +450,21 @@ class IPAData(object):
                 # create nested groups first
                 if nested_groups_added < nested_groups_per_entry:
                     if nest_lvl == 0:
-                        # the deepest group
-                        self.put_entry(gen_group_f(group_name))
+                        # the top group
+                        self.put_entry(
+                            gen_group_f(
+                                group_name,
+                                members=uids
+                            )
+                        )
                         nest_lvl += 1
                         nested_groups_added += 1
                     elif nest_lvl == max_nesting_level:
-                        # the top level group, add users there, this group is
-                        # not nested
+                        # the last level group this group is not nested
                         self.put_entry(
                             gen_group_f(
                                 group_name,
                                 group_members=[last_grp_name],
-                                members=uids
                             )
                         )
                         nest_lvl = 0
