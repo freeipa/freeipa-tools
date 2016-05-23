@@ -417,12 +417,14 @@ def run(cli):
     all_tickets = set()
     commits = []
     boundary_commits = []
+    on_gpgsig = False
 
     for line in output.splitlines():
         header, sep, content = line.partition(' ')
         content = content.strip()
         if not line:
-            pass
+            # gpgsig is multi-line field, starting with ' '
+            on_gpgsig = False
         elif header == 'commit':
             current_commit = Commit(content.strip(' -'))
             if content.startswith('-'):
@@ -446,6 +448,8 @@ def run(cli):
             mheader, sep, mcontent = line.strip().partition(' ')
             if mheader.lower() == 'reviewed-by:':
                 current_commit.reviewers.append(check_mailmap(mcontent))
+        elif line.startswith('gpgsig') or on_gpgsig:
+            on_gpgsig = True
         else:
             added, removed, filename = line.split('\t')
             try:
