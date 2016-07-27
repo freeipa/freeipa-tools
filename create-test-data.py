@@ -195,6 +195,8 @@ class IPAData(object):
             uid=uid, domain=self.domain)]
         user['krbPrincipalName'] = ['{uid}@{realm}'.format(
             uid=uid, realm=self.realm)]
+        user['krbCanonicalName'] = ['{uid}@{realm}'.format(
+            uid=uid, realm=self.realm)]
         user['givenName'] = [uid]
         user['cn'] = ['{} {}'.format(uid, uid)]
 
