@@ -1,0 +1,4 @@
+sudo dnf install fedmsg-hub
+sudo cp config.py /etc/fedmsg.d/githubconsumer.py
+python setup.py egg_info
+PYTHONPATH=$(pwd) fedmsg-hub
