@@ -1,1 +1,1 @@
-config = dict(githubconsumer=True)
+config = dict(testrepoconsumer=True)
