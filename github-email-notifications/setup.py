@@ -15,5 +15,6 @@ setup(
     entry_points="""
     [moksha.consumer]
     githubconsumer = githubconsumer:GithubConsumer
+    testrepoconsumer = githubconsumer:TestRepoConsumer
     """,
 )
