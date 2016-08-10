@@ -117,3 +117,11 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         method = self.topic_mapping.get(msg.get('topic'))
         if method:
             method(msg)
+
+class TestRepoConsumer(GithubConsumer):
+    config_key = 'testrepoconsumer'
+    repo_name = u'jhrozek/testrepo'
+    formatter_cls = StdoutFormatter
+
+    def __init__(self, *args, **kw):
+        super(TestRepoConsumer, self).__init__(*args, **kw)
