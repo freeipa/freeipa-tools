@@ -14,6 +14,8 @@ setup(
     packages=[],
     entry_points="""
     [moksha.consumer]
-    githubconsumer = githubconsumer:GithubConsumer
+    testgithubconsumer = githubconsumer:TestGithubConsumer
+    sssdgithubconsumer = githubconsumer:SSSDGithubConsumer
+    freeipagithubconsumer = githubconsumer:FreeIPAGithubConsumer
     """,
 )
