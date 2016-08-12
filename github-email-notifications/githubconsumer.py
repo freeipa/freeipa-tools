@@ -76,21 +76,30 @@ class EmailFormatter(Formatter):
         self.to_addr = to_addr
         self.from_addr = from_addr
         self.smtp_server = smtp_server
+        self.domain = from_addr.replace('@', '.')
 
-    def _send_email(self, subject, body):
+    def _msg_id(self, repo, gh_msgid, pr_num):
+        msgid = "<gh-{repo}-{pr_num}-{gh_msgid}@{domain}>".format(
+            repo=repo, gh_msgid=gh_msgid, pr_num=pr_num, domain=self.domain
+        )
+        threadid = "<gh-{repo}-{pr_num}@{domain}>".format(
+            repo=repo, pr_num=pr_num, domain=self.domain
+        )
+        return msgid, threadid
+
+    def _send_email(self, subject, body, msgid, threadid):
         """
         Inspired by: https://github.com/abartlet/gh-mailinglist-notifications/blob/master/gh-mailinglist.py
-        :param subject:
-        :param body:
-        :param attachment:
-        :param new:
-        :return:
         """
         subject = subject.replace('\n', ' ').replace('\r', ' ')
         outer = MIMEMultipart()
         outer['Subject'] = Header(subject, 'utf8')
         outer['To'] = self.to_addr
         outer['From'] = self.from_addr
+
+        outer.add_header("Message-ID", msgid)
+        outer.add_header("In-Reply-To", threadid)
+        outer.add_header("References", threadid)
 
         outer['Date'] = email.utils.formatdate(localtime=True)
         outer.attach(MIMEText(body, 'plain', 'utf8'))
@@ -103,12 +112,16 @@ class EmailFormatter(Formatter):
     def fmt_issue_comment(self, comment):
         body = super(EmailFormatter, self).fmt_issue_comment(comment)
         subject = u"[{repo} #{issue_num}] {issue_title}".format(**comment)
-        self._send_email(subject, body)
+        msgid, threadid = self._msg_id(
+            comment['repo'], comment['msgid'], comment['issue_num'])
+        self._send_email(subject, body, msgid, threadid)
 
     def fmt_pr(self, comment):
         body = super(EmailFormatter, self).fmt_pr(comment)
         subject = u"[{repo} #{pr_num}] {pr_title} ({pr_action})".format(**comment)
-        self._send_email(subject, body)
+        msgid, threadid = self._msg_id(
+            comment['repo'], comment['msgid'], comment['pr_num'])
+        self._send_email(subject, body, msgid, threadid)
 
 
 class RawPPFormatter(Formatter):
@@ -161,6 +174,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
     def _pr_handler(self, gh_msg):
         filter_map = {
+            'msgid': ['body', 'msg_id'],
             'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
             'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
             'pr_title' : ['body', 'msg', 'pull_request', 'title'],
@@ -188,6 +202,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'comment_body' : ['body', 'msg', 'comment', 'body'],
             'issue_num': ['body', 'msg', 'issue', 'number'],
             'issue_title': ['body', 'msg', 'issue', 'title'],
+            'msgid': ['body', 'msg_id'],
             'repo': ['body', 'msg', 'repository', 'full_name'],
         }
         msg = self._format_msg(filter_map, gh_msg)
