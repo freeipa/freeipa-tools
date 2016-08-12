@@ -102,12 +102,12 @@ class EmailFormatter(Formatter):
 
     def fmt_issue_comment(self, comment):
         body = super(EmailFormatter, self).fmt_issue_comment(comment)
-        subject = u"[PR #{issue_num}] {issue_title}".format(**comment)
+        subject = u"[{repo} #{issue_num}] {issue_title}".format(**comment)
         self._send_email(subject, body)
 
     def fmt_pr(self, comment):
         body = super(EmailFormatter, self).fmt_pr(comment)
-        subject = u"[PR #{pr_num}] {pr_title} ({pr_action})".format(**comment)
+        subject = u"[{repo} #{pr_num}] {pr_title} ({pr_action})".format(**comment)
         self._send_email(subject, body)
 
 
@@ -160,12 +160,15 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         return msg
 
     def _pr_handler(self, gh_msg):
-        filter_map = { 'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
-                       'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
-                       'pr_title' : ['body', 'msg', 'pull_request', 'title'],
-                       'pr_body' : ['body', 'msg', 'pull_request', 'body'],
-                       'pr_num' : ['body', 'msg', 'number'],
-                       'pr_action' : ['body', 'msg', 'action'] }
+        filter_map = {
+            'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
+            'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
+            'pr_title' : ['body', 'msg', 'pull_request', 'title'],
+            'pr_body' : ['body', 'msg', 'pull_request', 'body'],
+            'pr_num' : ['body', 'msg', 'number'],
+            'pr_action' : ['body', 'msg', 'action'],
+            'repo': ['body', 'msg', 'repository', 'full_name'],
+        }
         msg = self._format_msg(filter_map, gh_msg)
         return self.formatter.fmt_pr(msg)
 
@@ -185,6 +188,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'comment_body' : ['body', 'msg', 'comment', 'body'],
             'issue_num': ['body', 'msg', 'issue', 'number'],
             'issue_title': ['body', 'msg', 'issue', 'title'],
+            'repo': ['body', 'msg', 'repository', 'full_name'],
         }
         msg = self._format_msg(filter_map, gh_msg)
         return self.formatter.fmt_issue_comment(msg)
