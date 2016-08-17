@@ -1,40 +1,151 @@
 #!/usr/bin/python2
 # inspired by: https://github.com/lmacken/fedmsg-koji-consumer
 
-import fedmsg.consumers
+from __future__ import print_function
 
+import email
+import fedmsg.consumers
+import smtplib
+import StringIO
+
+from abc import ABCMeta, abstractmethod, abstractproperty
+from email.header import Header
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pprint import pprint
 
 def get_from_dict(data_dict, key_list):
     return reduce(lambda d, k: d[k], key_list, data_dict)
 
-class StdoutFormatter(object):
+
+class Formatter(object):
+    __metaclass__ = ABCMeta
+
+    @abstractmethod
     def fmt_issue_comment(self, comment):
-        # this could be mail subject
-        print "{comment_author} commented on a pull request".format(**comment)
-        # this could be mail body
-        print comment['comment_body']
-        print "See the full comment at {comment_url}\n".format(**comment)
+        output = StringIO.StringIO()
+        print(
+            "{comment_author} commented on a pull request".format(**comment),
+            file=output
+        )
+        print(comment['comment_body'], file=output)
+        print(
+            "See the full comment at {comment_url}\n".format(**comment),
+            file=output
+        )
+        res = output.getvalue()
+        output.close()
+        return res
+
+    @abstractmethod
+    def fmt_pr(self, pull_req):
+        output = StringIO.StringIO()
+        print(
+            "{pr_author}'s pull request #{pr_num}: \"{pr_title}\" was "
+            "{pr_action}\n".format(**pull_req),
+            file=output
+        )
+        if pull_req['pr_action'] == u'opened':
+            print("PR body:\n{pr_body}\n".format(**pull_req), file=output)
+        print(
+            "See the full pull-request at {pr_url}\n".format(**pull_req),
+            file=output
+        )
+        res = output.getvalue()
+        output.close()
+        return res
+
+
+class StdoutFormatter(Formatter):
+    def fmt_issue_comment(self, comment):
+        print(super(StdoutFormatter, self).fmt_issue_comment(comment))
 
     def fmt_pr(self, pull_req):
-        # this could be mail subject
-        print "{pr_author}'s pull request #{pr_num}: \"{pr_title}\" was {pr_action}\n".format(**pull_req)
-        # this could be mail body
-        if pull_req['pr_action'] == u'opened':
-            print "PR body:\n{pr_body}\n".format(**pull_req)
-        print "See the full pull-request at {pr_url}\n".format(**pull_req)
+        print(super(StdoutFormatter, self).fmt_pr(pull_req))
 
-class RawPPFormatter(object):
+
+class EmailFormatter(Formatter):
+    def __init__(self, to_addr, from_addr, smtp_server):
+        """
+
+        :param to_addr: email destinations
+        :param from_addr: source email address
+        """
+        super(EmailFormatter, self).__init__()
+
+        self.to_addr = to_addr
+        self.from_addr = from_addr
+        self.smtp_server = smtp_server
+        self.domain = from_addr.replace('@', '.')
+
+    def _msg_id(self, repo, gh_msgid, pr_num):
+        msgid = "<gh-{repo}-{pr_num}-{gh_msgid}@{domain}>".format(
+            repo=repo, gh_msgid=gh_msgid, pr_num=pr_num, domain=self.domain
+        )
+        threadid = "<gh-{repo}-{pr_num}@{domain}>".format(
+            repo=repo, pr_num=pr_num, domain=self.domain
+        )
+        return msgid, threadid
+
+    def _send_email(self, subject, body, msgid, threadid):
+        """
+        Inspired by: https://github.com/abartlet/gh-mailinglist-notifications/blob/master/gh-mailinglist.py
+        """
+        subject = subject.replace('\n', ' ').replace('\r', ' ')
+        outer = MIMEMultipart()
+        outer['Subject'] = Header(subject, 'utf8')
+        outer['To'] = self.to_addr
+        outer['From'] = self.from_addr
+
+        outer.add_header("Message-ID", msgid)
+        outer.add_header("In-Reply-To", threadid)
+        outer.add_header("References", threadid)
+
+        outer['Date'] = email.utils.formatdate(localtime=True)
+        outer.attach(MIMEText(body, 'plain', 'utf8'))
+
+        msg = outer.as_string()
+        s = smtplib.SMTP(self.smtp_server)
+        s.sendmail(self.from_addr, [self.to_addr], msg)
+        s.quit()
+
+    def fmt_issue_comment(self, comment):
+        body = super(EmailFormatter, self).fmt_issue_comment(comment)
+        subject = u"[{repo} #{issue_num}] {issue_title}".format(**comment)
+        msgid, threadid = self._msg_id(
+            comment['repo'], comment['msgid'], comment['issue_num'])
+        self._send_email(subject, body, msgid, threadid)
+
+    def fmt_pr(self, comment):
+        body = super(EmailFormatter, self).fmt_pr(comment)
+        subject = u"[{repo} #{pr_num}] {pr_title} ({pr_action})".format(**comment)
+        msgid, threadid = self._msg_id(
+            comment['repo'], comment['msgid'], comment['pr_num'])
+        self._send_email(subject, body, msgid, threadid)
+
+
+class RawPPFormatter(Formatter):
     def fmt_issue_comment(self, comment):
         pprint(comment)
 
-    def fmt_pr(self, action, pull_req):
+    def fmt_pr(self, pull_req):
         pprint(pull_req)
 
+
 class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
+
+    __meta__ = ABCMeta
+
     topic = 'org.fedoraproject.prod.github.*'
-    config_key = 'githubconsumer'
-    formatter_cls = RawPPFormatter
+    formatter_cls = EmailFormatter
+
+    @abstractproperty
+    def config_key(self):
+        pass
+
+    @abstractproperty
+    def repo_name(self):
+        pass
 
     def __init__(self, *args, **kw):
         super(GithubConsumer, self).__init__(*args, **kw)
@@ -48,8 +159,12 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'org.fedoraproject.prod.github.pull_request.review_comment': self.pr_review,
             'org.fedoraproject.prod.github.status': self.status,
         }
-        self.repo_name = None
-        self.formatter = self.formatter_cls()
+
+        self.formatter = self.formatter_cls(
+            args[0].config["{}.email_to".format(self.config_key)],
+            args[0].config["{}.email_from".format(self.config_key)],
+            args[0].config["{}.smtp_server".format(self.config_key)]
+        )
 
     def _format_msg(self, filter_map, gh_msg):
         msg = dict()
@@ -58,24 +173,38 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         return msg
 
     def _pr_handler(self, gh_msg):
-        filter_map = { 'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
-                       'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
-                       'pr_title' : ['body', 'msg', 'pull_request', 'title'],
-                       'pr_body' : ['body', 'msg', 'pull_request', 'body'],
-                       'pr_num' : ['body', 'msg', 'number'],
-                       'pr_action' : ['body', 'msg', 'action'] }
+        filter_map = {
+            'msgid': ['body', 'msg_id'],
+            'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
+            'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
+            'pr_title' : ['body', 'msg', 'pull_request', 'title'],
+            'pr_body' : ['body', 'msg', 'pull_request', 'body'],
+            'pr_num' : ['body', 'msg', 'number'],
+            'pr_action' : ['body', 'msg', 'action'],
+            'repo': ['body', 'msg', 'repository', 'full_name'],
+        }
         msg = self._format_msg(filter_map, gh_msg)
         return self.formatter.fmt_pr(msg)
 
     def issue_comment(self, gh_msg):
-        pr_link = get_from_dict(gh_msg, ['body', 'msg', 'issue', 'pull_request'])
+        try:
+            pr_link = get_from_dict(gh_msg, ['body', 'msg', 'issue', 'pull_request'])
+        except KeyError:
+            pr_link = None
+
         if not pr_link:
             # We only care about comments in pull-requests
             return
 
-        filter_map = { 'comment_url' : ['body', 'msg', 'comment', 'html_url'],
-                       'comment_author' : ['body', 'msg', 'comment', 'user', 'login'],
-                       'comment_body' : ['body', 'msg', 'comment', 'body'] }
+        filter_map = {
+            'comment_url' : ['body', 'msg', 'comment', 'html_url'],
+            'comment_author' : ['body', 'msg', 'comment', 'user', 'login'],
+            'comment_body' : ['body', 'msg', 'comment', 'body'],
+            'issue_num': ['body', 'msg', 'issue', 'number'],
+            'issue_title': ['body', 'msg', 'issue', 'title'],
+            'msgid': ['body', 'msg_id'],
+            'repo': ['body', 'msg', 'repository', 'full_name'],
+        }
         msg = self._format_msg(filter_map, gh_msg)
         return self.formatter.fmt_issue_comment(msg)
 
@@ -117,3 +246,18 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         method = self.topic_mapping.get(msg.get('topic'))
         if method:
             method(msg)
+
+
+class SSSDGithubConsumer(GithubConsumer):
+    repo_name = 'SSSD/sssd'
+    config_key = 'sssdgithubconsumer'
+
+
+class FreeIPAGithubConsumer(GithubConsumer):
+    repo_name = 'freeipa/freeipa'
+    config_key = 'freeipagithubconsumer'
+
+
+class TestGithubConsumer(GithubConsumer):
+    repo_name = 'bastiak/ipa-devel-tools'
+    config_key = 'testgithubconsumer'
