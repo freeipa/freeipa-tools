@@ -55,6 +55,29 @@ class Formatter(object):
         output.close()
         return res
 
+    @abstractmethod
+    def fmt_labeled(self, comment):
+        output = cStringIO.StringIO()
+        if comment['pr_action'] == u'labeled':
+            output.write(
+                u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" "
+                "label *{pr_label}* has been added\n".format(**comment),
+            )
+        elif comment['pr_action'] == u'unlabeled':
+            output.write(
+                u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" "
+                "label *{pr_label}* has been removed\n".format(**comment),
+            )
+        else:
+            assert False, "Unexpected pr_action '{}'".format(comment['pr_action'])
+        output.write(u'\n')
+        output.write(
+            u"See the full pull-request at {pr_url}\n".format(**comment),
+        )
+        res = output.getvalue()
+        output.close()
+        return res
+
 
 class StdoutFormatter(Formatter):
     def fmt_issue_comment(self, comment):
@@ -62,6 +85,9 @@ class StdoutFormatter(Formatter):
 
     def fmt_pr(self, pull_req):
         print(super(StdoutFormatter, self).fmt_pr(pull_req))
+
+    def fmt_labeled(self, comment):
+        print(super(StdoutFormatter, self).fmt_labeled(comment))
 
 
 class EmailFormatter(Formatter):
@@ -111,7 +137,7 @@ class EmailFormatter(Formatter):
 
     def fmt_issue_comment(self, comment):
         body = super(EmailFormatter, self).fmt_issue_comment(comment)
-        subject = u"[{repo} #{issue_num}] {issue_title}".format(**comment)
+        subject = u"[{repo} #{issue_num}] {issue_title} (comment)".format(**comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['issue_num'])
         self._send_email(subject, body, msgid, threadid)
@@ -119,6 +145,13 @@ class EmailFormatter(Formatter):
     def fmt_pr(self, comment):
         body = super(EmailFormatter, self).fmt_pr(comment)
         subject = u"[{repo} #{pr_num}] {pr_title} ({pr_action})".format(**comment)
+        msgid, threadid = self._msg_id(
+            comment['repo'], comment['msgid'], comment['pr_num'])
+        self._send_email(subject, body, msgid, threadid)
+
+    def fmt_labeled(self, comment):
+        body = super(EmailFormatter, self).fmt_labeled(comment)
+        subject = u"[{repo} #{pr_num}] {pr_title} (label change)".format(**comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
         self._send_email(subject, body, msgid, threadid)
@@ -189,6 +222,20 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         msg = self._format_msg(filter_map, gh_msg)
         return self.formatter.fmt_pr(msg)
 
+    def _pr_label_handler(self, gh_msg):
+        filter_map = {
+            'msgid': ['body', 'msg_id'],
+            'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
+            'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
+            'pr_title' : ['body', 'msg', 'pull_request', 'title'],
+            'pr_num' : ['body', 'msg', 'number'],
+            'pr_label' : ['body', 'msg', 'label', 'name'],
+            'pr_action': ['body', 'msg', 'action'],
+            'repo': ['body', 'msg', 'repository', 'full_name'],
+        }
+        msg = self._format_msg(filter_map, gh_msg)
+        return self.formatter.fmt_labeled(msg)
+
     def issue_comment(self, gh_msg):
         try:
             pr_link = get_from_dict(gh_msg, ['body', 'msg', 'issue', 'pull_request'])
@@ -211,7 +258,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         msg = self._format_msg(filter_map, gh_msg)
         return self.formatter.fmt_issue_comment(msg)
 
-    def issue_labeled(self, msg):
+    def issue_labeled(self, gh_msg):
         pass
 
     def pr_opened(self, gh_msg):
@@ -227,10 +274,10 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         pass
 
     def pr_labeled(self, gh_msg):
-        pass
+        return self._pr_label_handler(gh_msg)
 
     def pr_unlabeled(self, gh_msg):
-        pass
+        return self._pr_label_handler(gh_msg)
 
     def pr_synchronize(self, gh_msg):
         return self._pr_handler(gh_msg)
