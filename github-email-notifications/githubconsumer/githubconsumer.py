@@ -156,7 +156,10 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'org.fedoraproject.prod.github.pull_request.opened': self.pr_opened,
             'org.fedoraproject.prod.github.pull_request.reopened': self.pr_reopened,
             'org.fedoraproject.prod.github.pull_request.closed': self.pr_closed,
+            'org.fedoraproject.prod.github.pull_request.synchronize': self.pr_synchronize,
             'org.fedoraproject.prod.github.pull_request.review_comment': self.pr_review,
+            'org.fedoraproject.prod.github.pull_request.labeled': self.pr_labeled,
+            'org.fedoraproject.prod.github.pull_request.unlabeled': self.pr_unlabeled,
             'org.fedoraproject.prod.github.status': self.status,
         }
 
@@ -222,6 +225,15 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
     def pr_review(self, msg):
         pass
+
+    def pr_labeled(self, gh_msg):
+        pass
+
+    def pr_unlabeled(self, gh_msg):
+        pass
+
+    def pr_synchronize(self, gh_msg):
+        return self._pr_handler(gh_msg)
 
     def status(self, msg):
         pass
