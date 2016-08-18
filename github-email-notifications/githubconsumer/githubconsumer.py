@@ -5,9 +5,11 @@ from __future__ import print_function
 
 import email
 import fedmsg.consumers
+import logging
 import smtplib
 import cStringIO
 
+from systemd import journal
 from abc import ABCMeta, abstractmethod, abstractproperty
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -91,7 +93,7 @@ class StdoutFormatter(Formatter):
 
 
 class EmailFormatter(Formatter):
-    def __init__(self, to_addr, from_addr, smtp_server):
+    def __init__(self, to_addr, from_addr, smtp_server, log=None):
         """
 
         :param to_addr: email destinations
@@ -103,6 +105,7 @@ class EmailFormatter(Formatter):
         self.from_addr = from_addr
         self.smtp_server = smtp_server
         self.domain = from_addr.replace('@', '.')
+        self.log = log if log else logging.getLogger()
 
     def _msg_id(self, repo, gh_msgid, pr_num):
         msgid = "<gh-{repo}-{pr_num}-{gh_msgid}@{domain}>".format(
@@ -134,6 +137,7 @@ class EmailFormatter(Formatter):
         s = smtplib.SMTP(self.smtp_server)
         s.sendmail(self.from_addr, [self.to_addr], msg)
         s.quit()
+        self.log.info("Sent notification: \"%s\" to \"%s\"", subject, self.to_addr)
 
     def fmt_issue_comment(self, comment):
         body = super(EmailFormatter, self).fmt_issue_comment(comment)
@@ -183,6 +187,17 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
     def __init__(self, *args, **kw):
         super(GithubConsumer, self).__init__(*args, **kw)
 
+        self.log = logging.getLogger(self.config_key)
+        journal_handler = journal.JournalHandler()
+        journal_handler.setFormatter(logging.Formatter(
+            "[%(name)s %(levelname)s]: %(message)s"
+        ))
+        self.log.addHandler(journal_handler)
+        if args[0].config.get("{}.debug".format(self.config_key)):
+            self.log.setLevel(logging.DEBUG)
+        else:
+            self.log.setLevel(logging.INFO)
+
         self.topic_mapping = {
             'org.fedoraproject.prod.github.issue.comment': self.issue_comment,
             'org.fedoraproject.prod.github.issue.labeled': self.issue_labeled,
@@ -199,7 +214,8 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         self.formatter = self.formatter_cls(
             args[0].config["{}.email_to".format(self.config_key)],
             args[0].config["{}.email_from".format(self.config_key)],
-            args[0].config["{}.smtp_server".format(self.config_key)]
+            args[0].config["{}.smtp_server".format(self.config_key)],
+            log=self.log
         )
 
     def _format_msg(self, filter_map, gh_msg):
@@ -301,10 +317,17 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             # Not our repo
             return
 
-        pprint(msg)
+        msg_pretty = cStringIO.StringIO()
+        pprint(msg, msg_pretty)
+        self.log.debug(msg_pretty.getvalue())
+        msg_pretty.close()
+
         method = self.topic_mapping.get(msg.get('topic'))
         if method:
-            method(msg)
+            try:
+                method(msg)
+            except Exception as e:
+                self.log.exception("Failed with: %s", e)
 
 
 class SSSDGithubConsumer(GithubConsumer):
