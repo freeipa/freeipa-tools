@@ -5,12 +5,12 @@ config = {
     "testgithubconsumer.smtp_server": u"smtp.example.com",
 
     "sssdgithubconsumer": False,
-    "sssdgithubconsumer.email_to": u"test@example.com",
-    "sssdgithubconsumer.email_from": u"noreply@example.com",
+    "sssdgithubconsumer.email_to": u"sssd-devel@lists.fedorahosted.org",
+    "sssdgithubconsumer.email_from": u"sssd-github-notification@fedorahosted.org",
     "sssdgithubconsumer.smtp_server": u"smtp.example.com",
 
     "freeipagithubconsumer": False,
     "freeipagithubconsumer.email_to": u"freeipa-devel@redhat.com",
-    "freeipagithubconsumer.email_from": u"noreply@example.com",
+    "freeipagithubconsumer.email_from": u"freeipa-github-notification@redhat.com",
     "freeipagithubconsumer.smtp_server": u"smtp.example.com",
 }
