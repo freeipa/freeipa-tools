@@ -6,7 +6,7 @@ from __future__ import print_function
 import email
 import fedmsg.consumers
 import smtplib
-import StringIO
+import cStringIO
 
 from abc import ABCMeta, abstractmethod, abstractproperty
 from email.header import Header
@@ -23,15 +23,15 @@ class Formatter(object):
 
     @abstractmethod
     def fmt_issue_comment(self, comment):
-        output = StringIO.StringIO()
-        print(
-            "{comment_author} commented on a pull request".format(**comment),
-            file=output
+        output = cStringIO.StringIO()
+        output.write(
+            u"{comment_author} commented on a pull request\n".format(**comment)
         )
-        print(comment['comment_body'], file=output)
-        print(
-            "See the full comment at {comment_url}\n".format(**comment),
-            file=output
+        output.write(u'\n')
+        output.write(comment['comment_body'])
+        output.write(u'\n\n')
+        output.write(
+            u"See the full comment at {comment_url}\n".format(**comment)
         )
         res = output.getvalue()
         output.close()
@@ -39,17 +39,17 @@ class Formatter(object):
 
     @abstractmethod
     def fmt_pr(self, pull_req):
-        output = StringIO.StringIO()
-        print(
-            "{pr_author}'s pull request #{pr_num}: \"{pr_title}\" was "
+        output = cStringIO.StringIO()
+        output.write(
+            u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" was "
             "{pr_action}\n".format(**pull_req),
-            file=output
         )
+        output.write(u'\n')
         if pull_req['pr_action'] == u'opened':
-            print("PR body:\n{pr_body}\n".format(**pull_req), file=output)
-        print(
-            "See the full pull-request at {pr_url}\n".format(**pull_req),
-            file=output
+            output.write(u"PR body:\n{pr_body}\n".format(**pull_req))
+            output.write(u'\n')
+        output.write(
+            u"See the full pull-request at {pr_url}\n".format(**pull_req),
         )
         res = output.getvalue()
         output.close()
