@@ -11,7 +11,7 @@ setup(
     author_email='',
     url='',
     install_requires=["fedmsg"],
-    packages=[],
+    packages=['githubconsumer'],
     entry_points="""
     [moksha.consumer]
     testgithubconsumer = githubconsumer:TestGithubConsumer

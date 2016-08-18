@@ -1,4 +1,24 @@
-sudo dnf install fedmsg-hub
-sudo cp config.py /etc/fedmsg.d/githubconsumer.py
-python setup.py egg_info
-PYTHONPATH=$(pwd) fedmsg-hub
+Github notifications deployment:
+
+0.
+Enable github2fedmsg for your repository
+https://apps.fedoraproject.org/github2fedmsg
+
+1. Install fedmsg-hub
+$ sudo dnf install fedmsg-hub
+
+2. Copy config
+$ sudo cp config.py /etc/fedmsg.d/githubconsumer.py
+
+3. Update config accordingly
+$ sudo vim /etc/fedmsg.d/githubconsumer.py
+
+4. Install githubconsumer module
+$ sudo python setup.py install
+
+5. Run fedmsg service
+$ sudo systemctl start fedmsg-hub
+$ sudo systemctl enable fedmsg-hub
+
+6. Check for errors
+$ sudo journalctl -u fedmsg-hub
