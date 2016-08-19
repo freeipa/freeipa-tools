@@ -8,10 +8,12 @@ import fedmsg.consumers
 import logging
 import smtplib
 import cStringIO
+import urllib2
 
 from systemd import journal
 from abc import ABCMeta, abstractmethod, abstractproperty
 from email.header import Header
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pprint import pprint
@@ -106,7 +108,7 @@ class EmailFormatter(Formatter):
         )
         return msgid, threadid
 
-    def _send_email(self, subject, body, msgid, threadid):
+    def _send_email(self, subject, body, msgid, threadid, attachments=()):
         """
         Inspired by: https://github.com/abartlet/gh-mailinglist-notifications/blob/master/gh-mailinglist.py
         """
@@ -123,11 +125,25 @@ class EmailFormatter(Formatter):
         outer['Date'] = email.utils.formatdate(localtime=True)
         outer.attach(MIMEText(body, 'plain', 'utf8'))
 
+        for filename, data in attachments:
+            msg = MIMEApplication(data, 'text/x-diff',
+                                  email.encoders.encode_base64)
+            msg.add_header('Content-Disposition', 'attachment',
+                filename=filename)
+            outer.attach(msg)
+
         msg = outer.as_string()
         s = smtplib.SMTP(self.smtp_server)
         s.sendmail(self.from_addr, [self.to_addr], msg)
         s.quit()
         self.log.info("Sent notification: \"%s\" to \"%s\"", subject, self.to_addr)
+
+    def _get_patch(self, url):
+        try:
+            response = urllib2.urlopen(url)
+            return response.read()
+        except urllib2.HTTPError:
+            self.log.exception("Cannot download patch: %s", url)
 
     def fmt_issue_comment(self, comment):
         body = super(EmailFormatter, self).fmt_issue_comment(comment)
@@ -143,7 +159,19 @@ class EmailFormatter(Formatter):
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
-        self._send_email(subject, body, msgid, threadid)
+
+        attachments = ()
+        if comment['pr_action'] in {'opened', 'synchronize'}:
+            # send PR as patch in attachment
+            patch_data = self._get_patch("{pr_url}.patch".format(**comment))
+            if patch_data:
+                attachments = [(
+                    "{project}-pr-{pr_num}.patch".format(
+                        project=self.project, **comment),
+                    patch_data
+                )]
+
+        self._send_email(subject, body, msgid, threadid, attachments=attachments)
 
     def fmt_labeled(self, comment):
         body = super(EmailFormatter, self).fmt_labeled(comment)
