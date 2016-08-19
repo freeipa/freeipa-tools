@@ -81,17 +81,6 @@ class Formatter(object):
         return res
 
 
-class StdoutFormatter(Formatter):
-    def fmt_issue_comment(self, comment):
-        print(super(StdoutFormatter, self).fmt_issue_comment(comment))
-
-    def fmt_pr(self, pull_req):
-        print(super(StdoutFormatter, self).fmt_pr(pull_req))
-
-    def fmt_labeled(self, comment):
-        print(super(StdoutFormatter, self).fmt_labeled(comment))
-
-
 class EmailFormatter(Formatter):
     def __init__(self, to_addr, from_addr, smtp_server, log=None):
         """
