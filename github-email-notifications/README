@@ -4,8 +4,8 @@ Github notifications deployment:
 Enable github2fedmsg for your repository
 https://apps.fedoraproject.org/github2fedmsg
 
-1. Install fedmsg-hub
-$ sudo dnf install fedmsg-hub
+1. Install packages
+$ sudo dnf install fedmsg-hub python2-systemd
 
 2. Copy config
 $ sudo cp config.py /etc/fedmsg.d/githubconsumer.py
