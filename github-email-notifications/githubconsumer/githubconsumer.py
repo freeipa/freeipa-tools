@@ -82,7 +82,7 @@ class Formatter(object):
 
 
 class EmailFormatter(Formatter):
-    def __init__(self, to_addr, from_addr, smtp_server, log=None):
+    def __init__(self, project, to_addr, from_addr, smtp_server, log=None):
         """
 
         :param to_addr: email destinations
@@ -90,6 +90,7 @@ class EmailFormatter(Formatter):
         """
         super(EmailFormatter, self).__init__()
 
+        self.project = project
         self.to_addr = to_addr
         self.from_addr = from_addr
         self.smtp_server = smtp_server
@@ -130,21 +131,24 @@ class EmailFormatter(Formatter):
 
     def fmt_issue_comment(self, comment):
         body = super(EmailFormatter, self).fmt_issue_comment(comment)
-        subject = u"[{repo} #{issue_num}] {issue_title} (comment)".format(**comment)
+        subject = u"[{project} PR#{issue_num}] {issue_title} (comment)".format(
+            project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['issue_num'])
         self._send_email(subject, body, msgid, threadid)
 
     def fmt_pr(self, comment):
         body = super(EmailFormatter, self).fmt_pr(comment)
-        subject = u"[{repo} #{pr_num}] {pr_title} ({pr_action})".format(**comment)
+        subject = u"[{project} PR#{pr_num}] {pr_title} ({pr_action})".format(
+            project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
         self._send_email(subject, body, msgid, threadid)
 
     def fmt_labeled(self, comment):
         body = super(EmailFormatter, self).fmt_labeled(comment)
-        subject = u"[{repo} #{pr_num}] {pr_title} (label change)".format(**comment)
+        subject = u"[{project} PR#{pr_num}] {pr_title} (label change)".format(
+            project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
         self._send_email(subject, body, msgid, threadid)
@@ -171,6 +175,10 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
     @abstractproperty
     def repo_name(self):
+        pass
+
+    @abstractproperty
+    def project(self):
         pass
 
     def __init__(self, *args, **kw):
@@ -201,6 +209,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         }
 
         self.formatter = self.formatter_cls(
+            self.project,
             args[0].config["{}.email_to".format(self.config_key)],
             args[0].config["{}.email_from".format(self.config_key)],
             args[0].config["{}.smtp_server".format(self.config_key)],
@@ -321,14 +330,17 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
 class SSSDGithubConsumer(GithubConsumer):
     repo_name = 'SSSD/sssd'
+    project = 'sssd'
     config_key = 'sssdgithubconsumer'
 
 
 class FreeIPAGithubConsumer(GithubConsumer):
     repo_name = 'freeipa/freeipa'
+    project = 'freeipa'
     config_key = 'freeipagithubconsumer'
 
 
 class TestGithubConsumer(GithubConsumer):
     repo_name = 'bastiak/ipa-devel-tools'
+    project = 'test'
     config_key = 'testgithubconsumer'
