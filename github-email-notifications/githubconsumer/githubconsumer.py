@@ -175,7 +175,11 @@ class EmailFormatter(Formatter):
 
     def fmt_labeled(self, comment):
         body = super(EmailFormatter, self).fmt_labeled(comment)
-        subject = u"[{project} PR#{pr_num}] {pr_title} (label change)".format(
+        if comment['pr_action'] == u'labeled':
+            comment['action_prefix'] = u'+'
+        elif if comment['pr_action'] == u'unlabeled':
+            comment['action_prefix'] = u'-'
+        subject = u"[{project} PR#{pr_num}] {pr_title} ({action_prefix}{pr_label})".format(
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
