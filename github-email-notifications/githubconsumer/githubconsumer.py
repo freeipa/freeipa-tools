@@ -55,6 +55,14 @@ class Formatter(object):
         output.write(
             u"See the full pull-request at {pr_url}\n".format(**pull_req),
         )
+        output.write(
+            u"... or pull the PR as Git branch:\n"
+            u"git remote add gh{project} #<add Github repo URL here>\n"
+            u"git fetch gh{project} pull/{pr_num}/head:pr{pr_num}\n"
+            u"git checkout pr{pr_num}\n".format(
+                project=self.project, **pul_req
+            )
+        )
         res = output.getvalue()
         output.close()
         return res
