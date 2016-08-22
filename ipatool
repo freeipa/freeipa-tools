@@ -8,6 +8,10 @@ Usage:
   ipatool [options] [-v...] push [--branch=BRANCH...] [--reviewer=NAME...] [--] [PATCH ...]
   ipatool [options] [-v...] start-review [-f] [--am] [--ticket=NUMBER...] [--] [PATCH ...]
   ipatool [options] [-v...] am [--] [PATCH ...]
+  ipatool [options] [-v...] pr-ack PR_ID --comment=TEXT
+  ipatool [options] [-v...] pr-list [--state=(open|closed|all)] [--label=NAME]
+  ipatool [options] [-v...] pr-push PR_ID [--branch=BRANCH...] [--reviewer=NAME...]
+  ipatool [options] [-v...] pr-reject PR_ID --comment=TEXT
 
 Common Options:
   -h, --help           Display this help and exit
@@ -52,6 +56,24 @@ ipatool start-review:
 ipatool am:
   Applies the given patches to the working tree, using a configured command.
   Uses the configured patchdir if no patches are given.
+
+ipatool pr-list:
+  List pull requests. By default shows all opened pull requests.
+
+  -s, --state (open|closed|all)  List pull requests in given state
+  -l, --label NAME               List pull requests with given label
+
+ipatool pr-ack:
+  ACK pull request. Add `ack` label and comment.
+
+ipatool pr-reject:
+  Reject pull request. Add `rejected` label, comment with reject reason. Also
+  close the pull request.
+
+  -c, --comment TEXT    Reason for ACKing the PR
+
+iptool pr-push:
+  Fetch all patches from pull request, store them in `patchdir` and call push.
 """
 
 SAMPLE_CONFIG = """
@@ -83,11 +105,16 @@ am-command: ["ssh", "ipa-devel-vm.local", "cd ~/freeipa/ ; git am -3"]
 
 # Currently unused :(
 browser: firefox
+
+# GitHub configuration
+gh-token: "0123456789abcdef0123456789abcdef01234567"
+gh-repo: "freeipa/freeipa"
 """
 
 import glob
 import sys
 import os
+import string
 import subprocess
 import re
 import collections
@@ -96,8 +123,10 @@ import pprint
 
 import yaml       # yum install python3-PyYAML
 import blessings  # yum install python3-blessings
+import github3    # yum install python3-github3py
 import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
+import xtermcolor # yum install python3-xtermcolor
 
 MILESTONES = {
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
@@ -115,7 +144,6 @@ SubprocessResult = collections.namedtuple(
     'SubprocessResult', 'stdout stderr returncode')
 TracTicketData = collections.namedtuple(
     'TracTicketData', 'id time_created time_changed attributes')
-
 
 def cleanpath(path):
     """Return absolute path with leading ~ expanded"""
@@ -440,6 +468,7 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     remote = ctx.config['remote']
     branches = sha1s.keys()
 
+    ctx.push_info = {}
     trac_log = []
     bugzilla_log = ['Fixed upstream']
     for branch in branches:
@@ -447,8 +476,7 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
         bugzilla_log.append('%s:' % branch)
         log_result = ctx.runprocess(
             ['git', 'log', '--graph', '--oneline', '--abbrev=99',
-             '--color=%s' % ctx.color_arg,
-                '%s/%s..%s' % (remote, branch, sha1s[branch])])
+             '--color=never', '%s/%s..%s' % (remote, branch, sha1s[branch])])
         trac_log.extend(
             line.rstrip()
             for line in reversed(log_result.stdout.splitlines()))
@@ -495,7 +523,9 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     print('\n'.join(trac_log))
 
     print(ctx.term.cyan('=== Bugzilla comment ==='))
-    print('\n'.join(bugzilla_log))
+    bugzilla_msg = '\n'.join(bugzilla_log)
+    print(bugzilla_msg)
+    ctx.push_info['bugzilla_comment'] = bugzilla_msg
 
     if ticket_numbers:
         print(ctx.term.cyan('=== Tickets fixed ==='))
@@ -587,6 +617,7 @@ def push_command(ctx):
 
         if ctx.options['--dry-run']:
             print('Exiting, --dry-run specified')
+            ctx.push_info['pushed'] = False
         else:
             while True:
                 print('(k will start `gitk`)')
@@ -605,12 +636,188 @@ def push_command(ctx):
                                    timeout=60, verbosity=2)
                     break
 
+            if response.lower() == 'y':  # was pushed
+                ctx.push_info['pushed'] = True
+            else:
+                ctx.push_info['pushed'] = False
+
     finally:
         print('Cleaning up')
         ctx.runprocess(['git', 'am', '--abort'], check_returncode=None)
         ctx.runprocess(['git', 'reset', '--hard'], check_returncode=None)
         ctx.runprocess(['git', 'checkout', old_branch], check_returncode=None)
         ctx.runprocess(['git', 'clean', '-fxd'], check_returncode=None)
+
+
+def gh_repo(token, repo_full_name):
+    """
+
+    token - GitHub Personal access token
+    repo_full_name GitHub repository identifier, owner/repo
+    """
+    (owner, repo,) = repo_full_name.split('/')
+
+    gh = github3.login(token=token)
+    return gh.repository(owner, repo)
+
+
+def get_gh_repo(ctx):
+    try:
+        token = ctx.config['gh-token']
+        repo_full_name = ctx.config['gh-repo']
+    except KeyError:
+        ctx.die("'gh-token' and/or 'gh-repo' is not set in config file")
+
+    try:
+        return gh_repo(token, repo_full_name)
+    except Exception as e:
+        ctx.die("Failed to access GitHub repository. Check 'gh-token' and "
+                "'gh-repo' variables in config file.")
+
+
+def labels_names(labels):
+    return [l.name for l in labels]
+
+
+def labels_colorize(labels):
+    return [xtermcolor.colorize(l.name, rgb=int(l.color, 16)) for l in labels]
+
+
+def patch_filename(msg, num):
+    allowed = string.ascii_letters + string.digits + '-_'
+    title = msg.split('\n\n', 1)[0]
+    title = title.replace(' ', '-')
+    title = ''.join(c for c in title if c in allowed)
+    return '{:04}-{}.patch'.format(num, title)
+
+
+def delete_patches(d, ignore_errors=True):
+    for patch in os.listdir(d):
+        try:
+            os.remove(os.path.join(d,patch))
+        except Exception:
+            if not ignore_errors:
+                raise
+
+
+@Context.command('pr-push')
+def pr_push_command(ctx):
+    if list(ctx.get_patches()):
+        ctx.die('No patches are allowed when pushing pull request')
+
+    target_dir = os.path.expanduser(ctx.config['patchdir'])
+    repo = get_gh_repo(ctx)
+    pr = repo.pull_request(ctx.options['PR_ID'])
+
+    pr_is = repo.issue(pr.number)
+    labels = labels_names(pr_is.labels())
+
+    if pr_is.is_closed():
+        ctx.die('Pull request is already closed')
+
+    if 'ack' not in labels:
+        ctx.die('Pull request is not ACKed')
+
+    if 'rejected' in labels:
+        ctx.die('Pull request is rejected')
+
+    if 'pushed' in labels:
+        ctx.die('Pull request was already pushed')
+
+    try:
+        commit_num = 0
+        for commit in pr.commits():
+            patch_name = patch_filename(commit.message, commit_num)
+            patch_path = os.path.join(target_dir, patch_name)
+            with open(patch_path, 'wb') as patch_file:
+                patch_file.write(commit.patch())
+    except Exception as e:
+        delete_patches(target_dir)
+        ctx.die('Failed to get patch(es): {}'.format(e))
+
+    try:
+        # use regular `ipatool push`
+        push_command(ctx)
+    finally:
+        delete_patches(target_dir)
+
+    if ((not ctx.options.get('--dry-run', False)) and
+            ctx.push_info.get('pushed', False)):
+        print("Adding label 'pushed'")
+        pr_is.add_labels('pushed')
+        pr_is.refresh(conditional=True)
+
+        pr_is.create_comment(ctx.push_info['bugzilla_comment'])
+        pr_is.refresh(conditional=True)
+
+        print("Closing pull request {}".format(pr.number))
+        pr_is.close()
+
+
+@Context.command('pr-ack')
+def pr_ack_command(ctx):
+    repo = get_gh_repo(ctx)
+    pr_is = repo.issue(ctx.options['PR_ID'])
+    labels = labels_names(pr_is.labels())
+
+    if pr_is.is_closed():
+        ctx.die('Pull request was already closed')
+
+    if 'rejected' in labels:
+        ctx.die('Pull request was rejected')
+
+    print("Adding 'ack' label to PR {}".format(pr_is.number))
+    pr_is.add_labels('ack')
+    pr_is.refresh(conditional=True)
+
+    pr_is.create_comment(ctx.options['--comment'])
+
+
+@Context.command('pr-reject')
+def pr_reject_command(ctx):
+    repo = get_gh_repo(ctx)
+    pr_is = repo.issue(ctx.options['PR_ID'])
+    labels = labels_names(pr_is.labels())
+
+    if 'rejected' in labels:
+        print("Pull request is already rejected")
+    else:
+        print("Adding 'rejected' label to PR {}".format(pr_is.number))
+        pr_is.add_labels('rejected')
+        pr_is.refresh(conditional=True)
+
+    if 'ack' in labels:
+        print("Removing 'ack' label from PR {}".format(pr_is.number))
+        pr_is.remove_label('ack')
+        pr_is.refresh(conditional=True)
+
+    pr_is.create_comment(ctx.options['--comment'])
+    pr_is.refresh(conditional=True)
+
+    if not pr_is.is_closed():
+        print("Closing pull request")
+        pr_is.close()
+
+
+@Context.command('pr-list')
+def pr_list_command(ctx):
+    prline_template = '{num: 5}\t{title:.50}\t{labels}\t{url}'
+
+    state = ctx.options.get('--state', 'open')
+    label = ctx.options.get('--label', None)
+    repo = get_gh_repo(ctx)
+
+    for pr in repo.pull_requests(state=state):
+        pr_is = repo.issue(pr.number)
+        labels = pr_is.labels()
+        if label and label not in labels_names(labels):
+            continue
+        print(prline_template.format(
+            num=pr.number,
+            title=pr.title,
+            labels=' '.join(labels_colorize(labels)),
+            url=pr.html_url,
+        ))
 
 
 @Context.command('start-review')
