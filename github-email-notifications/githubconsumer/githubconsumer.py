@@ -117,6 +117,7 @@ class EmailFormatter(Formatter):
         outer['Subject'] = Header(subject, 'utf8')
         outer['To'] = self.to_addr
         outer['From'] = self.from_addr
+        outer['X-githubconsumer-project'] = self.project
 
         outer.add_header("Message-ID", msgid)
         outer.add_header("In-Reply-To", threadid)
