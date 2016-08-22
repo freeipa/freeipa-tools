@@ -8,10 +8,12 @@ import fedmsg.consumers
 import logging
 import smtplib
 import cStringIO
+import urllib2
 
 from systemd import journal
 from abc import ABCMeta, abstractmethod, abstractproperty
 from email.header import Header
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pprint import pprint
@@ -81,19 +83,8 @@ class Formatter(object):
         return res
 
 
-class StdoutFormatter(Formatter):
-    def fmt_issue_comment(self, comment):
-        print(super(StdoutFormatter, self).fmt_issue_comment(comment))
-
-    def fmt_pr(self, pull_req):
-        print(super(StdoutFormatter, self).fmt_pr(pull_req))
-
-    def fmt_labeled(self, comment):
-        print(super(StdoutFormatter, self).fmt_labeled(comment))
-
-
 class EmailFormatter(Formatter):
-    def __init__(self, to_addr, from_addr, smtp_server, log=None):
+    def __init__(self, project, to_addr, from_addr, smtp_server, log=None):
         """
 
         :param to_addr: email destinations
@@ -101,6 +92,7 @@ class EmailFormatter(Formatter):
         """
         super(EmailFormatter, self).__init__()
 
+        self.project = project
         self.to_addr = to_addr
         self.from_addr = from_addr
         self.smtp_server = smtp_server
@@ -116,7 +108,7 @@ class EmailFormatter(Formatter):
         )
         return msgid, threadid
 
-    def _send_email(self, subject, body, msgid, threadid):
+    def _send_email(self, subject, body, msgid, threadid, attachments=()):
         """
         Inspired by: https://github.com/abartlet/gh-mailinglist-notifications/blob/master/gh-mailinglist.py
         """
@@ -133,29 +125,58 @@ class EmailFormatter(Formatter):
         outer['Date'] = email.utils.formatdate(localtime=True)
         outer.attach(MIMEText(body, 'plain', 'utf8'))
 
+        for filename, data in attachments:
+            msg = MIMEApplication(data, 'text/x-diff',
+                                  email.encoders.encode_base64)
+            msg.add_header('Content-Disposition', 'attachment',
+                filename=filename)
+            outer.attach(msg)
+
         msg = outer.as_string()
         s = smtplib.SMTP(self.smtp_server)
         s.sendmail(self.from_addr, [self.to_addr], msg)
         s.quit()
         self.log.info("Sent notification: \"%s\" to \"%s\"", subject, self.to_addr)
 
+    def _get_patch(self, url):
+        try:
+            response = urllib2.urlopen(url)
+            return response.read()
+        except urllib2.HTTPError:
+            self.log.exception("Cannot download patch: %s", url)
+
     def fmt_issue_comment(self, comment):
         body = super(EmailFormatter, self).fmt_issue_comment(comment)
-        subject = u"[{repo} #{issue_num}] {issue_title} (comment)".format(**comment)
+        subject = u"[{project} PR#{issue_num}] {issue_title} (comment)".format(
+            project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['issue_num'])
         self._send_email(subject, body, msgid, threadid)
 
     def fmt_pr(self, comment):
         body = super(EmailFormatter, self).fmt_pr(comment)
-        subject = u"[{repo} #{pr_num}] {pr_title} ({pr_action})".format(**comment)
+        subject = u"[{project} PR#{pr_num}] {pr_title} ({pr_action})".format(
+            project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
-        self._send_email(subject, body, msgid, threadid)
+
+        attachments = ()
+        if comment['pr_action'] in {'opened', 'synchronize'}:
+            # send PR as patch in attachment
+            patch_data = self._get_patch("{pr_url}.patch".format(**comment))
+            if patch_data:
+                attachments = [(
+                    "{project}-pr-{pr_num}.patch".format(
+                        project=self.project, **comment),
+                    patch_data
+                )]
+
+        self._send_email(subject, body, msgid, threadid, attachments=attachments)
 
     def fmt_labeled(self, comment):
         body = super(EmailFormatter, self).fmt_labeled(comment)
-        subject = u"[{repo} #{pr_num}] {pr_title} (label change)".format(**comment)
+        subject = u"[{project} PR#{pr_num}] {pr_title} (label change)".format(
+            project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
         self._send_email(subject, body, msgid, threadid)
@@ -182,6 +203,10 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
     @abstractproperty
     def repo_name(self):
+        pass
+
+    @abstractproperty
+    def project(self):
         pass
 
     def __init__(self, *args, **kw):
@@ -212,6 +237,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         }
 
         self.formatter = self.formatter_cls(
+            self.project,
             args[0].config["{}.email_to".format(self.config_key)],
             args[0].config["{}.email_from".format(self.config_key)],
             args[0].config["{}.smtp_server".format(self.config_key)],
@@ -332,14 +358,17 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
 class SSSDGithubConsumer(GithubConsumer):
     repo_name = 'SSSD/sssd'
+    project = 'sssd'
     config_key = 'sssdgithubconsumer'
 
 
 class FreeIPAGithubConsumer(GithubConsumer):
     repo_name = 'freeipa/freeipa'
+    project = 'freeipa'
     config_key = 'freeipagithubconsumer'
 
 
 class TestGithubConsumer(GithubConsumer):
     repo_name = 'bastiak/ipa-devel-tools'
+    project = 'test'
     config_key = 'testgithubconsumer'
