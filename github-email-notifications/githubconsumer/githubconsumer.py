@@ -227,6 +227,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         self.topic_mapping = {
             'org.fedoraproject.prod.github.issue.comment': self.issue_comment,
             'org.fedoraproject.prod.github.issue.labeled': self.issue_labeled,
+            'org.fedoraproject.prod.github.pull_request.edited': self.pr_edited,
             'org.fedoraproject.prod.github.pull_request.opened': self.pr_opened,
             'org.fedoraproject.prod.github.pull_request.reopened': self.pr_reopened,
             'org.fedoraproject.prod.github.pull_request.closed': self.pr_closed,
@@ -315,6 +316,9 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
     def pr_review(self, msg):
         pass
+
+    def pr_edited(self, gh_msg):
+        return self._pr_handler(gh_msg)
 
     def pr_labeled(self, gh_msg):
         return self._pr_label_handler(gh_msg)
