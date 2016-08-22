@@ -8,7 +8,7 @@ Usage:
   ipatool [options] [-v...] push [--branch=BRANCH...] [--reviewer=NAME...] [--] [PATCH ...]
   ipatool [options] [-v...] start-review [-f] [--am] [--ticket=NUMBER...] [--] [PATCH ...]
   ipatool [options] [-v...] am [--] [PATCH ...]
-  ipatool [options] [-v...] pr-ack PR_ID --comment=TEXT
+  ipatool [options] [-v...] pr-ack PR_ID [--comment=TEXT]
   ipatool [options] [-v...] pr-list [--state=(open|closed|all)] [--label=NAME]
   ipatool [options] [-v...] pr-push PR_ID [--branch=BRANCH...] [--reviewer=NAME...]
   ipatool [options] [-v...] pr-reject PR_ID --comment=TEXT
