@@ -116,7 +116,7 @@ class EmailFormatter(Formatter):
         )
         return msgid, threadid
 
-    def _send_email(self, subject, body, msgid, threadid, attachments=()):
+    def _send_email(self, from_login, subject, body, msgid, threadid, attachments=()):
         """
         Inspired by: https://github.com/abartlet/gh-mailinglist-notifications/blob/master/gh-mailinglist.py
         """
@@ -124,8 +124,11 @@ class EmailFormatter(Formatter):
         outer = MIMEMultipart()
         outer['Subject'] = Header(subject, 'utf8')
         outer['To'] = self.to_addr
-        outer['From'] = self.from_addr
         outer['X-githubconsumer-project'] = self.project
+        outer['X-githubconsumer-author-gh-login'] = from_login
+        outer['From'] = "{name} <{noreplyaddr}>".format(
+                name=from_login, noreplyaddr=self.from_addr
+            )
 
         outer.add_header("Message-ID", msgid)
         outer.add_header("In-Reply-To", threadid)
@@ -160,7 +163,7 @@ class EmailFormatter(Formatter):
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['issue_num'])
-        self._send_email(subject, body, msgid, threadid)
+        self._send_email(comment['event_author'], subject, body, msgid, threadid)
 
     def fmt_pr(self, comment):
         body = super(EmailFormatter, self).fmt_pr(comment)
@@ -180,7 +183,7 @@ class EmailFormatter(Formatter):
                     patch_data
                 )]
 
-        self._send_email(subject, body, msgid, threadid, attachments=attachments)
+        self._send_email(comment['event_author'], subject, body, msgid, threadid, attachments=attachments)
 
     def fmt_labeled(self, comment):
         body = super(EmailFormatter, self).fmt_labeled(comment)
@@ -192,7 +195,7 @@ class EmailFormatter(Formatter):
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
-        self._send_email(subject, body, msgid, threadid)
+        self._send_email(comment['event_author'], subject, body, msgid, threadid)
 
 
 class RawPPFormatter(Formatter):
@@ -265,6 +268,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
     def _pr_handler(self, gh_msg):
         filter_map = {
+            'event_author': ['body', 'msg', 'sender', 'login'],
             'msgid': ['body', 'msg_id'],
             'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
             'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
@@ -280,6 +284,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
 
     def _pr_label_handler(self, gh_msg):
         filter_map = {
+            'event_author': ['body', 'msg', 'sender', 'login'],
             'msgid': ['body', 'msg_id'],
             'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
             'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
@@ -306,6 +311,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'comment_url' : ['body', 'msg', 'comment', 'html_url'],
             'comment_author' : ['body', 'msg', 'comment', 'user', 'login'],
             'comment_body' : ['body', 'msg', 'comment', 'body'],
+            'event_author': ['body', 'msg', 'sender', 'login'],
             'issue_num': ['body', 'msg', 'issue', 'number'],
             'issue_title': ['body', 'msg', 'issue', 'title'],
             'msgid': ['body', 'msg_id'],
