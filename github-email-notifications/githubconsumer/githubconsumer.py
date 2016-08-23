@@ -177,7 +177,7 @@ class EmailFormatter(Formatter):
         body = super(EmailFormatter, self).fmt_labeled(comment)
         if comment['pr_action'] == u'labeled':
             comment['action_prefix'] = u'+'
-        elif if comment['pr_action'] == u'unlabeled':
+        elif comment['pr_action'] == u'unlabeled':
             comment['action_prefix'] = u'-'
         subject = u"[{project} PR#{pr_num}] {pr_title} ({action_prefix}{pr_label})".format(
             project=self.project, **comment)
