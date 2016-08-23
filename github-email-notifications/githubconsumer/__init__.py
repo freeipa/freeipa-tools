@@ -1,7 +1,13 @@
 from .githubconsumer import (
     SSSDGithubConsumer,
     TestGithubConsumer,
-    FreeIPAGithubConsumer
+    FreeIPAGithubConsumer,
+    BindDyndbLDAPGithubConsumer,
 )
 
-__all__ = (FreeIPAGithubConsumer, SSSDGithubConsumer, TestGithubConsumer)
+__all__ = (
+    FreeIPAGithubConsumer,
+    SSSDGithubConsumer,
+    TestGithubConsumer,
+    BindDyndbLDAPGithubConsumer
+)

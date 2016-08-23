@@ -17,5 +17,6 @@ setup(
     testgithubconsumer = githubconsumer:TestGithubConsumer
     sssdgithubconsumer = githubconsumer:SSSDGithubConsumer
     freeipagithubconsumer = githubconsumer:FreeIPAGithubConsumer
+    binddyndbldapgithubconsumer = githubconsumer:BindDyndbLDAPGithubConsumer
     """,
 )

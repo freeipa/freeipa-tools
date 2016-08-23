@@ -376,6 +376,12 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
                 self.log.exception("Failed with: %s", e)
 
 
+class BindDyndbLDAPGithubConsumer(GithubConsumer):
+    repo_name = 'freeipa/bind-dyndb-ldap'
+    project = 'bind-dyndb-ldap'
+    config_key = 'binddyndbldapgithubconsumer'
+
+
 class SSSDGithubConsumer(GithubConsumer):
     repo_name = 'SSSD/sssd'
     project = 'sssd'
