@@ -16,4 +16,10 @@ config = {
     "freeipagithubconsumer.email_from": u"freeipa-github-notification@redhat.com",
     "freeipagithubconsumer.smtp_server": u"smtp.example.com",
     "freeipagithubconsumer.debug": False,
+
+    "binddyndbldapgithubconsumer": False,
+    "binddyndbldapgithubconsumer.email_to": u"freeipa-devel@redhat.com",
+    "binddyndbldapgithubconsumer.email_from": u"bind-dyndb-ldap-github-notification@redhat.com",
+    "binddyndbldapgithubconsumer.smtp_server": u"smtp.example.com",
+    "binddyndbldapgithubconsumer.debug": False,
 }
