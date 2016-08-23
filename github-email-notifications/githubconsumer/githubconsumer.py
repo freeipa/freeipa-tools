@@ -55,6 +55,14 @@ class Formatter(object):
         output.write(
             u"See the full pull-request at {pr_url}\n".format(**pull_req),
         )
+        output.write(
+            u"... or pull the PR as Git branch:\n"
+            u"git remote add gh{project} {repo_url_ro}\n"
+            u"git fetch gh{project} pull/{pr_num}/head:pr{pr_num}\n"
+            u"git checkout pr{pr_num}\n".format(
+                project=self.project, **pull_req
+            )
+        )
         res = output.getvalue()
         output.close()
         return res
@@ -261,6 +269,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'pr_num' : ['body', 'msg', 'number'],
             'pr_action' : ['body', 'msg', 'action'],
             'repo': ['body', 'msg', 'repository', 'full_name'],
+            'repo_url_ro': ['body', 'msg', 'repository', 'html_url'],
         }
         msg = self._format_msg(filter_map, gh_msg)
         return self.formatter.fmt_pr(msg)
