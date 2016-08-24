@@ -32,8 +32,11 @@ class Formatter(object):
             u"{comment_author} commented on a pull request\n".format(**comment)
         )
         output.write(u'\n')
+        output.write(u'"""\n')
         output.write(comment['comment_body'])
-        output.write(u'\n\n')
+        output.write(u'\n')
+        output.write(u'"""\n')
+        output.write(u'\n')
         output.write(
             u"See the full comment at {comment_url}\n".format(**comment)
         )
@@ -50,7 +53,10 @@ class Formatter(object):
         )
         output.write(u'\n')
         if pull_req['pr_action'] == u'opened':
-            output.write(u"PR body:\n{pr_body}\n".format(**pull_req))
+            output.write(u"PR body:\n")
+            output.write(u'"""\n')
+            output.write(u"{pr_body}\n".format(**pull_req))
+            output.write(u'"""\n')
             output.write(u'\n')
         output.write(
             u"See the full pull-request at {pr_url}\n".format(**pull_req),
