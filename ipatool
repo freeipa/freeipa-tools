@@ -870,6 +870,39 @@ def pr_list_command(ctx):
             url=pr.html_url,
         ))
 
+    # Human error detection section
+    print(xtermcolor.colorize("Checking for common mistakes...", rgb=0xff3311))
+    pull_requests = repo.pull_requests(
+        state='all', sort='updated', direction='desc', number=100
+    )
+    for pr in pull_requests:
+        pr_is = repo.issue(pr.number)
+        labels = pr_is.labels()
+        lnames = labels_names(labels)
+        if (pr.is_merged() and 'pushed' not in lnames):
+            print(xtermcolor.colorize(
+                "Pull request was merged but not labeled 'pushed'!",
+                rgb=0xff0000,
+            ))
+            print(prline_template.format(
+                num=pr.number,
+                title=pr.title,
+                labels=' '.join(labels_colorize(labels)),
+                url=pr.html_url,
+            ))
+        if ('pushed' in lnames and 'ack' not in lnames):
+            print(xtermcolor.colorize(
+                "Pull request was pushed without 'ack'!",
+                rgb=0xff0000,
+            ))
+            print(prline_template.format(
+                num=pr.number,
+                title=pr.title,
+                labels=' '.join(labels_colorize(labels)),
+                url=pr.html_url,
+            ))
+
+
 
 @Context.command('start-review')
 def start_review_command(ctx):
