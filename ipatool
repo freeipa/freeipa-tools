@@ -9,7 +9,7 @@ Usage:
   ipatool [options] [-v...] start-review [-f] [--am] [--ticket=NUMBER...] [--] [PATCH ...]
   ipatool [options] [-v...] am [--] [PATCH ...]
   ipatool [options] [-v...] pr-ack PR_ID [--comment=TEXT]
-  ipatool [options] [-v...] pr-list [--state=(open|closed|all)] [--label=NAME]
+  ipatool [options] [-v...] pr-list [--state=(open|closed|all)]... [--label=NAME...]
   ipatool [options] [-v...] pr-push PR_ID [--branch=BRANCH...] [--reviewer=NAME...]
   ipatool [options] [-v...] pr-reject PR_ID --comment=TEXT
 
@@ -803,15 +803,66 @@ def pr_reject_command(ctx):
 def pr_list_command(ctx):
     prline_template = '{num: 5}\t{title:.50}\t{labels}\t{url}'
 
-    state = ctx.options.get('--state', 'open')
-    label = ctx.options.get('--label', None)
+    states = ctx.options['--state']
+    labels = ctx.options['--label']
     repo = get_gh_repo(ctx)
 
-    for pr in repo.pull_requests(state=state):
+    def parse_signed(lst):
+        pos = set()
+        neg = set()
+
+        for item in lst:
+            if item.startswith('-'):
+                neg.add(item[1:])
+            elif item.startswith('+'):
+                pos.add(item[1:])
+            else:
+                pos.add(item)
+        return (pos, neg,)
+
+    states_pos, states_neg = parse_signed(states)
+    labels_pos, labels_neg = parse_signed(labels)
+
+    # if there is intersection between _pos and _neg there will be no
+    # results (PR can hardly be closed and not closed at the same time)
+    # we can safely stop here
+    # TODO: raise an error?
+    if states_pos & states_neg:
+        return
+
+    if labels_pos & labels_neg:
+        return
+
+    if 'all' in states_neg:
+        return
+
+    if not states_neg:
+        if not states_pos:
+            states_pos.add('open')
+            search_state = 'open'
+        elif len(states_pos) == 1:
+            search_state = list(states_pos)[0]
+        else:
+            search_state = 'all'
+    else:
+        search_state = 'all'
+
+    # 'all' is not real state
+    states_pos.discard('all')
+
+    for pr in repo.pull_requests(state=search_state):
         pr_is = repo.issue(pr.number)
-        labels = pr_is.labels()
-        if label and label not in labels_names(labels):
+        if states_pos and pr.state not in states_pos:
             continue
+        if pr.state in states_neg:
+            continue
+        labels = pr_is.labels()
+        if labels:
+            lnames = set(labels_names(labels))
+            if labels_pos and not lnames & labels_pos:
+                continue
+            if lnames & labels_neg:
+                continue
         print(prline_template.format(
             num=pr.number,
             title=pr.title,
