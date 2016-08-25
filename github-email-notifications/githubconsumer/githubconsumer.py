@@ -189,6 +189,16 @@ class EmailFormatter(Formatter):
                     patch_data
                 )]
 
+        # warning if pullrequest was merged
+        if comment['pr_merged'] and comment['pr_action'] == u"closed":
+            subject = "WARNING: MERGED {}".format(subject)
+            body = (
+                "*WARNING: this pull request has been merged!*\n"
+                "This is only mirrored repo thus any changes will be erased. "
+                "Please push commit(s) to authoritative repository.\n\n"
+                "{}".format(body)
+            )
+
         self._send_email(comment['event_author'], subject, body, msgid, threadid, attachments=attachments)
 
     def fmt_labeled(self, comment):
@@ -281,6 +291,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
             'pr_title' : ['body', 'msg', 'pull_request', 'title'],
             'pr_body' : ['body', 'msg', 'pull_request', 'body'],
+            'pr_merged': ['body', 'msg', 'pull_request', 'merged'],
             'pr_num' : ['body', 'msg', 'number'],
             'pr_action' : ['body', 'msg', 'action'],
             'repo': ['body', 'msg', 'repository', 'full_name'],
