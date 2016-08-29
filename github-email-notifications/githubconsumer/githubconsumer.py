@@ -127,7 +127,7 @@ class EmailFormatter(Formatter):
         """
         subject = subject.replace('\n', ' ').replace('\r', ' ')
         outer = MIMEMultipart()
-        outer['Subject'] = Header(subject, 'utf8')
+        outer['Subject'] = Header(subject, 'UTF-8')
         outer['To'] = self.to_addr
         outer['X-githubconsumer-project'] = self.project
         outer['X-githubconsumer-author-gh-login'] = from_login
@@ -140,10 +140,10 @@ class EmailFormatter(Formatter):
         outer.add_header("References", threadid)
 
         outer['Date'] = email.utils.formatdate(localtime=True)
-        outer.attach(MIMEText(body, 'plain', 'utf8'))
+        outer.attach(MIMEText(body, 'plain', 'UTF-8'))
 
         for filename, data in attachments:
-            msg = MIMEText(data, 'x-diff', 'utf-8')
+            msg = MIMEText(data, 'x-diff', 'UTF-8')
             msg.add_header('Content-Disposition', 'attachment',
                 filename=filename)
             outer.attach(msg)
