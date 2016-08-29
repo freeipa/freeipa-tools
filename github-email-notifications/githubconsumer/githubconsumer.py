@@ -13,9 +13,8 @@ import urllib2
 from systemd import journal
 from abc import ABCMeta, abstractmethod, abstractproperty
 from email.header import Header
-from email.mime.application import MIMEApplication
+from email.mime.application import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from pprint import pprint
 
 def get_from_dict(data_dict, key_list):
@@ -144,8 +143,7 @@ class EmailFormatter(Formatter):
         outer.attach(MIMEText(body, 'plain', 'utf8'))
 
         for filename, data in attachments:
-            msg = MIMEApplication(data, 'text/x-diff',
-                                  email.encoders.encode_base64)
+            msg = MIMEText(data, 'x-diff', 'utf-8')
             msg.add_header('Content-Disposition', 'attachment',
                 filename=filename)
             outer.attach(msg)
