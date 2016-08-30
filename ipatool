@@ -731,6 +731,7 @@ def pr_push_command(ctx):
             patch_path = os.path.join(target_dir, patch_name)
             with open(patch_path, 'wb') as patch_file:
                 patch_file.write(commit.patch())
+            commit_num += 1
     except Exception as e:
         delete_patches(target_dir)
         ctx.die('Failed to get patch(es): {}'.format(e))
