@@ -122,7 +122,8 @@ class EmailFormatter(Formatter):
         )
         return msgid, threadid
 
-    def _send_email(self, from_login, subject, body, msgid, threadid, attachments=()):
+    def _send_email(self, from_login, subject, body, msgid, threadid,
+                    attachments=(), new_thread=False):
         """
         Inspired by: https://github.com/abartlet/gh-mailinglist-notifications/blob/master/gh-mailinglist.py
         """
@@ -137,8 +138,9 @@ class EmailFormatter(Formatter):
             )
 
         outer.add_header("Message-ID", msgid)
-        outer.add_header("In-Reply-To", threadid)
-        outer.add_header("References", threadid)
+        if not new_thread:
+            outer.add_header("In-Reply-To", threadid)
+            outer.add_header("References", threadid)
 
         outer['Date'] = email.utils.formatdate(localtime=True)
         outer.attach(MIMEText(body, 'plain', 'utf8'))
@@ -199,7 +201,14 @@ class EmailFormatter(Formatter):
                 "{}".format(body)
             )
 
-        self._send_email(comment['event_author'], subject, body, msgid, threadid, attachments=attachments)
+        if comment['pr_action'] == u'opened':
+            new_thread = True
+        else:
+            new_thread = False
+
+        self._send_email(
+            comment['event_author'], subject, body, msgid,
+            threadid, attachments=attachments, new_thread=new_thread)
 
     def fmt_labeled(self, comment):
         body = super(EmailFormatter, self).fmt_labeled(comment)
