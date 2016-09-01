@@ -7,7 +7,7 @@ import email
 import fedmsg.consumers
 import logging
 import smtplib
-import cStringIO
+import StringIO
 import urllib2
 
 from systemd import journal
@@ -26,7 +26,7 @@ class Formatter(object):
 
     @abstractmethod
     def fmt_issue_comment(self, comment):
-        output = cStringIO.StringIO()
+        output = StringIO.StringIO()
         output.write(
             u"{comment_author} commented on a pull request\n".format(**comment)
         )
@@ -45,7 +45,7 @@ class Formatter(object):
 
     @abstractmethod
     def fmt_pr(self, pull_req):
-        output = cStringIO.StringIO()
+        output = StringIO.StringIO()
         output.write(
             u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" was "
             "{pr_action}\n".format(**pull_req),
@@ -74,7 +74,7 @@ class Formatter(object):
 
     @abstractmethod
     def fmt_labeled(self, comment):
-        output = cStringIO.StringIO()
+        output = StringIO.StringIO()
         if comment['pr_action'] == u'labeled':
             output.write(
                 u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" "
@@ -393,7 +393,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             # Not our repo
             return
 
-        msg_pretty = cStringIO.StringIO()
+        msg_pretty = StringIO.StringIO()
         pprint(msg, msg_pretty)
         self.log.debug(msg_pretty.getvalue())
         msg_pretty.close()
