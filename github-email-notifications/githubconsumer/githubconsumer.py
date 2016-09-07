@@ -48,7 +48,7 @@ class Formatter(object):
         output = StringIO.StringIO()
         output.write(
             u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" was "
-            "{pr_action}\n".format(**pull_req),
+            "{pr_action_txt}\n".format(**pull_req),
         )
         output.write(u'\n')
         if pull_req['pr_action'] == u'opened':
@@ -174,13 +174,17 @@ class EmailFormatter(Formatter):
         self._send_email(comment['event_author'], subject, body, msgid, threadid)
 
     def fmt_pr(self, comment):
+        if comment['pr_action'] == 'synchronize':
+            comment['pr_action_txt'] = u'synchronized'
+
         body = super(EmailFormatter, self).fmt_pr(comment)
-        subject = u"[{project} PR#{pr_num}] {pr_title} ({pr_action})".format(
+        subject = u"[{project} PR#{pr_num}] {pr_title} ({pr_action_txt})".format(
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
 
         attachments = ()
+
         if comment['pr_action'] in {'opened', 'synchronize'}:
             # send PR as patch in attachment
             patch_data = self._get_patch("{pr_url}.patch".format(**comment))
@@ -303,6 +307,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'pr_merged': ['body', 'msg', 'pull_request', 'merged'],
             'pr_num' : ['body', 'msg', 'number'],
             'pr_action' : ['body', 'msg', 'action'],
+            'pr_action_txt': ['body', 'msg', 'action'],
             'repo': ['body', 'msg', 'repository', 'full_name'],
             'repo_url_ro': ['body', 'msg', 'repository', 'html_url'],
         }
