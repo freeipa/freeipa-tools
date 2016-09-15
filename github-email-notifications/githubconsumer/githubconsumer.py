@@ -27,10 +27,12 @@ class Formatter(object):
     @abstractmethod
     def fmt_issue_comment(self, comment):
         output = StringIO.StringIO()
+        output.write(u"  URL: {pr_url}\n".format(**comment))
+        output.write(u"Title: #{issue_num}: {issue_title}\n".format(**comment))
+        output.write(u"\n")
         output.write(
-            u"{comment_author} commented on a pull request\n".format(**comment)
+            u"{comment_author} commented:\n".format(**comment)
         )
-        output.write(u'\n')
         output.write(u'"""\n')
         output.write(comment['comment_body'])
         output.write(u'\n')
@@ -46,10 +48,10 @@ class Formatter(object):
     @abstractmethod
     def fmt_pr(self, pull_req):
         output = StringIO.StringIO()
-        output.write(
-            u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" was "
-            "{pr_action_txt}\n".format(**pull_req),
-        )
+        output.write(u"   URL: {pr_url}\n".format(**pull_req))
+        output.write(u"Author: {pr_author}\n".format(**pull_req))
+        output.write(u" Title: #{pr_num}: {pr_title}\n".format(**pull_req))
+        output.write(u"Action: {pr_action_txt}\n".format(**pull_req))
         output.write(u'\n')
         if pull_req['pr_action'] == u'opened':
             output.write(u"PR body:\n")
@@ -58,10 +60,7 @@ class Formatter(object):
             output.write(u'"""\n')
             output.write(u'\n')
         output.write(
-            u"See the full pull-request at {pr_url}\n".format(**pull_req),
-        )
-        output.write(
-            u"... or pull the PR as Git branch:\n"
+            u"To pull the PR as Git branch:\n"
             u"git remote add gh{project} {repo_url_ro}\n"
             u"git fetch gh{project} pull/{pr_num}/head:pr{pr_num}\n"
             u"git checkout pr{pr_num}\n".format(
@@ -75,22 +74,13 @@ class Formatter(object):
     @abstractmethod
     def fmt_labeled(self, comment):
         output = StringIO.StringIO()
-        if comment['pr_action'] == u'labeled':
-            output.write(
-                u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" "
-                "label *{pr_label}* has been added\n".format(**comment),
-            )
-        elif comment['pr_action'] == u'unlabeled':
-            output.write(
-                u"{pr_author}'s pull request #{pr_num}: \"{pr_title}\" "
-                "label *{pr_label}* has been removed\n".format(**comment),
-            )
-        else:
+        if comment['pr_action'] not in {u'labeled', u'unlabeled'}:
             assert False, "Unexpected pr_action '{}'".format(comment['pr_action'])
-        output.write(u'\n')
-        output.write(
-            u"See the full pull-request at {pr_url}\n".format(**comment),
-        )
+
+        output.write(u"  URL: {pr_url}\n".format(**comment))
+        output.write(u"Title: #{pr_num}: {pr_title}\n".format(**comment))
+        output.write(u"\n")
+        output.write(u"Label: {action_prefix}{pr_label}\n".format(**comment))
         res = output.getvalue()
         output.close()
         return res
@@ -215,11 +205,11 @@ class EmailFormatter(Formatter):
             threadid, attachments=attachments, new_thread=new_thread)
 
     def fmt_labeled(self, comment):
-        body = super(EmailFormatter, self).fmt_labeled(comment)
         if comment['pr_action'] == u'labeled':
             comment['action_prefix'] = u'+'
         elif comment['pr_action'] == u'unlabeled':
             comment['action_prefix'] = u'-'
+        body = super(EmailFormatter, self).fmt_labeled(comment)
         subject = u"[{project} PR#{pr_num}] {pr_title} ({action_prefix}{pr_label})".format(
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
@@ -346,6 +336,7 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
             'event_author': ['body', 'msg', 'sender', 'login'],
             'issue_num': ['body', 'msg', 'issue', 'number'],
             'issue_title': ['body', 'msg', 'issue', 'title'],
+            'pr_url': ['body', 'msg', 'issue', 'html_url'],
             'msgid': ['body', 'msg_id'],
             'repo': ['body', 'msg', 'repository', 'full_name'],
         }
