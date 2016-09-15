@@ -157,7 +157,7 @@ class EmailFormatter(Formatter):
 
     def fmt_issue_comment(self, comment):
         body = super(EmailFormatter, self).fmt_issue_comment(comment)
-        subject = u"[{project} PR#{issue_num}] {issue_title} (comment)".format(
+        subject = u"[{project} PR#{issue_num}][comment] {issue_title}".format(
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['issue_num'])
@@ -168,7 +168,7 @@ class EmailFormatter(Formatter):
             comment['pr_action_txt'] = u'synchronized'
 
         body = super(EmailFormatter, self).fmt_pr(comment)
-        subject = u"[{project} PR#{pr_num}] {pr_title} ({pr_action_txt})".format(
+        subject = u"[{project} PR#{pr_num}][{pr_action_txt}] {pr_title}".format(
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
@@ -210,7 +210,7 @@ class EmailFormatter(Formatter):
         elif comment['pr_action'] == u'unlabeled':
             comment['action_prefix'] = u'-'
         body = super(EmailFormatter, self).fmt_labeled(comment)
-        subject = u"[{project} PR#{pr_num}] {pr_title} ({action_prefix}{pr_label})".format(
+        subject = u"[{project} PR#{pr_num}][{action_prefix}{pr_label}] {pr_title}".format(
             project=self.project, **comment)
         msgid, threadid = self._msg_id(
             comment['repo'], comment['msgid'], comment['pr_num'])
