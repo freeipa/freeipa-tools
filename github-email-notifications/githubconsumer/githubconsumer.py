@@ -72,6 +72,25 @@ class Formatter(object):
         return res
 
     @abstractmethod
+    def fmt_pr_edited(self, msg):
+        output = StringIO.StringIO()
+        output.write(u"   URL: {pr_url}\n".format(**msg))
+        output.write(u"Author: {pr_author}\n".format(**msg))
+        output.write(u" Title: #{pr_num}: {pr_title}\n".format(**msg))
+        output.write(u"Action: {pr_action_txt}\n".format(**msg))
+        output.write(u"\n")
+        for field, original_value in msg['pr_changes'].items():
+            output.write(u" Changed field: {}\n".format(field))
+            output.write(u"Original value:\n")
+            output.write(u'"""\n')
+            output.write(u"{}\n".format(original_value['from']))
+            output.write(u'"""\n')
+            output.write(u"\n")
+        res = output.getvalue()
+        output.close()
+        return res
+
+    @abstractmethod
     def fmt_labeled(self, comment):
         output = StringIO.StringIO()
         if comment['pr_action'] not in {u'labeled', u'unlabeled'}:
@@ -216,6 +235,15 @@ class EmailFormatter(Formatter):
             comment['repo'], comment['msgid'], comment['pr_num'])
         self._send_email(comment['event_author'], subject, body, msgid, threadid)
 
+    def fmt_pr_edited(self, comment):
+        body = super(EmailFormatter, self).fmt_pr_edited(comment)
+        subject = u"[{project} PR#{pr_num}][{pr_action}] {pr_title}".format(
+            project=self.project, **comment)
+        msgid, threadid = self._msg_id(
+            comment['repo'], comment['msgid'], comment['pr_num'])
+        self._send_email(comment['event_author'], subject, body, msgid,
+            threadid)
+
 
 class RawPPFormatter(Formatter):
     def fmt_issue_comment(self, comment):
@@ -359,7 +387,22 @@ class GithubConsumer(fedmsg.consumers.FedmsgConsumer):
         pass
 
     def pr_edited(self, gh_msg):
-        return self._pr_handler(gh_msg)
+        filter_map = {
+            'event_author': ['body', 'msg', 'sender', 'login'],
+            'msgid': ['body', 'msg_id'],
+            'pr_url' : ['body', 'msg', 'pull_request', 'html_url'],
+            'pr_author' : ['body', 'msg', 'pull_request', 'user', 'login'],
+            'pr_title' : ['body', 'msg', 'pull_request', 'title'],
+            'pr_body' : ['body', 'msg', 'pull_request', 'body'],
+            'pr_num' : ['body', 'msg', 'number'],
+            'pr_action' : ['body', 'msg', 'action'],
+            'pr_action_txt': ['body', 'msg', 'action'],
+            'pr_changes': ['body', 'msg', 'changes'],
+            'repo': ['body', 'msg', 'repository', 'full_name'],
+            'repo_url_ro': ['body', 'msg', 'repository', 'html_url'],
+        }
+        msg = self._format_msg(filter_map, gh_msg)
+        return self.formatter.fmt_pr_edited(msg)
 
     def pr_labeled(self, gh_msg):
         return self._pr_label_handler(gh_msg)
