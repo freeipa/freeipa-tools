@@ -727,6 +727,36 @@ def delete_patches(d, ignore_errors=True):
                 raise
 
 
+def sorted_commits(commits):
+    # no merges! no magic!
+    for c in commits:
+        assert len(c.parents) == 1
+
+    commit_ids = [c.sha for c in commits]
+
+    # find first
+    for c in commits:
+        if c.parents[0]['sha'] not in commit_ids:
+            result = [c]
+            break
+    else:
+        raise RuntimeError("No first commit? There should be always one.")
+
+    parent_id = c.sha
+    while len(result) < len(commits):
+        for c in commits:
+            if c.parents[0]['sha'] == parent_id:
+                result.append(c)
+                parent_id = c.sha
+                break  # end for loop
+        else:
+            raise RuntimeError(
+                "Commit {} should have child but none found".format(parent_id)
+            )
+
+    return result
+
+
 @Context.command('pr-push')
 def pr_push_command(ctx):
     if list(ctx.get_patches()):
@@ -753,7 +783,7 @@ def pr_push_command(ctx):
 
     try:
         commit_num = 0
-        for commit in pr.commits():
+        for commit in sorted_commits(list(pr.commits())):
             patch_name = patch_filename(commit.message, commit_num)
             patch_path = os.path.join(target_dir, patch_name)
             with open(patch_path, 'wb') as patch_file:
