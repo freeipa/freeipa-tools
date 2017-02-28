@@ -19,7 +19,7 @@ Common Options:
   --config FILE        Configuration file [default: ~/.ipa/toolconf.yaml]
   --no-reviewer        Do not add a Reviewed-By: line
   -n, --dry-run        Do not push
-  --no-trac            Do not contact Trac
+  --no-pagure          Do not contact Pagure.io
   --no-fetch           Do not synchronize before pushing
   --color=(auto|always|never)  Colorize output [default: auto]
   PATCH                Patch to push, or directory with *.patch files
@@ -33,7 +33,7 @@ ipatool push:
   A "Reviewed-By" line with the name(s) given by --reviewer is added
   to all patches unless --no-reviewer is given).
   If neither --reviewer nor --no-reviewer is given, a reviewer is looked up in
-  the "Reviewed by" field of the Trac ticket(s). If that does not yield one
+  the "Reviewed by" field of the Pagure ticket(s). If that does not yield one
   reviewer, the pushpatches command fails.
   If the reviewer name is not in the
   form "Name Last <mail@address.example>", it is looked up in the contributors
@@ -84,19 +84,19 @@ remote: origin
 # Default directory where patches to push are stored
 patchdir: ~/patches/to-apply
 
-# URLs to use in reporrts & messages
-ticket-url: https://fedorahosted.org/freeipa/ticket/
-commit-url: https://fedorahosted.org/freeipa/changeset/
+# URLs to use in reports & messages
+ticket-url: https://pagure.io/freeipa/issue/
+commit-url: https://pagure.io/freeipa/c/
 bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 
-# Trac XML login details
-trac-protocol: https
-trac-host: fedorahosted.org
-trac-path: freeipa
-trac-username: pviktori
-trac-password: "!@#$%^&*"
+# Pagure login details
+pagure-repository: freeipa
+pagure-token: "0123456789abcdef0123456789abcdef01234567"
+# workaround: pagure doesn't provide the tokens for users so we cannot
+# dynamically detect username
+username: username
 
-# Mapping of Trac logins to Git-style author lines
+# Mapping of logins to Git-style author lines
 trac-username-map:
     abbra: Alexander Bokovoy <abokovoy@redhat.com>
 
@@ -118,7 +118,6 @@ import string
 import subprocess
 import re
 import collections
-import xmlrpc.client
 import pprint
 
 import yaml       # yum install python3-PyYAML
@@ -127,6 +126,7 @@ import github3    # yum install python3-github3py
 import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
 import xtermcolor # yum install python3-xtermcolor
+from libpagure import Pagure  # yum install python3-libpagure
 
 MILESTONES = {
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
@@ -144,8 +144,6 @@ SUBJECT_RE = re.compile('^Subject:( *\[PATCH( [^]*])?\])*(?P<subj>.*)')
 
 SubprocessResult = collections.namedtuple(
     'SubprocessResult', 'stdout stderr returncode')
-TracTicketData = collections.namedtuple(
-    'TracTicketData', 'id time_created time_changed attributes')
 
 def cleanpath(path):
     """Return absolute path with leading ~ expanded"""
@@ -162,45 +160,6 @@ def shellquote(arg):
         return "'%s'" % arg.replace("'", r"'\''")
 
 
-class reify(object):
-    # https://github.com/Pylons/pyramid/blob/1.4-branch/pyramid/decorator.py
-    def __init__(self, wrapped):
-        self.wrapped = wrapped
-        self.__doc__ = getattr(wrapped, '__doc__', None)
-
-    def __get__(self, inst, objtype=None):
-        if inst is None:
-            return self
-        val = self.wrapped(inst)
-        setattr(inst, self.wrapped.__name__, val)
-        return val
-
-
-# request method in xmlrpc.client.Transport is broken
-#
-# The issue [1] was fixed in upstream already but the fix was not
-# released in Fedora and RHEL yet. Replace the broken method with
-# fixed version.
-# TODO: Remove this workaround once the fix is released on all
-# platforms we care about.
-#
-# [1] https://bugs.python.org/issue26402
-def request(self, host, handler, request_body, verbose=False):
-    #retry request once if cached connection has gone cold
-    for i in (0, 1):
-        try:
-            return self.single_request(host, handler, request_body, verbose)
-        except http.client.RemoteDisconnected:
-            if i:
-                raise
-        except OSError as e:
-            if i or e.errno not in (errno.ECONNRESET, errno.ECONNABORTED,
-                                    errno.EPIPE):
-                raise
-
-xmlrpc.client.Transport.request = request
-
-
 class Patch(object):
     """Represents a sanitized patch
 
@@ -210,7 +169,7 @@ class Patch(object):
     Attributes:
     * subject - name of the patch
     * lines - iterator of lines with the patch
-    * ticket_numbers - numbers of referenced Trac tickets
+    * ticket_numbers - numbers of referenced tickets
     """
     def __init__(self, config, filename):
         if filename:
@@ -265,20 +224,41 @@ class Patch(object):
 
 
 class Ticket(object):
-    """Trac ticket with lazily fetched information"""
-    def __init__(self, trac, number):
-        self.trac = trac
+    """Pagure ticket with lazily fetched information"""
+    def __init__(self, pagure, number):
+        self.pagure = pagure
         self.number = number
+        self._data = None
 
-    @reify
-    def data(self):
-        print('Retrieving ticket %s' % self.number)
-        data = TracTicketData(*self.trac.ticket.get(self.number))
-        return data
+    def get_custom_data(self, name, default=None):
+        for field in self.data.get('custom_fields', ()):
+            if field['name'] == name:
+                return field['value']
+        return default
 
     @property
-    def attributes(self):
-        return self.data.attributes
+    def data(self):
+        if self._data is not None:
+            return self._data
+        print('Retrieving ticket %s' % self.number)
+        self._data = self.pagure.issue_info(self.number)
+        return self._data
+
+    @property
+    def reviewer(self):
+        return self.get_custom_data('reviewer')
+
+    @property
+    def rhbz(self):
+        return self.get_custom_data('rhbz')
+
+    @property
+    def milestone(self):
+        return self.data['milestone']
+
+    @property
+    def summary(self):
+        return self.data['content']
 
 
 class Context(object):
@@ -295,12 +275,13 @@ class Context(object):
             pprint.pprint(self.options)
             print('Config:')
             pprint.pprint(self.config)
-        if self.options['--no-trac']:
-            self.trac = None
+        if self.options['--no-pagure']:
+            self.pagure = None
         else:
-            url = ('{c[trac-protocol]}://{c[trac-host]}/{c[trac-path]}'
-                   '/xmlrpc').format(c=self.config)
-            self.trac = xmlrpc.client.ServerProxy(url)
+            self.pagure = Pagure(
+                pagure_token=self.config['pagure-token'],
+                pagure_repository=self.config['pagure-repository']
+            )
 
         self.color_arg = self.options['--color']
         if self.color_arg == 'auto':
@@ -317,12 +298,6 @@ class Context(object):
         date_result = self.runprocess(['date', '-Iseconds'],
                                       env={'GIT_COMMIT_DATE': ''})
         self.isodate_now = date_result.stdout.strip()
-
-    def trac_login(self):
-        url = ('{c[trac-protocol]}://{c[trac-username]}:{c[trac-password]}'
-               '@{c[trac-host]}/{c[trac-path]}'
-               '/login/xmlrpc').format(c=self.config)
-        self.trac = xmlrpc.client.ServerProxy(url)
 
     commands = {}
     @classmethod
@@ -430,11 +405,11 @@ def get_rewiewers(ctx, tickets):
     if ctx.options['--no-reviewer']:
         return []
     reviewers = ctx.options['--reviewer']
-    if ctx.trac and not reviewers:
+    if ctx.pagure and not reviewers:
         reviewers = set()
         for ticket in tickets:
-            if ticket.attributes.get('reviewer'):
-                reviewers.add(ticket.attributes['reviewer'])
+            if ticket.reviewer:
+                reviewers.add(ticket.reviewer)
         if len(reviewers) > 1:
             print('Reviewers found: %s' % ', '.join(reviewers))
             ctx.die('Too many reviewers found in ticket(s), '
@@ -496,15 +471,15 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     branches = sha1s.keys()
 
     ctx.push_info = {}
-    trac_log = []
+    pagure_log = []
     bugzilla_log = ['Fixed upstream']
     for branch in branches:
-        trac_log.append('%s:' % branch)
+        pagure_log.append('%s:' % branch)
         bugzilla_log.append('%s:' % branch)
         log_result = ctx.runprocess(
             ['git', 'log', '--graph', '--oneline', '--abbrev=99',
              '--color=never', '%s/%s..%s' % (remote, branch, sha1s[branch])])
-        trac_log.extend(
+        pagure_log.extend(
             line.rstrip()
             for line in reversed(log_result.stdout.splitlines()))
 
@@ -519,7 +494,7 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     bugzilla_re = re.compile('(%s\d+)' %
                                 re.escape(ctx.config['bugzilla-bug-url']))
     for ticket in tickets:
-        for match in bugzilla_re.finditer(ticket.attributes['rhbz']):
+        for match in bugzilla_re.finditer(ticket.rhbz):
             bugzilla_urls.append(match.group(0))
 
     for branch in branches:
@@ -546,8 +521,8 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     for branch in branches:
         print('%s: %s' % (branch, sha1s[branch]))
 
-    print(ctx.term.cyan('=== Trac comment ==='))
-    print('\n'.join(trac_log))
+    print(ctx.term.cyan('=== Ticket comment ==='))
+    print('\n'.join(pagure_log))
 
     print(ctx.term.cyan('=== Bugzilla comment ==='))
     bugzilla_msg = '\n'.join(bugzilla_log)
@@ -577,8 +552,8 @@ def push_command(ctx):
     ticket_numbers = set()
     for patch in patches:
         ticket_numbers.update(patch.ticket_numbers)
-    if ctx.trac:
-        tickets = [Ticket(ctx.trac, n) for n in ticket_numbers]
+    if ctx.pagure:
+        tickets = [Ticket(ctx.pagure, n) for n in ticket_numbers]
     else:
         tickets = []
 
@@ -594,19 +569,19 @@ def push_command(ctx):
     branches = ctx.options['--branch']
     if not branches:
         if not tickets:
-            if ctx.trac:
+            if ctx.pagure:
                 ctx.die('No branches specified and no tickets found')
             else:
-                ctx.die('No branches specified and trac disabled')
+                ctx.die('No branches specified and Pagure disabled')
         if ctx.verbosity:
             print('Divining branches from tickets: %s' %
                     ', '.join(str(t.number) for t in tickets))
-        milestones = set(t.attributes['milestone'] for t in tickets)
+        milestones = set(t.milestone for t in tickets)
         if not milestones:
             ctx.die('No milestones found in tickets')
         elif len(milestones) > 1:
             ctx.die('Tickets belong to disparate milestones; '
-                        'fix them in Trac or specify branches explicitly')
+                        'fix them in Pagure or specify branches explicitly')
         [milestone] = milestones
         for template, templ_branches in MILESTONES.items():
             if re.match(template, milestone):
@@ -977,23 +952,20 @@ def start_review_command(ctx):
     ticket_numbers = sorted(ticket_numbers)
     if ctx.verbosity:
         print('Tickets selected: %s' % ticket_numbers)
-    ctx.trac_login()
-    tickets = [Ticket(ctx.trac, int(n)) for n in ticket_numbers]
+    tickets = [Ticket(ctx.pagure, int(n)) for n in ticket_numbers]
     if not tickets:
         ctx.die('No tickets selected')
-    if not ctx.trac:
-        ctx.die('Cannot work with --no-trac')
-    [ticket.attributes for ticket in tickets]
+    if not ctx.pagure:
+        ctx.die('Cannot work with --no-pagure')
 
     existing_reviewers = []
     for ticket in tickets:
         print(ctx.term.blue('Ticket #%s' % ticket.number))
-        print('- summary:', ticket.attributes['summary'])
-        reviewer = ticket.attributes.get('reviewer')
+        print('- summary:', ticket.summary)
+        reviewer = ticket.reviewer
         print('- reviewer:', ctx.term.yellow(str(reviewer or '')) or 'none')
         if reviewer:
             existing_reviewers.append(reviewer)
-        print('- cc:', ticket.attributes['cc'])
     if existing_reviewers:
         if ctx.options['--force']:
             print(ctx.term.yellow('Existing reviewer(s) found'))
@@ -1013,19 +985,7 @@ def start_review_command(ctx):
 
     for ticket in tickets:
         print('Starting review: #%s' % ticket.number)
-        old_cc = ticket.attributes.get('cc')
-        if old_cc:
-            new_cc = '%s, %s' % (old_cc, ctx.config['trac-username'])
-        else:
-            new_cc = ctx.config['trac-username']
-        ctx.trac.ticket.update(ticket.number,
-                               'Starting review',
-                               {
-                                    'reviewer': ctx.config['trac-username'],
-                                    'cc': new_cc,
-                               },
-                               True)
-        print(ctx.term.green('OK'))
+        print(ctx.term.red('Does not work temporary, update tickets manually'))
 
     if ctx.options['--am']:
         print('Applying patches to worktree...')
