@@ -474,7 +474,7 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     pagure_log = []
     bugzilla_log = ['Fixed upstream']
     for branch in branches:
-        pagure_log.append('%s:' % branch)
+        pagure_log.append('%s:\n' % branch)  # we need extra newline for pagure
         bugzilla_log.append('%s:' % branch)
         log_result = ctx.runprocess(
             ['git', 'log', '--graph', '--oneline', '--abbrev=99',
