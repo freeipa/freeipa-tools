@@ -522,7 +522,9 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
         print('%s: %s' % (branch, sha1s[branch]))
 
     print(ctx.term.cyan('=== Ticket comment ==='))
-    print('\n'.join(pagure_log))
+    pagure_msg = '\n'.join(pagure_log)
+    print(pagure_msg)
+    ctx.push_info['pagure_comment'] = pagure_msg
 
     print(ctx.term.cyan('=== Bugzilla comment ==='))
     bugzilla_msg = '\n'.join(bugzilla_log)
@@ -780,7 +782,7 @@ def pr_push_command(ctx):
         pr_is.add_labels('pushed')
         pr_is.refresh(conditional=True)
 
-        pr_is.create_comment(ctx.push_info['bugzilla_comment'])
+        pr_is.create_comment(ctx.push_info['pagure_comment'])
         pr_is.refresh(conditional=True)
 
         print("Closing pull request {}".format(pr.number))
