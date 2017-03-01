@@ -5,12 +5,12 @@
 Usage:
   ipatool --help
   ipatool [options] [-v...] sample-config
-  ipatool [options] [-v...] push [--branch=BRANCH...] [--reviewer=NAME...] [--] [PATCH ...]
+  ipatool [options] [-v...] push [--close-ticket] [--no-bz-autopost] [--branch=BRANCH...] [--reviewer=NAME...] [--] [PATCH ...]
   ipatool [options] [-v...] start-review [-f] [--am] [--ticket=NUMBER...] [--] [PATCH ...]
   ipatool [options] [-v...] am [--] [PATCH ...]
   ipatool [options] [-v...] pr-ack PR_ID [--comment=TEXT]
   ipatool [options] [-v...] pr-list [--state=(open|closed|all)]... [--label=NAME...]
-  ipatool [options] [-v...] pr-push PR_ID [--branch=BRANCH...] [--reviewer=NAME...]
+  ipatool [options] [-v...] pr-push PR_ID [--close-ticket] [--no-bz-autopost] [--branch=BRANCH...] [--reviewer=NAME...]
   ipatool [options] [-v...] pr-reject PR_ID --comment=TEXT
 
 Common Options:
@@ -95,6 +95,14 @@ trac-host: fedorahosted.org
 trac-path: freeipa
 trac-username: pviktori
 trac-password: "!@#$%^&*"
+trac-update-ticket: False
+
+# Bugzilla XML login details
+bz-url: bugzilla.redhat.com
+bz-username: pviktori@example.org
+bz-password: "*&^%#$@!"
+bz-update-bug: False
+bz-autopost: False
 
 # Mapping of Trac logins to Git-style author lines
 trac-username-map:
@@ -123,6 +131,7 @@ import pprint
 
 import yaml       # yum install python3-PyYAML
 import blessings  # yum install python3-blessings
+import bugzilla   # yum install python3-bugzilla
 import github3    # yum install python3-github3py
 import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
@@ -264,6 +273,45 @@ class Patch(object):
         yield from self.patch_lines
 
 
+class Bug(object):
+    """Bugzilla bug"""
+    def __init__(self, bz, bz_id):
+        self.bz = bz
+        self.id = bz_id
+
+    def iter_tickets(self, trac):
+        bug = self.bz.getbug(self.id)
+        for match in re.finditer(r'IPA (\d+)', bug.devel_whiteboard):
+            yield Ticket(trac, match.group(1))
+
+    def add_comment(self, msg):
+        bug = self.bz.getbug(self.id)
+        update = self.bz.build_update(comment=msg)
+        self.bz.update_bugs([bug.id], update)
+        bug.refresh()
+
+    def move_to_post(self, trac):
+        can_move = True
+        bug = self.bz.getbug(self.id)
+
+        # Check if all required Bugs are solved
+        bz_solved = ('post', 'modified', 'on_qa', 'release_pending', 'closed')
+        for bz_id in bug.depends_on:
+            if self.bz.getbug(bz_id).status.lower() not in bz_solved:
+                can_move = False
+                break
+
+        # Check if all related upstream tickets are closed
+        for ticket in self.iter_tickets(trac):
+            if ticket.attributes['status'].lower() != 'closed':
+                can_move = False
+                break
+
+        if can_move:
+            update = self.bz.build_update(status='post')
+            self.bz.update_bugs([self.id], update)
+
+
 class Ticket(object):
     """Trac ticket with lazily fetched information"""
     def __init__(self, trac, number):
@@ -279,6 +327,13 @@ class Ticket(object):
     @property
     def attributes(self):
         return self.data.attributes
+
+    def add_comment(self, msg):
+        self.trac.ticket.update(self.number, msg)
+
+    def close(self, resolution='fixed'):
+        self.trac.ticket.update(self.number, '', {'status': 'closed',
+                                'resolution': resolution})
 
 
 class Context(object):
@@ -323,6 +378,37 @@ class Context(object):
                '@{c[trac-host]}/{c[trac-path]}'
                '/login/xmlrpc').format(c=self.config)
         self.trac = xmlrpc.client.ServerProxy(url)
+
+    def bugzilla_login(self):
+        url = self.config['bz-url']
+        user = self.config.get('bz-username', None)
+        password = self.config.get('bz-password', None)
+
+        self.bz = bugzilla.Bugzilla(url)
+        try:
+            self.bz.readconfig()
+            self.bz.login()
+        except Exception:
+            self.bz.interactive_login(user, password)
+
+    def trac_add_comment(self, ticket_num, msg):
+        self.trac_login()
+        Ticket(self.trac, ticket_num).add_comment(msg)
+
+    def trac_close_ticket(self, ticket_num):
+        """Change state of ticket to 'closed' with resolution 'fixed'"""
+        self.trac_login()
+        Ticket(self.trac, ticket_num).close(resolution='fixed')
+
+    def bugzilla_add_comment(self, bz_id, msg):
+        self.bugzilla_login()
+        Bug(self.bz, bz_id).add_comment(msg)
+
+    def bugzilla_move_to_post(self, bz_id):
+        self.bugzilla_login()
+        self.trac_login()
+
+        Bug(self.bz, bz_id).move_to_post(self.trac)
 
     commands = {}
     @classmethod
@@ -511,16 +597,22 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
         log_result = ctx.runprocess(
             ['git', 'log', '--pretty=format:%H',
              '%s/%s..%s' % (remote, branch, sha1s[branch])])
-        bugzilla_log.extend(
-            ctx.config['commit-url'] + line.strip()
-            for line in reversed(log_result.stdout.splitlines()))
+        commits_urls = [ctx.config['commit-url'] + line.strip()
+            for line in reversed(log_result.stdout.splitlines())]
+        bugzilla_log.extend(commits_urls)
+        ctx.push_info['commits_urls'] = commits_urls
 
     bugzilla_urls = []
-    bugzilla_re = re.compile('(%s\d+)' %
+    bugzilla_ids = []
+    bugzilla_re = re.compile('(%s(\d+))' %
                                 re.escape(ctx.config['bugzilla-bug-url']))
     for ticket in tickets:
         for match in bugzilla_re.finditer(ticket.attributes['rhbz']):
             bugzilla_urls.append(match.group(0))
+            bugzilla_ids.append(match.group(2))
+
+    ctx.push_info['ticket_numbers'] = ticket_numbers
+    ctx.push_info['bugzilla_ids'] = bugzilla_ids
 
     for branch in branches:
         print(ctx.term.cyan('=== Diffstat for %s ===' % branch))
@@ -547,7 +639,9 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
         print('%s: %s' % (branch, sha1s[branch]))
 
     print(ctx.term.cyan('=== Trac comment ==='))
-    print('\n'.join(trac_log))
+    trac_msg = '\n'.join(trac_log)
+    print(trac_msg)
+    ctx.push_info['trac_comment'] = trac_msg
 
     print(ctx.term.cyan('=== Bugzilla comment ==='))
     bugzilla_msg = '\n'.join(bugzilla_log)
@@ -665,6 +759,38 @@ def push_command(ctx):
 
             if response.lower() == 'y':  # was pushed
                 ctx.push_info['pushed'] = True
+                if ctx.config.get('trac-update-ticket', False):
+                    ticket_numbers = sorted(ctx.push_info['ticket_numbers'])
+                    if ticket_numbers:
+                        print("Updating Tickets: {}".format(
+                            ' '.join([str(num) for num in ticket_numbers])))
+                        ticket_close = ctx.options.get('--close-ticket', False)
+                        for number in ticket_numbers:
+                            ctx.trac_add_comment(
+                                number,
+                                ctx.push_info['trac_comment'],
+                            )
+                            if ticket_close:
+                                ctx.trac_close_ticket(number)
+
+                if ctx.config.get('bz-update-bug', False):
+                    bz_ids = ctx.push_info['bugzilla_ids']
+                    if bz_ids:
+                        print("Updating Bugs: {}".format(
+                            ' '.join([str(bz_id) for bz_id in bz_ids])))
+                        try:
+                            bz_autopost = not ctx.options['--no-bz-autopost']
+                        except KeyError:
+                            bz_autopost = ctx.config.get('bz-autopost', True)
+
+                        for bz_id in bz_ids:
+                            ctx.bugzilla_add_comment(
+                                bz_id,
+                                ctx.push_info['bugzilla_comment'],
+                            )
+
+                            if bz_autopost:
+                                ctx.bugzilla_move_to_post(bz_id)
             else:
                 ctx.push_info['pushed'] = False
 
