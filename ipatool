@@ -494,8 +494,9 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     bugzilla_re = re.compile('(%s\d+)' %
                                 re.escape(ctx.config['bugzilla-bug-url']))
     for ticket in tickets:
-        for match in bugzilla_re.finditer(ticket.rhbz):
-            bugzilla_urls.append(match.group(0))
+        if ticket.rhbz:
+            for match in bugzilla_re.finditer(ticket.rhbz):
+                bugzilla_urls.append(match.group(0))
 
     for branch in branches:
         print(ctx.term.cyan('=== Diffstat for %s ===' % branch))
