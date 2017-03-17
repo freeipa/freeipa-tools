@@ -96,6 +96,10 @@ pagure-token: "0123456789abcdef0123456789abcdef01234567"
 # dynamically detect username
 username: username
 
+# Pagure issues operations
+# update-issue options: yes/no/ask
+update-issue: ask
+
 # Mapping of logins to Git-style author lines
 trac-username-map:
     abbra: Alexander Bokovoy <abokovoy@redhat.com>
@@ -257,6 +261,10 @@ class Ticket(object):
     @property
     def summary(self):
         return self.data['content']
+
+    @property
+    def title(self):
+        return self.data['title']
 
 
 class Context(object):
@@ -542,6 +550,37 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
 
     print(ctx.term.cyan('=== Ready to push ==='))
 
+
+def _update_issue(ctx, ticket):
+    update_issue = ctx.config.get('update-issue', 'ask')
+    if update_issue == 'no':
+        do_comment = False
+    elif update_issue == 'yes':
+        do_comment = True
+    else:
+        if update_issue != 'ask':
+            print(ctx.term.red(
+                'Invalid value for "update-issue" in config file'))
+        response = input(
+            'Update issue "#{}: {}" with commit info? [y/n] '.format(
+                ticket.number,
+                ticket.title))
+        if response.lower() == 'y':
+            do_comment = True
+        else:
+            do_comment = False
+
+    if do_comment:
+        try:
+            ctx.pagure.comment_issue(ticket.number,
+                ctx.push_info['pagure_comment'])
+        except Exception as e:
+            print(ctx.term.red('Comment failed: {}'.format(e)))
+            print(ctx.term.yellow('Please update issue manually'))
+        else:
+            print(ctx.term.green('Comment added'))
+
+
 @Context.command('push')
 def push_command(ctx):
     patches = list(ctx.get_patches())
@@ -651,6 +690,11 @@ def push_command(ctx):
         ctx.runprocess(['git', 'reset', '--hard'], check_returncode=None)
         ctx.runprocess(['git', 'checkout', old_branch], check_returncode=None)
         ctx.runprocess(['git', 'clean', '-fxd'], check_returncode=None)
+
+    if ctx.push_info['pushed']:
+        for ticket in tickets:
+            _update_issue(ctx, ticket)
+
 
 
 def gh_repo(token, repo_full_name):
