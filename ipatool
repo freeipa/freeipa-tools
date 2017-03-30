@@ -312,7 +312,7 @@ class Context(object):
             if self.options[name]:
                 return func(self)
         else:
-            print('Regstered commands: %s' % ', '.join(self.commands))
+            print('Registered commands: %s' % ', '.join(self.commands))
             self.die('Internal error: No command found')
 
     def die(self, message):
