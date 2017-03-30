@@ -482,6 +482,7 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
         pagure_log.extend(
             line.rstrip()
             for line in reversed(log_result.stdout.splitlines()))
+        pagure_log.append('\n')  # add newline to fix github/pagure formatting
 
         log_result = ctx.runprocess(
             ['git', 'log', '--pretty=format:%H',
