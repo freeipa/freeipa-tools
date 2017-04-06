@@ -130,10 +130,6 @@ from libpagure import Pagure  # yum install python3-libpagure
 
 MILESTONES = {
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
-    r"^FreeIPA 4\.0.*": ['master', 'ipa-4-1', 'ipa-4-0'],
-    r"^FreeIPA 4\.1.*": ['master', 'ipa-4-1'],
-    r"^FreeIPA 4\.2.*": ['master', 'ipa-4-2'],
-    r"^FreeIPA 4\.3.*": ['master', 'ipa-4-3', 'ipa-4-4'],
     r"^FreeIPA 4\.4.*": ['master', 'ipa-4-5', 'ipa-4-4'],
     r"^FreeIPA 4\.5.*": ['master', 'ipa-4-5'],
     r"^FreeIPA 4\.6.*": ['master'],
