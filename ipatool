@@ -99,6 +99,8 @@ username: username
 # Pagure issues operations
 # update-issue options: yes/no/ask
 update-issue: ask
+# close-issue options: no/ask
+close-issue: ask
 
 # Mapping of logins to Git-style author lines
 trac-username-map:
@@ -580,6 +582,36 @@ def _update_issue(ctx, ticket):
         else:
             print(ctx.term.green('Comment added'))
 
+def _close_issue(ctx, ticket):
+    close_ticket = ctx.config.get('close-issue', 'ask')
+    if close_ticket == 'no':
+        do_close = False
+    else:
+        if close_ticket != 'ask':
+            print(ctx.term.red(
+                'Invalid value for "close-issue" in config file'))
+        response = input(
+            'Close issue "#{}: {}"? [y/n] '.format(
+                ticket.number,
+                ticket.title))
+        if response.lower() == 'y':
+            do_close = True
+        else:
+            do_close = False
+
+    if do_close:
+        try:
+            ctx.pagure.change_issue_status(
+                ticket.number,
+                new_status='Closed',
+                close_status='fixed'
+            )
+        except Exception as e:
+            print(ctx.term.red('Failed to close the issue: {}'.format(e)))
+            print(ctx.term.yellow('Please close the issue manually'))
+        else:
+            print(ctx.term.green('Comment added'))
+
 
 @Context.command('push')
 def push_command(ctx):
@@ -694,6 +726,7 @@ def push_command(ctx):
     if ctx.push_info['pushed']:
         for ticket in tickets:
             _update_issue(ctx, ticket)
+            _close_issue(ctx, ticket)
 
 
 
