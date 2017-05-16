@@ -25,8 +25,12 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+from pyasn1.type import univ, char, namedtype, tag
+from pyasn1.codec.der import encoder as der_encoder
+from pyasn1.codec.native import decoder as native_decoder
 
 DOMAIN = 'example.com'
+REALM = DOMAIN.upper()
 SERVER1 = 'server1.example.com'
 SERVER2 = 'server2.example.com'
 CLIENT = 'client.example.com'
@@ -37,6 +41,58 @@ DAY = datetime.timedelta(days=1)
 YEAR = 365 * DAY
 
 CertInfo = collections.namedtuple('CertInfo', 'nick key cert counter')
+
+
+# RFC 4120
+class PrincipalName(univ.Sequence):
+    componentType = namedtype.NamedTypes(
+        namedtype.NamedType(
+            'name-type',
+            univ.Integer().subtype(
+                explicitTag=tag.Tag(
+                    tag.tagClassContext,
+                    tag.tagFormatSimple,
+                    0,
+                ),
+            ),
+        ),
+        namedtype.NamedType(
+            'name-string',
+            univ.SequenceOf(char.GeneralString()).subtype(
+                explicitTag=tag.Tag(
+                    tag.tagClassContext,
+                    tag.tagFormatSimple,
+                    1,
+                ),
+            ),
+        ),
+    )
+
+
+# RFC 4556
+class KRB5PrincipalName(univ.Sequence):
+    componentType = namedtype.NamedTypes(
+        namedtype.NamedType(
+            'realm',
+            char.GeneralString().subtype(
+                explicitTag=tag.Tag(
+                    tag.tagClassContext,
+                    tag.tagFormatSimple,
+                    0,
+                ),
+            ),
+        ),
+        namedtype.NamedType(
+            'principalName',
+            PrincipalName().subtype(
+                explicitTag=tag.Tag(
+                    tag.tagClassContext,
+                    tag.tagFormatSimple,
+                    1,
+                ),
+            ),
+        ),
+    )
 
 
 def profile_ca(builder, ca_nick):
@@ -106,6 +162,54 @@ def profile_server(builder, ca_nick,
             x509.SubjectAlternativeName([x509.DNSName(dns_name)]),
             critical=False,
         )
+
+    return builder
+
+
+def profile_kdc(builder, ca_nick,
+                warp=datetime.timedelta(days=0), dns_name=None):
+    now = datetime.datetime.utcnow() + warp
+
+    builder = builder.not_valid_before(now)
+    builder = builder.not_valid_after(now + YEAR)
+
+    crl_uri = 'file://{}.crl'.format(os.path.join(DIR, ca_nick))
+
+    builder = builder.add_extension(
+        x509.ExtendedKeyUsage([x509.ObjectIdentifier('1.3.6.1.5.2.3.5')]),
+        critical=False,
+    )
+
+    name = {
+        'realm': REALM,
+        'principalName': {
+            'name-type': 2,
+            'name-string': ['krbtgt', REALM],
+        },
+    }
+    name = native_decoder.decode(name, asn1Spec=KRB5PrincipalName())
+    name = der_encoder.encode(name)
+
+    names = [x509.OtherName(x509.ObjectIdentifier('1.3.6.1.5.2.2'), name)]
+    if dns_name is not None:
+        names += [x509.DNSName(dns_name)]
+
+    builder = builder.add_extension(
+        x509.SubjectAlternativeName(names),
+        critical=False,
+    )
+
+    builder = builder.add_extension(
+        x509.CRLDistributionPoints([
+                x509.DistributionPoint(
+                    full_name=[x509.UniformResourceIdentifier(crl_uri)],
+                    relative_name=None,
+                    crl_issuer=None,
+                    reasons=None,
+                ),
+        ]),
+        critical=False,
+    )
 
     return builder
 
@@ -218,18 +322,34 @@ def gen_server_certs(nick_base, hostname, org, ca=None):
     revoke_cert(ca, revoked.cert.serial_number)
 
 
+def gen_kdc_certs(nick_base, hostname, org, ca=None):
+    gen_cert(profile_kdc, nick_base + '-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'KDC'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca)
+    gen_cert(profile_kdc, nick_base + '-badname-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'KDC'), x509.NameAttribute(NameOID.COMMON_NAME, 'not-' + hostname)]), ca)
+    gen_cert(profile_kdc, nick_base + '-altname-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'KDC'), x509.NameAttribute(NameOID.COMMON_NAME, 'alt-' + hostname)]), ca, dns_name=hostname)
+    gen_cert(profile_kdc, nick_base + '-expired-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Expired KDC'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca, warp=-2 * YEAR)
+    gen_cert(profile_kdc, nick_base + '-badusage-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Bad Usage KDC'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca)
+    revoked = gen_cert(profile_kdc, nick_base + '-revoked-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Revoked KDC'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca)
+    revoke_cert(ca, revoked.cert.serial_number)
+
+
 def gen_subtree(nick_base, org, ca=None):
     subca = gen_cert(profile_ca, nick_base, x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.COMMON_NAME, 'CA')]), ca)
     gen_cert(profile_server, 'wildcard', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.COMMON_NAME, '*.' + DOMAIN)]), subca)
     gen_server_certs('server', SERVER1, org, subca)
     gen_server_certs('replica', SERVER2, org, subca)
     gen_server_certs('client', CLIENT, org, subca)
+    gen_cert(profile_kdc, 'wildcard-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.COMMON_NAME, '*.' + DOMAIN)]), subca)
+    gen_kdc_certs('server', SERVER1, org, subca)
+    gen_kdc_certs('replica', SERVER2, org, subca)
+    gen_kdc_certs('client', CLIENT, org, subca)
     return subca
 
 
 def main():
     gen_cert(profile_server, 'server-selfsign', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'Self-signed'), x509.NameAttribute(NameOID.COMMON_NAME, SERVER1)]))
     gen_cert(profile_server, 'replica-selfsign', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'Self-signed'), x509.NameAttribute(NameOID.COMMON_NAME, SERVER2)]))
+    gen_cert(profile_kdc, 'server-selfsign-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'Self-signed'), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'KDC'), x509.NameAttribute(NameOID.COMMON_NAME, SERVER1)]))
+    gen_cert(profile_kdc, 'replica-selfsign-kdc', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'Self-signed'), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'KDC'), x509.NameAttribute(NameOID.COMMON_NAME, SERVER2)]))
     ca1 = gen_subtree('ca1', 'Example Organization')
     gen_subtree('subca', 'Subsidiary Example Organization', ca1)
     gen_subtree('ca2', 'Other Example Organization')
