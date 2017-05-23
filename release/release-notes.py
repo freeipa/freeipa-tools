@@ -17,8 +17,10 @@ WIKI_BLOB = """
 The FreeIPA team would like to announce FreeIPA %(version)s release!
 
 It can be downloaded from http://www.freeipa.org/page/Downloads. Builds for
-Fedora 24 will be available in the official
+Fedora '''FIXME''' VERSION '''END FIXME''' will be available in the official
+'''FIXME LINK'''
 [https://copr.fedorainfracloud.org/coprs/g/freeipa/freeipa-4-4/ COPR repository].
+'''END FIXME'''
 
 == Highlights in %(version)s ==
 
@@ -31,7 +33,8 @@ Fedora 24 will be available in the official
 
 === Bug fixes ===
 FreeIPA %(version)s is a stabilization release for the features delivered as a
-part of 4.4.0. There are more than %(num_bugs)s bug-fixes which details can be seen in
+part of '''FIXME''' 4.4.0 '''END FIXME'''.
+There are more than %(num_bugs)s bug-fixes which details can be seen in
 the list of resolved tickets below.
 
 == Upgrading ==
