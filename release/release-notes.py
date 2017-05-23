@@ -47,7 +47,6 @@ channel on Freenode.
 
 GIT_DIR = None; assert GIT_DIR, "Specify path to clean git repository here"
 PAGURE_REPO = "freeipa"
-PAGURE_TOKEN = None; assert PAGURE_TOKEN, "Specify pagure token here"
 
 
 class OperationError(Exception):
@@ -101,11 +100,22 @@ def get_custom_field(ticket, name, default=None):
 class App(object):
     def __init__(self, args):
         self.args = args
+        self.pagure_token = None
+
+        if args.token:
+            self.pagure_token = args.token
+        elif args.token_file:
+            with open(args.token_file, 'r') as f:
+                self.pagure_token = f.read().strip()
+        else:
+            RuntimeError(
+                "Please specify Pagure token"
+            )
 
     def run(self):
         pagure = Pagure(
             pagure_repository=PAGURE_REPO,
-            pagure_token=PAGURE_TOKEN
+            pagure_token=self.pagure_token
         )
         git = self._get_commits()
 
@@ -251,8 +261,19 @@ def parse_args():
                         nargs='*', help='Additional milestones')
     parser.add_argument('--links', action="store_true",
                         help='With links to tickets and commits')
+    parser.add_argument('--token', dest='token', action='store',
+                        help='Pagure token for accessing issues',
+                        metavar='TOKEN', default=None)
+    parser.add_argument('--token-file', dest='token_file', action='store',
+                        help='Path to file where pagure token is stored',
+                        metavar='PATH', default=None)
 
     args = parser.parse_args()
+
+    if not (args.token or args.token_file):
+        raise RuntimeError(
+            "Please specify --token or --token-file for pagure access")
+
     return args
 
 if __name__ == '__main__':
