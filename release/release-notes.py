@@ -54,8 +54,12 @@ class OperationError(Exception):
     foo = ''
 
 
-def query(pagure, status=None, tags=None, assignee=None, author=None):
-    issues = pagure.list_issues(status, tags, assignee, author)
+def query(
+        pagure, status=None, tags=None, assignee=None, author=None,
+        milestones=None
+):
+    issues = pagure.list_issues(
+        status, tags, assignee, author, milestones=milestones)
     return issues
 
 def normalize_val(val):
@@ -105,17 +109,22 @@ class App(object):
         )
         git = self._get_commits()
 
-        # pagure cannot list tickets by Milestone
-        all_closed = query(pagure, "Closed")
-        all_fixed = filter_by_close_status(all_closed, [u'fixed'])
+        # get all fixed tickets from the primary milestone
+        primary_closed = query(
+            pagure, "Closed", milestones=[self.args.milestone])
+        primary_fixed = filter_by_close_status(primary_closed, [u'fixed'])
 
-        primary_tickets = filter_by_milestones(all_fixed, self.args.milestone)
+        # get all fixed tickets from other milestones that can be possibly
+        # fixed in this release
         if self.args.milestones:
-            possibly_fixed = filter_by_milestones(all_fixed, self.args.milestones)
-            fixed_here_tickets = self._filter_tickets(possibly_fixed, git.commits)
-            fixed_here_tickets = primary_tickets + fixed_here_tickets
+            possibly_closed = query(
+                pagure, "Closed", milestones=self.args.milestones)
+            possibly_fixed = filter_by_close_status(
+                possibly_closed, [u'fixed'])
+            fixed_here_tickets = self._filter_tickets(
+                possibly_fixed, git.commits) + primary_fixed
         else:
-            fixed_here_tickets = primary_tickets
+            fixed_here_tickets = primary_fixed
 
         bugs = self._get_bugs(fixed_here_tickets)
         self._print_wiki(fixed_here_tickets, bugs, git)
