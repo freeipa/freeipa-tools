@@ -268,6 +268,14 @@ class Ticket(object):
     def title(self):
         return self.data['title']
 
+    @property
+    def status(self):
+        return self.data['status']
+
+    @property
+    def close_status(self):
+        return self.data['close_status']
+
 
 class Context(object):
     """Holds options, configuration, and helpers for a tool"""
@@ -601,11 +609,17 @@ def _close_issue(ctx, ticket):
 
     if do_close:
         try:
-            ctx.pagure.change_issue_status(
-                ticket.number,
-                new_status='Closed',
-                close_status='fixed'
-            )
+            # workaround https://pagure.io/libpagure/issue/22
+            try:
+                ctx.pagure.change_issue_status(
+                    ticket.number,
+                    new_status='Closed',
+                    close_status='fixed'
+                )
+            except AttributeError:
+                issue = ctx.pagure.issue_info(ticket.number)
+                if issue.status != 'Closed' or issue.close_status != 'fixed':
+                    raise
         except Exception as e:
             print(ctx.term.red('Failed to close the issue: {}'.format(e)))
             print(ctx.term.yellow('Please close the issue manually'))
