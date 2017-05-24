@@ -34,7 +34,7 @@ Fedora '''FIXME''' VERSION '''END FIXME''' will be available in the official
 === Bug fixes ===
 FreeIPA %(version)s is a stabilization release for the features delivered as a
 part of '''FIXME''' 4.4.0 '''END FIXME'''.
-There are more than %(num_bugs)s bug-fixes which details can be seen in
+There are more than %(num_bugs)s bug-fixes details of which can be seen in
 the list of resolved tickets below.
 
 == Upgrading ==
