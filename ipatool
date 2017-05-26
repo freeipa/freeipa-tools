@@ -618,7 +618,10 @@ def _close_issue(ctx, ticket):
                 )
             except AttributeError:
                 issue = ctx.pagure.issue_info(ticket.number)
-                if issue.status != 'Closed' or issue.close_status != 'fixed':
+                if (
+                    issue['status'] != 'Closed'
+                    or issue['close_status'] != 'fixed'
+                ):
                     raise
         except Exception as e:
             print(ctx.term.red('Failed to close the issue: {}'.format(e)))
