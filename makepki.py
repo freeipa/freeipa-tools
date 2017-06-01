@@ -137,7 +137,8 @@ def profile_ca(builder, ca_nick):
 
 
 def profile_server(builder, ca_nick,
-                   warp=datetime.timedelta(days=0), dns_name=None):
+                   warp=datetime.timedelta(days=0), dns_name=None,
+                   badusage=False):
     now = datetime.datetime.utcnow() + warp
 
     builder = builder.not_valid_before(now)
@@ -163,11 +164,28 @@ def profile_server(builder, ca_nick,
             critical=False,
         )
 
+    if badusage:
+        builder = builder.add_extension(
+            x509.KeyUsage(
+                digital_signature=False,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=True,
+                key_agreement=True,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False
+            ),
+            critical=False
+        )
+
     return builder
 
 
 def profile_kdc(builder, ca_nick,
-                warp=datetime.timedelta(days=0), dns_name=None):
+                warp=datetime.timedelta(days=0), dns_name=None,
+                badusage=False):
     now = datetime.datetime.utcnow() + warp
 
     builder = builder.not_valid_before(now)
@@ -210,6 +228,22 @@ def profile_kdc(builder, ca_nick,
         ]),
         critical=False,
     )
+
+    if badusage:
+        builder = builder.add_extension(
+            x509.KeyUsage(
+                digital_signature=False,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=True,
+                key_agreement=True,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False
+            ),
+            critical=False
+        )
 
     return builder
 
@@ -317,7 +351,7 @@ def gen_server_certs(nick_base, hostname, org, ca=None):
     gen_cert(profile_server, nick_base + '-badname', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.COMMON_NAME, 'not-' + hostname)]), ca)
     gen_cert(profile_server, nick_base + '-altname', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.COMMON_NAME, 'alt-' + hostname)]), ca, dns_name=hostname)
     gen_cert(profile_server, nick_base + '-expired', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Expired'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca, warp=-2 * YEAR)
-    gen_cert(profile_server, nick_base + '-badusage', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Bad Usage'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca)
+    gen_cert(profile_server, nick_base + '-badusage', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Bad Usage'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca, badusage=True)
     revoked = gen_cert(profile_server, nick_base + '-revoked', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Revoked'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca)
     revoke_cert(ca, revoked.cert.serial_number)
 
@@ -327,7 +361,7 @@ def gen_kdc_certs(nick_base, hostname, org, ca=None):
     gen_cert(profile_kdc, nick_base + '-kdc-badname', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'KDC'), x509.NameAttribute(NameOID.COMMON_NAME, 'not-' + hostname)]), ca)
     gen_cert(profile_kdc, nick_base + '-kdc-altname', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'KDC'), x509.NameAttribute(NameOID.COMMON_NAME, 'alt-' + hostname)]), ca, dns_name=hostname)
     gen_cert(profile_kdc, nick_base + '-kdc-expired', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Expired KDC'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca, warp=-2 * YEAR)
-    gen_cert(profile_kdc, nick_base + '-kdc-badusage', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Bad Usage KDC'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca)
+    gen_cert(profile_kdc, nick_base + '-kdc-badusage', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Bad Usage KDC'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca, badusage=True)
     revoked = gen_cert(profile_kdc, nick_base + '-kdc-revoked', x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, org), x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'Revoked KDC'), x509.NameAttribute(NameOID.COMMON_NAME, hostname)]), ca)
     revoke_cert(ca, revoked.cert.serial_number)
 
