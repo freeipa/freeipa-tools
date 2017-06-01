@@ -591,6 +591,10 @@ def _update_issue(ctx, ticket):
             print(ctx.term.green('Comment added'))
 
 def _close_issue(ctx, ticket):
+    if ticket.status == 'Closed':
+        # nothing to do
+        print("Issue already closed.")
+        return
     close_ticket = ctx.config.get('close-issue', 'ask')
     if close_ticket == 'no':
         do_close = False
