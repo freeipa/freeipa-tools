@@ -240,6 +240,12 @@ class Ticket(object):
                 return field['value']
         return default
 
+    def is_closed(self):
+        return self.status == 'Closed'
+
+    def is_fixed(self):
+        return self.is_closed() and self.close_status == 'fixed'
+
     @property
     def data(self):
         if self._data is not None:
@@ -591,7 +597,7 @@ def _update_issue(ctx, ticket):
             print(ctx.term.green('Comment added'))
 
 def _close_issue(ctx, ticket):
-    if ticket.status == 'Closed':
+    if ticket.is_closed():
         # nothing to do
         print("Issue already closed.")
         return
@@ -621,11 +627,8 @@ def _close_issue(ctx, ticket):
                     close_status='fixed'
                 )
             except AttributeError:
-                issue = ctx.pagure.issue_info(ticket.number)
-                if (
-                    issue['status'] != 'Closed'
-                    or issue['close_status'] != 'fixed'
-                ):
+                updated_ticket = Ticket(ctx.pagure, ticket.number)
+                if not updated_ticket.is_fixed():
                     raise
         except Exception as e:
             print(ctx.term.red('Failed to close the issue: {}'.format(e)))
