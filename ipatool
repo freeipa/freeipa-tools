@@ -631,7 +631,7 @@ def _close_issue(ctx, ticket):
             print(ctx.term.red('Failed to close the issue: {}'.format(e)))
             print(ctx.term.yellow('Please close the issue manually'))
         else:
-            print(ctx.term.green('Comment added'))
+            print(ctx.term.green('Issue closed'))
 
 
 @Context.command('push')
