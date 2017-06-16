@@ -1,0 +1,10 @@
+---
+- name: "check build system version"
+  fail:
+    msg: "build system <4.5 is not supported yet"
+  when: git_branch == "ipa-4-4"
+
+- name: "generate ipa.pot"
+  shell: make ipa.pot-update
+  args:
+    chdir: "{{ git_repo_local }}/po"

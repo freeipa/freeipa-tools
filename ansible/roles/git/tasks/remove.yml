@@ -1,0 +1,5 @@
+---
+- name: "remove git repo"
+  file:
+    path: "{{ git_repo_local }}"
+    state: absent

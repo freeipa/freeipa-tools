@@ -1,0 +1,16 @@
+---
+- name: "update contributors"
+  shell: "python {{ freeipa_tools }}/update_contributors.py"
+  args:
+    chdir: "{{ git_repo_local }}"
+
+- name: "add Contributors.txt"
+  shell: git add Contributors.txt
+  args:
+    chdir: "{{ git_repo_local }}"
+
+- name: "git commit"
+  shell: git commit -s -m "Update contributors"
+  args:
+    chdir: "{{ git_repo_local }}"
+  ignore_errors: true

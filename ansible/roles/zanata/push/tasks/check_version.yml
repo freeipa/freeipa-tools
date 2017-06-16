@@ -1,0 +1,7 @@
+---
+- name: "update project-version in zanata"
+  lineinfile:
+    path: "{{ git_repo_local }}/zanata.xml"
+    regexp: '^(\s*)<project-version>.*</project-version>'
+    line: '\g<1><project-version>{{ git_branch }}</project-version>'
+    backrefs: true

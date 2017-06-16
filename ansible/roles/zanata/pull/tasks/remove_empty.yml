@@ -1,0 +1,5 @@
+---
+- name: "remove emptry translation from *.po"
+  shell: make strip-po
+  args:
+    chdir: "{{ git_repo_local }}/po"

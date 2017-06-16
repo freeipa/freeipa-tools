@@ -1,0 +1,5 @@
+---
+freeipa_tools: /git/freeipa-tools
+git_repo_local: ~/git/freeipa-release
+git_repo_https: https://pagure.io/freeipa.git
+git_repo_ssh: ssh://git@pagure.io/freeipa.git

@@ -1,0 +1,7 @@
+---
+- name: "push translation to zanata"
+  shell: zanata-cli -B push
+  args:
+    chdir: "{{ git_repo_local }}"
+  tags:
+    - push

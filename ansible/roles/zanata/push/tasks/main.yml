@@ -1,0 +1,4 @@
+---
+- include: check_version.yml
+- include: update_ipa_pot.yml
+- include: push.yml

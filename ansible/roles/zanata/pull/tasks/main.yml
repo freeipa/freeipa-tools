@@ -1,0 +1,6 @@
+---
+- include: pull.yml
+- include: new_language.yml
+- include: remove_empty.yml
+- include: commit.yml
+- include: verify_build.yml
