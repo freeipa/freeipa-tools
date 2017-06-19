@@ -450,6 +450,30 @@ class BindDyndbLDAPGithubConsumer(GithubConsumer):
     project = 'bind-dyndb-ldap'
     config_key = 'binddyndbldapgithubconsumer'
 
+    def pr_labeled(self, gh_msg):
+        pass  # disabled notification
+
+    def pr_edited(self, gh_msg):
+        pass  # disabled notification
+
+    def pr_review(self, msg):
+        pass  # disabled notification
+
+    def pr_unlabeled(self, gh_msg):
+        pass  # disabled notification
+
+    def pr_synchronize(self, gh_msg):
+        pass  # disabled notification
+
+    def issue_comment(self, gh_msg):
+        pass  # disabled notification
+
+    def issue_labeled(self, gh_msg):
+        pass  # disabled notification
+
+    def status(self, msg):
+        pass  # disabled notification
+
 
 class SSSDGithubConsumer(GithubConsumer):
     repo_name = 'SSSD/sssd'
