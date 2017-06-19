@@ -1,0 +1,8 @@
+---
+- name: patch with upstream spec changes since previous version
+  shell: git diff {{ prev_version_tag }} freeipa.spec.in > {{ artifacts_dest }}/spec.patch
+  args:
+    chdir: "{{ git_repo_local }}"
+
+- name: modify patch for fedora
+  shell: sed -i "s/freeipa.spec.in/freeipa.spec/g" {{ artifacts_dest}}/spec.patch

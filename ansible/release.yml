@@ -1,7 +1,35 @@
 ---
 - hosts: release_machine
   roles:
-    - git
+    - role: git/clone
+      git_repo_remove: true
+    - role: git/checkout
+      git_checkout_ref: "{{ git_branch }}"
     - zanata/push
     - zanata/pull
+    - git/rebase
     - contributors
+    - role: version/create_variables
+      tags: always
+    - version/set_version
+    - role: version/set_git_snapshot
+      version_git_snapshot: "no"
+    - version/commit
+    - git/tag
+    - role: version/set_git_snapshot
+      version_git_snapshot: "yes"
+    - version/commit
+    - git/push
+    - role: git/clone
+      git_repo_remove: true
+    - role: git/checkout
+      git_checkout_ref: "{{ version_tag }}"
+    - git/configure
+    - artifacts/prepare
+    - tarball
+    - fedora/spec_patch
+    - pypi/make_wheels
+    - role: pypi/upload
+      tags: pypi_release
+    - role: release_notes
+      tags: pagure

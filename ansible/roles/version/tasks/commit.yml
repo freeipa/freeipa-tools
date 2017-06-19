@@ -1,0 +1,26 @@
+---
+- name: "add version file"
+  shell: git add VERSION.m4
+  args:
+    chdir: "{{ git_repo_local }}"
+  tags:
+    - set_git_snapshot
+    - set_version
+
+- name: "git commit"
+  shell: 'git commit -a -s -m "Become IPA {{ version_major }}.{{ version_minor }}.{{version_release }}"'
+  args:
+    chdir: "{{ git_repo_local }}"
+  when: version_git_snapshot == 'no'
+  tags:
+    - set_version
+    - set_git_snapshot
+
+- name: "git commit"
+  shell: 'git commit -a -s -m "{{ version_major }}.{{ version_minor}} set back to git snapshot"'
+  args:
+    chdir: "{{ git_repo_local }}"
+  when: version_git_snapshot == 'yes'
+  tags:
+    - set_version
+    - set_git_snapshot

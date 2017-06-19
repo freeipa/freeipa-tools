@@ -1,0 +1,6 @@
+---
+- name: "create signed tag"
+  shell: 'git tag -s -m "tagging IPAv{{ version_major }} {{ version }}" {{ version_tag }}'
+  args:
+    chdir: "{{ git_repo_local}}"
+  tags: git_tag

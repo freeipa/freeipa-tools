@@ -1,0 +1,2 @@
+---
+- include: fetch_rebase.yml

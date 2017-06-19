@@ -1,0 +1,5 @@
+---
+- include: variables.yml
+- include: set_version.yml
+- include: set_git_snapshot.yml
+- include: commit.yml

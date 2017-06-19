@@ -1,0 +1,6 @@
+---
+- name: checkout from git
+  shell: git checkout {{ git_checkout_ref }}
+  args:
+    chdir: "{{ git_repo_local }}"
+  tags: git_checkout

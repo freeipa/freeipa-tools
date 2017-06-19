@@ -1,0 +1,5 @@
+---
+- include: variables.yml
+  tags: always
+- include: directory.yml
+  tags: remove_artifacts_dir

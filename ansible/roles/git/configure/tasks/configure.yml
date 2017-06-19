@@ -3,8 +3,10 @@
   shell: autoreconf -fiv
   args:
     chdir: "{{ git_repo_local }}"
+  tags: git_configure
 
 - name: "run configure"
   shell: ./configure
   args:
     chdir: "{{ git_repo_local }}"
+  tags: git_configure

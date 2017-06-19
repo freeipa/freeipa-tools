@@ -1,0 +1,6 @@
+---
+- name: "set git snapshot"
+  lineinfile:
+    path: "{{ git_repo_local }}/VERSION.m4"
+    regexp: '^define\(IPA_VERSION_IS_GIT_SNAPSHOT,'
+    line: 'define(IPA_VERSION_IS_GIT_SNAPSHOT, {{ version_git_snapshot }})'

@@ -1,0 +1,8 @@
+---
+- name: "verify GPG tag"
+  shell: 'git verify-tag {{ version_tag }}'
+  args:
+    chdir: "{{ git_repo_local }}"
+  register: out
+- debug:
+    msg: "{{ out.stdout }}"

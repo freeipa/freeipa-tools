@@ -1,0 +1,8 @@
+---
+- name: make wheels
+  shell: make bdist_wheel
+  args:
+    chdir: "{{ git_repo_local }}"
+
+- name: collect wheel
+  shell: cp -r {{ git_repo_local }}/dist/wheels {{ artifacts_dest }}/

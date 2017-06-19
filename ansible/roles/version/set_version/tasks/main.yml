@@ -1,0 +1,2 @@
+---
+- include: set_version.yml

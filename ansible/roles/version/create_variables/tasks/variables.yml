@@ -1,0 +1,16 @@
+---
+- name: "create version variable"
+  set_fact:
+    version: "{{ version_major }}.{{ version_minor }}.{{ version_release }}"
+
+- name: "create version_tag variable"
+  set_fact:
+    version_tag: "release-{{ version_major }}-{{ version_minor }}-{{ version_release }}"
+
+- name: "create prev_version variable"
+  set_fact:
+    prev_version: "{{ prev_version_major }}.{{ prev_version_minor }}.{{ prev_version_release }}"
+
+- name: "create prev_version_tag variable"
+  set_fact:
+    prev_version_tag: "release-{{ prev_version_major }}-{{ prev_version_minor }}-{{ prev_version_release }}"

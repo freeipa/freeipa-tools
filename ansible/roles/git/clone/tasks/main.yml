@@ -1,4 +1,3 @@
 ---
 - include: remove.yml
 - include: clone.yml
-- include: configure.yml
