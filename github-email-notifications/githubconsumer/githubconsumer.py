@@ -462,6 +462,30 @@ class FreeIPAGithubConsumer(GithubConsumer):
     project = 'freeipa'
     config_key = 'freeipagithubconsumer'
 
+    def pr_labeled(self, gh_msg):
+        pass  # disabled notification
+
+    def pr_edited(self, gh_msg):
+        pass  # disabled notification
+
+    def pr_review(self, msg):
+        pass  # disabled notification
+
+    def pr_unlabeled(self, gh_msg):
+        pass  # disabled notification
+
+    def pr_synchronize(self, gh_msg):
+        pass  # disabled notification
+
+    def issue_comment(self, gh_msg):
+        pass  # disabled notification
+
+    def issue_labeled(self, gh_msg):
+        pass  # disabled notification
+
+    def status(self, msg):
+        pass  # disabled notification
+
 
 class TestGithubConsumer(GithubConsumer):
     repo_name = 'bastiak/ipa-devel-tools'
