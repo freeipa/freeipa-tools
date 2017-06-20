@@ -1,0 +1,2 @@
+---
+git_branch: "ipa-{{ version.major }}-{{ version.minor }}"

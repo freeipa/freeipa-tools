@@ -1,0 +1,14 @@
+---
+version:
+  major: "{{ version_major }}"
+  minor: "{{ version_minor }}"
+  patch: "{{ version_patch }}"
+  name: "{{ version_major }}.{{ version_minor }}.{{ version_patch }}"
+  tag: "release-{{ version_major }}-{{ version_minor }}-{{ version_patch }}"
+
+prev_version:
+  major: "{{ prev_version_major }}"
+  minor: "{{ prev_version_minor }}"
+  patch: "{{ prev_version_patch }}"
+  name: "{{ prev_version_major }}.{{ prev_version_minor }}.{{ prev_version_patch }}"
+  tag: "release-{{ prev_version_major }}-{{ prev_version_minor }}-{{ prev_version_patch }}"

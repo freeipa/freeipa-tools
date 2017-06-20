@@ -1,6 +1,6 @@
 # Release engineering ansible playbooks
 
-**Only 4.5+ build system is currently supported!**
+**Only 4.5+ build system and PATCH releases are currently supported!**
 
 ## Configuration
 
@@ -14,12 +14,12 @@
 ### Update zanata
 
 ```bash
-ansible-playbook -i hosts zanata_push.yml -e git_branch=ipa-4-5
+ansible-playbook zanata_push.yml -e git_branch=ipa-4-5
 ```
 
 ### Release FreeIPA
 
-This playbook can be used to do a release (4.5.x, ...) of FreeIPA.
+This playbook can be used to do a patch release (4.5.x, ...) of FreeIPA.
 Please note, major and minor version releases require some additional
 manual steps, see https://www.freeipa.org/page/Release for the full guide.
 
@@ -44,12 +44,5 @@ Not yet finished (WIP):
 Release version 4.5.2.
 
 ```bash
-ansible-playbook -i hosts release.yml \
-  -e git_branch=ipa-4-5 \
-  -e version_major=4 \
-  -e version_nimor=5 \
-  -e version_release=2 \
-  -e prev_version_major=4 \
-  -e prev_version_minor=5 \
-  -e prev_version_release=1
+ansible-playbook release.yml \
 ```

@@ -1,0 +1,4 @@
+---
+- include: check_build_system.yml
+- include: check_patch_release.yml
+- include: prompt_confirmation.yml

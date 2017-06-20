@@ -1,0 +1,6 @@
+---
+- name: check this is a patch release
+  fail:
+    msg: Only PATCH releases (X.Y.Z -> X.Y.(Z+1)) are supported
+  when: version.major != prev_version.major or
+        version.minor != prev_version.minor

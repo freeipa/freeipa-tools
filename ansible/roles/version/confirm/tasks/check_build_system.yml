@@ -1,0 +1,6 @@
+---
+- name: check 4.5+ build system is used
+  fail:
+    msg: "Only 4.5+ build system is supported"
+  when: version.major < 4 or 
+        (version.major == 4 and version.minor <= 4)
