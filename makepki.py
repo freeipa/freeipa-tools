@@ -19,7 +19,6 @@ import datetime
 import itertools
 import os
 import os.path
-import base64
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -133,8 +132,11 @@ def profile_ca(builder, ca_nick):
         ]),
         critical=False,
     )
+    
+    public_key = builder._public_key
+
     builder = builder.add_extension(
-        x509.SubjectKeyIdentifier(digest = base64.b64encode(os.urandom(64))),
+        x509.SubjectKeyIdentifier.from_public_key(public_key),
         critical=False,
     )
 
