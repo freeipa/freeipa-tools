@@ -95,7 +95,7 @@ class KRB5PrincipalName(univ.Sequence):
     )
 
 
-def profile_ca(builder, ca_nick):
+def profile_ca(builder, ca_nick, ca):
     now = datetime.datetime.utcnow()
 
     builder = builder.not_valid_before(now)
@@ -139,11 +139,23 @@ def profile_ca(builder, ca_nick):
         x509.SubjectKeyIdentifier.from_public_key(public_key),
         critical=False,
     )
+    if not ca:
+        builder = builder.add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(public_key),
+            critical=False,
+        )
+    # here we get "ca" object only for "ca1/subca"
+    else:
+        ski = ca.cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+        builder = builder.add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ski),
+            critical=False,
+        )
 
     return builder
 
 
-def profile_server(builder, ca_nick,
+def profile_server(builder, ca_nick, ca,
                    warp=datetime.timedelta(days=0), dns_name=None,
                    badusage=False):
     now = datetime.datetime.utcnow() + warp
@@ -190,7 +202,7 @@ def profile_server(builder, ca_nick,
     return builder
 
 
-def profile_kdc(builder, ca_nick,
+def profile_kdc(builder, ca_nick, ca,
                 warp=datetime.timedelta(days=0), dns_name=None,
                 badusage=False):
     now = datetime.datetime.utcnow() + warp
@@ -283,7 +295,7 @@ def gen_cert(profile, nick_base, subject, ca=None, **kwargs):
     builder = builder.subject_name(subject)
     builder = builder.public_key(public_key)
 
-    builder = profile(builder, ca_nick, **kwargs)
+    builder = profile(builder, ca_nick, ca, **kwargs)
 
     cert = builder.sign(
         private_key=ca_key,
