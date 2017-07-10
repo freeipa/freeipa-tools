@@ -1,0 +1,10 @@
+---
+- name: remove artifcats_dest directory
+  file:
+    path: "{{ artifacts_dest }}"
+    state: absent
+
+- name: create artifcats_dest directory
+  file:
+    path: "{{ artifacts_dest }}"
+    state: directory

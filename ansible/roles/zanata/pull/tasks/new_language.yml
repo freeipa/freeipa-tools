@@ -1,0 +1,11 @@
+---
+- name: "check if new lang was added"
+  shell: git ls-files --others --exclude-standard | grep 'po/.*po'
+  args:
+    chdir: "{{ git_repo_local }}"
+  register: new_lang
+  ignore_errors: true
+
+- fail:
+    msg: "new language added from zanata, please add it manually to LINGUAS file"
+  when: new_lang.rc == 0

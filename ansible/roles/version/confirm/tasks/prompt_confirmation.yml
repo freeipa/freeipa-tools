@@ -1,0 +1,10 @@
+---
+- name: confirmation dialog
+  pause:
+    prompt: |
+
+        === RELEASING {{ version.name }} ===
+        Using git branch: {{ git_branch }}
+        Previosuly released version: {{ prev_version.name }}
+        
+        To abort, press Ctrl+C A

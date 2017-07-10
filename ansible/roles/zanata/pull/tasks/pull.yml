@@ -1,0 +1,5 @@
+---
+- name: "pull translation from zanata"
+  shell: zanata-cli -B pull
+  args:
+    chdir: "{{ git_repo_local }}"

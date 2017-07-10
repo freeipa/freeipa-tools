@@ -1,0 +1,19 @@
+---
+- name: create gpg signature
+  shell: gpg2 --batch --yes --armor --detach-sign freeipa-{{ version }}.tar.gz
+  args:
+    chdir: "{{ git_repo_local }}"
+
+- name: verify gpg signature
+  shell: gpg2 --verify freeipa-{{ version }}.tar.gz.asc
+  args:
+    chdir: "{{ git_repo_local }}"
+  register: tarball_verify
+
+- name: show tarball signature
+  debug:
+    var: tarball_verify.stdout_lines
+
+- name: show tarball signature
+  debug:
+    var: tarball_verify.stderr_lines

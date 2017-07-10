@@ -1,0 +1,6 @@
+---
+- hosts: release_machine
+  roles:
+    - git/clone
+    - git/configure
+    - zanata/push

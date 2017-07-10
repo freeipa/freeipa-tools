@@ -1,0 +1,10 @@
+---
+- name: "add po files to git"
+  shell: git add po/
+  args:
+    chdir: "{{ git_repo_local }}"
+
+- name: "git commit"
+  shell: git commit -s -m "Update translations"
+  args:
+    chdir: "{{ git_repo_local }}"

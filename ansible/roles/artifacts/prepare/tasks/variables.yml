@@ -1,0 +1,4 @@
+---
+- name: create artifacts_dest variable
+  set_fact:
+    artifacts_dest: "{{ artifacts_location }}/{{ version }}"

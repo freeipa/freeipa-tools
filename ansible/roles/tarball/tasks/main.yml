@@ -1,0 +1,4 @@
+---
+- include: make.yml
+- include: sign.yml
+- include: collect.yml

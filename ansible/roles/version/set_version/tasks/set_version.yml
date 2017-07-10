@@ -1,0 +1,18 @@
+---
+- name: "set major version"
+  lineinfile:
+    path: "{{ git_repo_local }}/VERSION.m4"
+    regexp: '^define\(IPA_VERSION_MAJOR,'
+    line: 'define(IPA_VERSION_MAJOR, {{ version_major }})'
+
+- name: "set minor version"
+  lineinfile:
+    path: "{{ git_repo_local }}/VERSION.m4"
+    regexp: '^define\(IPA_VERSION_MINOR,'
+    line: 'define(IPA_VERSION_MINOR, {{ version_minor }})'
+
+- name: "set release version"
+  lineinfile:
+    path: "{{ git_repo_local }}/VERSION.m4"
+    regexp: '^define\(IPA_VERSION_RELEASE,'
+    line: 'define(IPA_VERSION_RELEASE, {{ version_release }})'

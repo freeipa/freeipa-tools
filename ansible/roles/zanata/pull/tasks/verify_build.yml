@@ -1,0 +1,10 @@
+---
+- name: "clean git repo"
+  shell: git clean -dfx
+  args:
+    chdir: "{{ git_repo_local }}"
+
+- name: "build FreeIPA to verify translations are correct"
+  shell: ./makerpms.sh
+  args:
+    chdir: "{{ git_repo_local }}"

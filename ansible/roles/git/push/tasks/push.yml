@@ -1,0 +1,33 @@
+---
+- name: perform dry run of git push
+  shell: git push upstream {{ git_branch }} --tags --dry-run
+  args:
+    chdir: "{{ git_repo_local }}"
+  register: git_push_out
+
+- name: prompt for confirmation before pushing to upstream git
+  pause:
+    prompt: |
+
+      ======= WARNING =======
+      Pushing to upstream repo!
+
+      ----------------------------------------------
+      {{ git_push_out.stdout }}{{ git_push_out.stderr }}
+      ----------------------------------------------
+      
+      Verify the above (git log ..., tag is present)
+      
+      To proceed, type 'git push' and confirm
+      To abort, type anything else (or Ctrl+C A)
+  register: out
+  
+- name: check confirmation
+  fail:
+    msg: Aborted! Expected 'git push', got '{{ out.user_input }}'
+  when: out.user_input != 'git push'
+
+- name: push to upstream repo
+  shell: git push upstream {{ git_branch }} --tags
+  args:
+    chdir: "{{ git_repo_local }}"

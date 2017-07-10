@@ -1,0 +1,5 @@
+---
+- name: create tarball
+  shell: make dist
+  args:
+    chdir: "{{ git_repo_local }}"

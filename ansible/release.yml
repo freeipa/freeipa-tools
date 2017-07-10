@@ -1,0 +1,51 @@
+---
+- hosts: release_machine
+  vars_files:
+    - vars/version.yml
+    - vars/git.yml
+  vars_prompt:
+    - name: version_major
+      prompt: "MAJOR version to release (MAJOR.minor.patch)"
+    - name: version_minor
+      prompt: "MINOR version to release (major.MINOR.patch)"
+    - name: version_patch
+      prompt: "PATCH version to release (major.minor.PATCH)"
+    - name: prev_version_major
+      prompt: "Previous MAJOR version (MAJOR.minor.patch)"
+    - name: prev_version_minor
+      prompt: "Previous MINOR version (major.MINOR.patch)"
+    - name: prev_version_patch
+      prompt: "Previous PATCH version (major.minor.PATCH)"
+  roles:
+    - role: version/confirm
+      tags: always
+    - role: git/clone
+      git_repo_remove: true
+    - role: git/checkout
+      git_checkout_ref: "{{ git_branch }}"
+    - zanata/push
+    - zanata/pull
+    - git/rebase
+    - contributors
+    - version/set_version
+    - role: version/set_git_snapshot
+      version_git_snapshot: "no"
+    - version/commit
+    - git/tag
+    - role: version/set_git_snapshot
+      version_git_snapshot: "yes"
+    - version/commit
+    - git/push
+    - role: git/clone
+      git_repo_remove: true
+    - role: git/checkout
+      git_checkout_ref: "{{ version_tag }}"
+    - git/configure
+    - artifacts/prepare
+    - tarball
+    - fedora/spec_patch
+    - pypi/make_wheels
+    - role: pypi/upload
+      tags: pypi
+    - role: release_notes
+      tags: pagure

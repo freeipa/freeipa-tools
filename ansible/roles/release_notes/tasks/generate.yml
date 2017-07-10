@@ -1,0 +1,35 @@
+---
+- name: generate release notes
+  shell: |
+    python {{ freeipa_tools }}/release/release-notes.py \
+      {{ version }} \
+      $(date +"%F") \
+      '{{ prev_version }}' \
+      '{{ version_major }}.{{ version_minor }}.0' \
+      '{{ prev_version_tag }}..{{ version_tag }}' \
+      'FreeIPA {{ version }}' \
+      --token-file {{ pagure_token_file }}
+  register: release_notes
+
+- name: save release notes to file
+  copy:
+    content: "{{ release_notes.stdout }}"
+    dest: "{{ artifacts_dest }}/release_notes"
+
+- name: generate release notes with links
+  shell: |
+    python {{ freeipa_tools }}/release/release-notes.py \
+      {{ version }} \
+      $(date +"%F") \
+      '{{ prev_version }}' \
+      '{{ version_major }}.{{ version_minor }}.0' \
+      '{{ prev_version_tag }}..{{ version_tag }}' \
+      'FreeIPA {{ version }}' \
+      --token-file {{ pagure_token_file }} \
+      --links
+  register: release_notes
+
+- name: save release notes to file
+  copy:
+    content: "{{ release_notes.stdout }}"
+    dest: "{{ artifacts_dest }}/release_notes_links"

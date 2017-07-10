@@ -1,0 +1,5 @@
+---
+- name: copy tarball and signature
+  shell: "cp freeipa-{{ version }}.tar.gz* {{ artifacts_dest }}"
+  args:
+    chdir: "{{ git_repo_local }}"
