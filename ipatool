@@ -146,6 +146,8 @@ COLOR_OPT_MAP = {'auto': False, 'always': True, 'never': None}
 
 SUBJECT_RE = re.compile('^Subject:( *\[PATCH( [^]*])?\])*(?P<subj>.*)')
 
+GIT_REMOTE_SERVER = 'pagure.io'
+
 SubprocessResult = collections.namedtuple(
     'SubprocessResult', 'stdout stderr returncode')
 
@@ -596,6 +598,21 @@ def _update_issue(ctx, ticket):
         else:
             print(ctx.term.green('Comment added'))
 
+def verify_remote_url(ctx):
+    remote = ctx.config['remote']
+    stdout = ctx.runprocess(['git', 'remote', 'get-url', '--push', remote]).stdout
+    remote_url = stdout.splitlines()[0]
+
+    if GIT_REMOTE_SERVER not in remote_url:
+        print(ctx.term.red(
+            '!!! WARNING !!! not pushing to {} git repo').format(
+                GIT_REMOTE_SERVER))
+        response = input(
+            'Push to "{}"? [y/n] '.format(
+                remote_url))
+        if response.lower() != 'y':
+            ctx.die('Aborting push')
+
 def _close_issue(ctx, ticket):
     if ticket.is_closed():
         # nothing to do
@@ -691,6 +708,7 @@ def push_command(ctx):
             (len(patches), ', '.join(branches)))
 
     remote = ctx.config['remote']
+    verify_remote_url(ctx)
 
     if not ctx.options['--no-fetch']:
         print('Fetching...')
