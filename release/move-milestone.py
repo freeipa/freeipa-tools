@@ -20,6 +20,7 @@
 from __future__ import print_function
 import argparse
 import time
+from requests.exceptions import ConnectionError
 from libpagure import Pagure
 
 PAGURE_REPO = "freeipa"
@@ -45,7 +46,14 @@ def move_tickets_to_milestone(pagure, move_from, move_to, message=None):
             t_num, t_title, move_to
         ))
         try:
-            pagure.change_issue_milestone(t_num, move_to)
+            moved = False
+            while not moved:
+                try:
+                    pagure.change_issue_milestone(t_num, move_to)
+                except ConnectionError:
+                    time.sleep(1)
+                    continue
+                else: moved = True
         except AttributeError:
             # Workaround https://pagure.io/libpagure/issue/23
             issue = pagure.issue_info(t_num)
@@ -53,7 +61,7 @@ def move_tickets_to_milestone(pagure, move_from, move_to, message=None):
                 raise RuntimeError("Failed to move ticket to milestone")
         if message:
             pagure.comment_issue(t_num, message)
-        time.sleep(5)  # Do not hammer pagure API
+        time.sleep(1)  # Do not hammer pagure API
 
 def parse_args():
     desc = """
