@@ -877,6 +877,28 @@ def pr_push_command(ctx):
     if 'pushed' in labels:
         ctx.die('Pull request was already pushed')
 
+    if not pr.mergeable:
+        ctx.die('Pull request is not mergeable.')
+
+    # TODO: use with CombinedStatus once released
+    # status = repo.commit(pr.head.sha).status()
+    # if status.state in ('error', 'failure',):
+    #     ctx.die('Pull request failed CI test(s)')
+    # elif status.state == 'pending':
+    #     ctx.die('CI have not completed testing the pull request yet')
+    # remove vvv
+    most_recent_results = {}
+    for s in repo.commit(pr.head.sha).statuses():
+        if s.context not in most_recent_results:
+            most_recent_results[s.context] = s.state
+
+    states = most_recent_results.values()
+    if 'error' in states or 'failure' in states:
+        ctx.die('Pull request failed CI test(s)')
+    elif 'pending' in states:
+        ctx.die('CI have not completed testing the pull request yet')
+    # remove ^^^
+
     try:
         commit_num = 0
         for commit in sorted_commits(list(pr.commits())):
