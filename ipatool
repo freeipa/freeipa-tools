@@ -10,7 +10,7 @@ Usage:
   ipatool [options] [-v...] am [--] [PATCH ...]
   ipatool [options] [-v...] pr-ack PR_ID [--comment=TEXT]
   ipatool [options] [-v...] pr-list [--state=(open|closed|all)]... [--label=NAME...]
-  ipatool [options] [-v...] pr-push PR_ID [--branch=BRANCH...] [--reviewer=NAME...]
+  ipatool [options] [-v...] pr-push PR_ID [--backport=BRANCH...] [--reviewer=NAME...]
   ipatool [options] [-v...] pr-reject PR_ID --comment=TEXT
 
 Common Options:
@@ -74,6 +74,7 @@ ipatool pr-reject:
 
 iptool pr-push:
   Fetch all patches from pull request, store them in `patchdir` and call push.
+  -B, --backport BRANCH Rebase patches from PR and open new PR against BRANCH
 """
 
 SAMPLE_CONFIG = """
@@ -115,6 +116,7 @@ browser: firefox
 # GitHub configuration
 gh-token: "0123456789abcdef0123456789abcdef01234567"
 gh-repo: "freeipa/freeipa"
+gh-fork-remote: "my-freeipa-fork-on-github"
 """
 
 import glob
@@ -474,7 +476,7 @@ def normalize_reviewer(ctx, reviewer):
         name = unidecode.unidecode(names[0])
         return name
 
-def apply_patches(ctx, patches, branch):
+def apply_patches(ctx, patches, branch, die_on_fail=True):
     """Apply patches to the given branch
 
     Checks out the branch
@@ -483,7 +485,10 @@ def apply_patches(ctx, patches, branch):
                     '%s/%s' % (ctx.config['remote'], branch)])
     for patch in patches:
         print('Aplying to %s: %s' % (branch, patch.subject))
-        ctx.runprocess(['git', 'am'], stdin_string=''.join(patch.lines))
+        res = ctx.runprocess(['git', 'am'], stdin_string=''.join(patch.lines),
+                             check_returncode=0 if die_on_fail else None)
+        if not die_on_fail and res.returncode:
+            raise RuntimeError(res.stderr)
     sha1 = ctx.runprocess(['git', 'rev-parse', 'HEAD']).stdout.strip()
     if ctx.verbosity:
         print('Resulting hash: %s' % sha1)
@@ -853,6 +858,101 @@ def sorted_commits(commits):
     return result
 
 
+def backport(ctx, repo, pr):
+    try:
+        backport_branches = ctx.options['--backport']
+    except KeyError:
+        return
+
+    try:
+        ctx.config['remote']
+        ctx.config['gh-fork-remote']
+        ctx.config['gh-token']
+        ctx.config['clean-repo-path']
+    except KeyError as exc:
+        ctx.die("%s is not set in configuration file. Backport must be "
+                "handled manually." % exc)
+
+    patches = list(ctx.get_patches())
+    os.chdir(cleanpath(ctx.config['clean-repo-path']))
+    github_login = github3.login(token=ctx.config['gh-token']).me().login
+
+    rev_parse = ctx.runprocess(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
+    old_branch = rev_parse.stdout.strip()
+
+    for bb in backport_branches:
+        try:
+            res = ctx.runprocess(
+                ['git', 'checkout', '%s/%s' % (ctx.config['remote'], bb)],
+                check_returncode=None
+            )
+            if res.returncode:
+                print(ctx.term.red(
+                    "Failed to checkout %s/%s. Manual backport is needed. %s"
+                    % (ctx.config['remote'], bb, res.stderr)
+                ))
+                continue
+
+            try:
+                sha = apply_patches(ctx, patches, bb, die_on_fail=False)
+            except RuntimeError as exc:
+                print(ctx.term.red(
+                    "Failed to apply patches onto %s/%s. Manual backport is "
+                    "needed." % (ctx.config['remote'], bb)
+                ))
+                if ctx.verbosity:
+                    print(ctx.term.red(res.stderr))
+                continue
+            print(
+                "Applied patches on %s/%s" % (ctx.config['remote'], bb)
+            )
+
+            backport_name = 'backport_pr%d_%s' % (pr.number, bb)
+            res = ctx.runprocess(
+                ['git', 'push', ctx.config['gh-fork-remote'],
+                 "%s:refs/heads/%s" % (sha, backport_name)],
+                check_returncode=None, timeout=60,
+            )
+            if res.returncode:
+                print(ctx.term.red(
+                    "Failed to push %s to %s/%s"
+                    % (sha, ctx.config['gh-fork-remote'], backport_name)
+                ))
+                continue
+
+            print(
+                "Pushed %s to %s/%s"
+                % (sha, ctx.config['gh-fork-remote'], backport_name)
+            )
+            backport_pr = repo.create_pull(
+                title="Backport PR %d to %s" % (pr.number, bb),
+                base=bb,
+                head="%s:%s" % (github_login, backport_name),
+                body="This PR was opened automatically because PR #%d was "
+                     "pushed to %s and backport to %s is required."
+                     % (pr.number, pr.base.ref, bb),
+            )
+            backport_issue = backport_pr.issue()
+            backport_issue.add_labels('ack')
+            backport_issue.create_comment(
+                'PR was ACKed automatically because this is backport of PR '
+                '#%d. Wait for CI to finish before pushing. In case of '
+                'questions or problems contact @%s who is author of the '
+                'original PR.' % (pr.number, pr.user.login)
+            )
+            print(ctx.term.green(
+                "Created and auto-ACKed PR %d against branch %s: %s"
+                % (pr.number, bb, pr.html_url)
+            ))
+        finally:
+            print('Cleaning up')
+            ctx.runprocess(['git', 'am', '--abort'], check_returncode=None)
+            ctx.runprocess(['git', 'reset', '--hard'], check_returncode=None)
+            ctx.runprocess(['git', 'checkout', old_branch],
+                           check_returncode=None)
+            ctx.runprocess(['git', 'clean', '-fxd'], check_returncode=None)
+
+
 @Context.command('pr-push')
 def pr_push_command(ctx):
     if list(ctx.get_patches()):
@@ -911,23 +1011,28 @@ def pr_push_command(ctx):
         delete_patches(target_dir)
         ctx.die('Failed to get patch(es): {}'.format(e))
 
+    ctx.options['--branch'] = [pr.base.ref]
     try:
         # use regular `ipatool push`
         push_command(ctx)
+    except Exception:
+        pass
+    else:
+        if ((not ctx.options.get('--dry-run', False)) and
+                ctx.push_info.get('pushed', False)):
+            print("Adding label 'pushed'")
+            pr_is.add_labels('pushed')
+            pr_is.refresh(conditional=True)
+
+            pr_is.create_comment(ctx.push_info['pagure_comment'])
+            pr_is.refresh(conditional=True)
+
+            print("Closing pull request {}".format(pr.number))
+            pr_is.close()
+
+            backport(ctx, repo, pr)
     finally:
         delete_patches(target_dir)
-
-    if ((not ctx.options.get('--dry-run', False)) and
-            ctx.push_info.get('pushed', False)):
-        print("Adding label 'pushed'")
-        pr_is.add_labels('pushed')
-        pr_is.refresh(conditional=True)
-
-        pr_is.create_comment(ctx.push_info['pagure_comment'])
-        pr_is.refresh(conditional=True)
-
-        print("Closing pull request {}".format(pr.number))
-        pr_is.close()
 
 
 @Context.command('pr-ack')
