@@ -925,7 +925,7 @@ def backport(ctx, repo, pr):
                 % (sha, ctx.config['gh-fork-remote'], backport_name)
             )
             backport_pr = repo.create_pull(
-                title="Backport PR %d to %s" % (pr.number, bb),
+                title="[Backport][%s] %s" % (bb, pr.title),
                 base=bb,
                 head="%s:%s" % (github_login, backport_name),
                 body="This PR was opened automatically because PR #%d was "
