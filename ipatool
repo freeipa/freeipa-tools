@@ -134,7 +134,8 @@ import github3    # yum install python3-github3py
 import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
 import xtermcolor # yum install python3-xtermcolor
-from libpagure import Pagure  # yum install python3-libpagure
+import libpagure  # yum install python3-libpagure
+
 
 MILESTONES = {
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
@@ -304,7 +305,7 @@ class Context(object):
         if self.options['--no-pagure']:
             self.pagure = None
         else:
-            self.pagure = Pagure(
+            self.pagure = libpagure.Pagure(
                 pagure_token=self.config['pagure-token'],
                 pagure_repository=self.config['pagure-repository']
             )
@@ -1015,6 +1016,8 @@ def pr_push_command(ctx):
     try:
         # use regular `ipatool push`
         push_command(ctx)
+    except libpagure.exceptions.APIError as e:
+        ctx.die('Pagure API Error: {}'.format(e))
     except Exception:
         pass
     else:
