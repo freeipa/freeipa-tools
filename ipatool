@@ -294,8 +294,12 @@ class Context(object):
     """Holds options, configuration, and helpers for a tool"""
     def __init__(self, options):
         self.options = options
-        with open(os.path.expanduser(options['--config'])) as conf_file:
-            self.config = yaml.safe_load(conf_file)
+        self.config = None
+        try:
+            with open(os.path.expanduser(options['--config'])) as conf_file:
+                self.config = yaml.safe_load(conf_file)
+        except:
+            pass
         self.term = blessings.Terminal(
             force_styling=COLOR_OPT_MAP[options['--color']])
         self.verbosity = self.options['--verbose']
@@ -304,7 +308,7 @@ class Context(object):
             pprint.pprint(self.options)
             print('Config:')
             self.print_sanitized_config()
-        if self.options['--no-pagure']:
+        if self.options['--no-pagure'] or self.config == None:
             self.pagure = None
         else:
             self.pagure = libpagure.Pagure(
