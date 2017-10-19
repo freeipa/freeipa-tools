@@ -114,6 +114,8 @@ am-command: ["ssh", "ipa-devel-vm.local", "cd ~/freeipa/ ; git am -3"]
 browser: firefox
 
 # GitHub configuration
+# for the token, we require at least the 'repo', 'admin:org' group permissions
+# and the 'user:email' permission
 gh-token: "0123456789abcdef0123456789abcdef01234567"
 gh-repo: "freeipa/freeipa"
 gh-fork-remote: "my-freeipa-fork-on-github"
