@@ -12,6 +12,7 @@ Usage:
   ipatool [options] [-v...] pr-list [--state=(open|closed|all)]... [--label=NAME...]
   ipatool [options] [-v...] pr-push PR_ID [--backport=BRANCH...] [--reviewer=NAME...]
   ipatool [options] [-v...] pr-reject PR_ID --comment=TEXT
+  ipatool [options] [-v...] backport PR_ID --branch=BRANCH
 
 Common Options:
   -h, --help           Display this help and exit
@@ -74,7 +75,14 @@ ipatool pr-reject:
 
 iptool pr-push:
   Fetch all patches from pull request, store them in `patchdir` and call push.
+
   -B, --backport BRANCH Rebase patches from PR and open new PR against BRANCH
+
+ipatool backport:
+  Fetch all patches from a pull request, store them in `patchdir` and backport
+  them to a specific branch. PR can be in pushed and closed state but it has
+  to be 'ack'ed.
+
 """
 
 SAMPLE_CONFIG = """
@@ -876,7 +884,10 @@ def backport(ctx, repo, pr):
     try:
         backport_branches = ctx.options['--backport']
     except KeyError:
-        return
+        try:
+            backport_branches = ctx.options['--branch']
+        except KeyError:
+            return
 
     try:
         ctx.config['remote']
@@ -965,6 +976,57 @@ def backport(ctx, repo, pr):
             ctx.runprocess(['git', 'checkout', old_branch],
                            check_returncode=None)
             ctx.runprocess(['git', 'clean', '-fxd'], check_returncode=None)
+
+
+
+@Context.command('backport')
+def backport_command(ctx):
+    if list(ctx.get_patches()):
+        ctx.die('No patches are allowed when pushing pull request')
+
+    repo = get_gh_repo(ctx)
+    target_dir = os.path.expanduser(ctx.config['patchdir'])
+    pr = repo.pull_request(ctx.options['PR_ID'])
+
+    pr_is = repo.issue(pr.number)
+    labels = labels_names(pr_is.labels())
+
+    if 'ack' not in labels:
+        ctx.die('Pull request is not ACKed')
+
+    if 'rejected' in labels:
+        ctx.die('Pull request is rejected')
+
+    if not pr.mergeable:
+        ctx.die('Pull request is not mergeable.')
+
+    most_recent_results = {}
+    for s in repo.commit(pr.head.sha).statuses():
+        if s.context not in most_recent_results:
+            most_recent_results[s.context] = s.state
+
+    states = most_recent_results.values()
+    if 'error' in states or 'failure' in states:
+        ctx.die('Pull request failed CI test(s)')
+    elif 'pending' in states:
+        ctx.die('CI have not completed testing the pull request yet')
+    # remove ^^^
+
+    try:
+        commit_num = 0
+        for commit in sorted_commits(list(pr.commits())):
+            patch_name = patch_filename(commit.message, commit_num)
+            patch_path = os.path.join(target_dir, patch_name)
+            with open(patch_path, 'wb') as patch_file:
+                patch_file.write(commit.patch())
+            commit_num += 1
+    except Exception as e:
+        delete_patches(target_dir)
+        ctx.die('Failed to get patch(es): {}'.format(e))
+
+    backport(ctx, repo, pr)
+    delete_patches(target_dir)
+
 
 
 @Context.command('pr-push')
