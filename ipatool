@@ -303,7 +303,7 @@ class Context(object):
             print('Options:')
             pprint.pprint(self.options)
             print('Config:')
-            pprint.pprint(self.config)
+            self.print_sanitized_config()
         if self.options['--no-pagure']:
             self.pagure = None
         else:
@@ -327,6 +327,13 @@ class Context(object):
         date_result = self.runprocess(['date', '-Iseconds'],
                                       env={'GIT_COMMIT_DATE': ''})
         self.isodate_now = date_result.stdout.strip()
+
+    def print_sanitized_config(self):
+        # prints the config dictionary with sensitive informations starred
+        sensitives = ('gh-token', 'pagure-token')
+        pprint.pprint(dict((attr, val)
+                        if attr not in sensitives else (attr, '***')
+                        for attr, val in self.config.items()))
 
     commands = {}
     @classmethod
