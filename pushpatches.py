@@ -1,4 +1,0 @@
-#!/usr/bin/python3
-
-if __name__ == '__main__':
-    exit('use ipatool instead')
