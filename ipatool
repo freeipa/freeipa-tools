@@ -100,6 +100,16 @@ bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 
 # Pagure login details
 pagure-repository: freeipa
+# Create the token in https://pagure.io/freeipa/settings
+# For token you need:
+#   * Assign issue to someone
+#   * Change the status of a ticket
+#   * Comment on a ticket
+#   * Create a new ticket
+#   * Subscribe the user with this token to an issue
+#   * Update an issue, status, comments, custom fields...
+#   * Update the custom fields of an issue
+#   * Update the milestone of an issue
 pagure-token: "0123456789abcdef0123456789abcdef01234567"
 # workaround: pagure doesn't provide the tokens for users so we cannot
 # dynamically detect username
@@ -126,7 +136,22 @@ browser: firefox
 # and the 'user:email' permission
 gh-token: "0123456789abcdef0123456789abcdef01234567"
 gh-repo: "freeipa/freeipa"
-gh-fork-remote: "my-freeipa-fork-on-github"
+gh-fork-remote: "mygh"
+
+# To create gh-fork-remote do the following:
+#
+# NOTE: also set clean-repo-path to ~/redhat/freeipa-clean or
+#       the path to your checkout.
+#
+# $ git clone ssh://git@pagure.io/freeipa.git ~/redhat/freeipa-clean
+# $ cd ~/redhat/freeipa-clean
+# $ git remote add mygh git@github.com:<yourname>/freeipa.git
+#
+# $ git remote -v
+# mygh    git@github.com:<yourname>/freeipa.git (fetch)
+# mygh    git@github.com:<yourname>/freeipa.git (push)
+# origin  ssh://git@pagure.io/freeipa.git (fetch)
+# origin  ssh://git@pagure.io/freeipa.git (push)
 """
 
 import glob
