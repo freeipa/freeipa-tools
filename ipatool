@@ -470,7 +470,7 @@ def ensure_clean_repo(ctx):
                    check_stderr='',
                    fail_message='Repository %s not clean' % os.getcwd())
 
-def get_rewiewers(ctx, tickets):
+def get_reviewers(ctx, tickets):
     """Get name & address of reviewers, or empty list for --no-reviewer
 
     Raises if a suitable reviewer is not found
@@ -723,7 +723,7 @@ def push_command(ctx):
     else:
         tickets = []
 
-    reviewers = get_rewiewers(ctx, tickets)
+    reviewers = get_reviewers(ctx, tickets)
     if reviewers:
         for reviewer in reviewers:
             print('Reviewer: %s' % reviewer)
