@@ -48,7 +48,7 @@ or #freeipa channel on Freenode.
 """
 
 
-GIT_DIR = None; assert GIT_DIR, "Specify path to clean git repository here"
+GIT_DIR = None
 PAGURE_REPO = "freeipa"
 
 
@@ -270,12 +270,18 @@ def parse_args():
     parser.add_argument('--token-file', dest='token_file', action='store',
                         help='Path to file where pagure token is stored',
                         metavar='PATH', default=None)
+    parser.add_argument('--repo', dest='git_repo', action='store',
+                        help='Path to git repo to process',
+                        metavar='GIT_DIR', default=GIT_DIR)
 
     args = parser.parse_args()
 
     if not (args.token or args.token_file):
         raise RuntimeError(
             "Please specify --token or --token-file for pagure access")
+
+    GIT_DIR = GIT_DIR or args.git_repo
+    assert GIT_DIR, "Specify path to clean git repository with --repo"
 
     return args
 
