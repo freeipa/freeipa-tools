@@ -139,6 +139,15 @@ class App(object):
         else:
             fixed_here_tickets = primary_fixed
 
+        ticket_issues = [issue.get('id') for issue in fixed_here_tickets]
+        for commit in git.commits:
+            if len(commit.tickets) > 0:
+                for issue in commit.tickets:
+                    if issue not in ticket_issues:
+                        fixed_here_tickets.append(pagure.issue_info(issue))
+                        ticket_issues.append(issue)
+
+        fixed_here_tickets.sort(key=lambda x: x.get('id'))
         bugs = self._get_bugs(fixed_here_tickets)
         self._print_wiki(fixed_here_tickets, bugs, git)
 
