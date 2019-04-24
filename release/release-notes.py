@@ -19,7 +19,7 @@ The FreeIPA team would like to announce FreeIPA %(version)s release!
 It can be downloaded from http://www.freeipa.org/page/Downloads. Builds for
 Fedora '''FIXME''' VERSION '''END FIXME''' will be available in the official
 '''FIXME LINK'''
-[https://copr.fedorainfracloud.org/coprs/g/freeipa/freeipa-4-4/ COPR repository].
+[https://copr.fedorainfracloud.org/coprs/g/freeipa/freeipa-4-7/ COPR repository].
 '''END FIXME'''
 
 == Highlights in %(version)s ==
@@ -33,7 +33,7 @@ Fedora '''FIXME''' VERSION '''END FIXME''' will be available in the official
 
 === Bug fixes ===
 FreeIPA %(version)s is a stabilization release for the features delivered as a
-part of '''FIXME''' 4.4.0 '''END FIXME'''.
+part of '''FIXME''' 4.7.0 '''END FIXME'''.
 There are more than %(num_bugs)s bug-fixes details of which can be seen in
 the list of resolved tickets below.
 
@@ -48,7 +48,7 @@ or #freeipa channel on Freenode.
 """
 
 
-GIT_DIR = None; assert GIT_DIR, "Specify path to clean git repository here"
+GIT_DIR = None
 PAGURE_REPO = "freeipa"
 
 
@@ -139,6 +139,15 @@ class App(object):
         else:
             fixed_here_tickets = primary_fixed
 
+        ticket_issues = [issue.get('id') for issue in fixed_here_tickets]
+        for commit in git.commits:
+            if len(commit.tickets) > 0:
+                for issue in commit.tickets:
+                    if issue not in ticket_issues:
+                        fixed_here_tickets.append(pagure.issue_info(issue))
+                        ticket_issues.append(issue)
+
+        fixed_here_tickets.sort(key=lambda x: x.get('id'))
         bugs = self._get_bugs(fixed_here_tickets)
         self._print_wiki(fixed_here_tickets, bugs, git)
 
@@ -270,12 +279,18 @@ def parse_args():
     parser.add_argument('--token-file', dest='token_file', action='store',
                         help='Path to file where pagure token is stored',
                         metavar='PATH', default=None)
+    parser.add_argument('--repo', dest='git_repo', action='store',
+                        help='Path to git repo to process',
+                        metavar='GIT_DIR', default=GIT_DIR)
 
     args = parser.parse_args()
 
     if not (args.token or args.token_file):
         raise RuntimeError(
             "Please specify --token or --token-file for pagure access")
+
+    GIT_DIR = GIT_DIR or args.git_repo
+    assert GIT_DIR, "Specify path to clean git repository with --repo"
 
     return args
 

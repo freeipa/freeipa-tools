@@ -4,11 +4,15 @@ ipa-tools
 This repository contains tools that automate some tasks in FreeIPA development.
 
 For guidelines, see: http://www.freeipa.org/page/Contribute/Code
-TLDR:
 
-- we mail patches around before committing to git
-- we use Trac for tracking bugs
-- and some Trac tickets are cloned to Bugzilla
+TLDR
+----
+
+- Master git repository is on Pagure http://pagure.io/freeipa
+- Github is a clone of Pagure
+- we use pull requests https://github.com/freeipa/freeipa
+- we use Pagure for tracking bugs
+- and some Pagure tickets are cloned to Bugzilla
 
 These tools might work for other projects that work similarly.
 
@@ -25,7 +29,7 @@ The most documented script is the all-in-one "ipatool", which can:
 Dependencies:
 
     yum install python3 python3-PyYAML python3-blessings python3-unidecode \
-        python3-docopt
+        python3-docopt python3-github3py python3-xtermcolor python3-libpagure
 
 See docs in the script itself
 

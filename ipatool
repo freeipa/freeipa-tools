@@ -10,8 +10,9 @@ Usage:
   ipatool [options] [-v...] am [--] [PATCH ...]
   ipatool [options] [-v...] pr-ack PR_ID [--comment=TEXT]
   ipatool [options] [-v...] pr-list [--state=(open|closed|all)]... [--label=NAME...]
-  ipatool [options] [-v...] pr-push PR_ID [--branch=BRANCH...] [--reviewer=NAME...]
+  ipatool [options] [-v...] pr-push PR_ID [--backport=BRANCH...] [--reviewer=NAME...]
   ipatool [options] [-v...] pr-reject PR_ID --comment=TEXT
+  ipatool [options] [-v...] backport PR_ID --branch=BRANCH
 
 Common Options:
   -h, --help           Display this help and exit
@@ -74,6 +75,14 @@ ipatool pr-reject:
 
 iptool pr-push:
   Fetch all patches from pull request, store them in `patchdir` and call push.
+
+  -B, --backport BRANCH Rebase patches from PR and open new PR against BRANCH
+
+ipatool backport:
+  Fetch all patches from a pull request, store them in `patchdir` and backport
+  them to a specific branch. PR can be in pushed and closed state but it has
+  to be 'ack'ed.
+
 """
 
 SAMPLE_CONFIG = """
@@ -91,6 +100,16 @@ bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 
 # Pagure login details
 pagure-repository: freeipa
+# Create the token in https://pagure.io/freeipa/settings
+# For token you need:
+#   * Assign issue to someone
+#   * Change the status of a ticket
+#   * Comment on a ticket
+#   * Create a new ticket
+#   * Subscribe the user with this token to an issue
+#   * Update an issue, status, comments, custom fields...
+#   * Update the custom fields of an issue
+#   * Update the milestone of an issue
 pagure-token: "0123456789abcdef0123456789abcdef01234567"
 # workaround: pagure doesn't provide the tokens for users so we cannot
 # dynamically detect username
@@ -113,8 +132,26 @@ am-command: ["ssh", "ipa-devel-vm.local", "cd ~/freeipa/ ; git am -3"]
 browser: firefox
 
 # GitHub configuration
+# for the token, we require at least the 'repo', 'admin:org' group permissions
+# and the 'user:email' permission
 gh-token: "0123456789abcdef0123456789abcdef01234567"
 gh-repo: "freeipa/freeipa"
+gh-fork-remote: "mygh"
+
+# To create gh-fork-remote do the following:
+#
+# NOTE: also set clean-repo-path to ~/redhat/freeipa-clean or
+#       the path to your checkout.
+#
+# $ git clone ssh://git@pagure.io/freeipa.git ~/redhat/freeipa-clean
+# $ cd ~/redhat/freeipa-clean
+# $ git remote add mygh git@github.com:<yourname>/freeipa.git
+#
+# $ git remote -v
+# mygh    git@github.com:<yourname>/freeipa.git (fetch)
+# mygh    git@github.com:<yourname>/freeipa.git (push)
+# origin  ssh://git@pagure.io/freeipa.git (fetch)
+# origin  ssh://git@pagure.io/freeipa.git (push)
 """
 
 import glob
@@ -132,7 +169,8 @@ import github3    # yum install python3-github3py
 import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
 import xtermcolor # yum install python3-xtermcolor
-from libpagure import Pagure  # yum install python3-libpagure
+import libpagure  # yum install python3-libpagure
+
 
 MILESTONES = {
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
@@ -145,6 +183,8 @@ MILESTONES = {
 COLOR_OPT_MAP = {'auto': False, 'always': True, 'never': None}
 
 SUBJECT_RE = re.compile('^Subject:( *\[PATCH( [^]*])?\])*(?P<subj>.*)')
+
+GIT_REMOTE_SERVER = 'pagure.io'
 
 SubprocessResult = collections.namedtuple(
     'SubprocessResult', 'stdout stderr returncode')
@@ -287,8 +327,12 @@ class Context(object):
     """Holds options, configuration, and helpers for a tool"""
     def __init__(self, options):
         self.options = options
-        with open(os.path.expanduser(options['--config'])) as conf_file:
-            self.config = yaml.safe_load(conf_file)
+        self.config = None
+        try:
+            with open(os.path.expanduser(options['--config'])) as conf_file:
+                self.config = yaml.safe_load(conf_file)
+        except:
+            pass
         self.term = blessings.Terminal(
             force_styling=COLOR_OPT_MAP[options['--color']])
         self.verbosity = self.options['--verbose']
@@ -296,11 +340,11 @@ class Context(object):
             print('Options:')
             pprint.pprint(self.options)
             print('Config:')
-            pprint.pprint(self.config)
-        if self.options['--no-pagure']:
+            self.print_sanitized_config()
+        if self.options['--no-pagure'] or self.config == None:
             self.pagure = None
         else:
-            self.pagure = Pagure(
+            self.pagure = libpagure.Pagure(
                 pagure_token=self.config['pagure-token'],
                 pagure_repository=self.config['pagure-repository']
             )
@@ -320,6 +364,13 @@ class Context(object):
         date_result = self.runprocess(['date', '-Iseconds'],
                                       env={'GIT_COMMIT_DATE': ''})
         self.isodate_now = date_result.stdout.strip()
+
+    def print_sanitized_config(self):
+        # prints the config dictionary with sensitive informations starred
+        sensitives = ('gh-token', 'pagure-token')
+        pprint.pprint(dict((attr, val)
+                        if attr not in sensitives else (attr, '***')
+                        for attr, val in self.config.items()))
 
     commands = {}
     @classmethod
@@ -419,7 +470,7 @@ def ensure_clean_repo(ctx):
                    check_stderr='',
                    fail_message='Repository %s not clean' % os.getcwd())
 
-def get_rewiewers(ctx, tickets):
+def get_reviewers(ctx, tickets):
     """Get name & address of reviewers, or empty list for --no-reviewer
 
     Raises if a suitable reviewer is not found
@@ -472,7 +523,7 @@ def normalize_reviewer(ctx, reviewer):
         name = unidecode.unidecode(names[0])
         return name
 
-def apply_patches(ctx, patches, branch):
+def apply_patches(ctx, patches, branch, die_on_fail=True):
     """Apply patches to the given branch
 
     Checks out the branch
@@ -481,7 +532,10 @@ def apply_patches(ctx, patches, branch):
                     '%s/%s' % (ctx.config['remote'], branch)])
     for patch in patches:
         print('Aplying to %s: %s' % (branch, patch.subject))
-        ctx.runprocess(['git', 'am'], stdin_string=''.join(patch.lines))
+        res = ctx.runprocess(['git', 'am'], stdin_string=''.join(patch.lines),
+                             check_returncode=0 if die_on_fail else None)
+        if not die_on_fail and res.returncode:
+            raise RuntimeError(res.stderr)
     sha1 = ctx.runprocess(['git', 'rev-parse', 'HEAD']).stdout.strip()
     if ctx.verbosity:
         print('Resulting hash: %s' % sha1)
@@ -596,6 +650,21 @@ def _update_issue(ctx, ticket):
         else:
             print(ctx.term.green('Comment added'))
 
+def verify_remote_url(ctx):
+    remote = ctx.config['remote']
+    stdout = ctx.runprocess(['git', 'remote', 'get-url', '--push', remote]).stdout
+    remote_url = stdout.splitlines()[0]
+
+    if GIT_REMOTE_SERVER not in remote_url:
+        print(ctx.term.red(
+            '!!! WARNING !!! not pushing to {} git repo').format(
+                GIT_REMOTE_SERVER))
+        response = input(
+            'Push to "{}"? [y/n] '.format(
+                remote_url))
+        if response.lower() != 'y':
+            ctx.die('Aborting push')
+
 def _close_issue(ctx, ticket):
     if ticket.is_closed():
         # nothing to do
@@ -654,7 +723,7 @@ def push_command(ctx):
     else:
         tickets = []
 
-    reviewers = get_rewiewers(ctx, tickets)
+    reviewers = get_reviewers(ctx, tickets)
     if reviewers:
         for reviewer in reviewers:
             print('Reviewer: %s' % reviewer)
@@ -691,6 +760,7 @@ def push_command(ctx):
             (len(patches), ', '.join(branches)))
 
     remote = ctx.config['remote']
+    verify_remote_url(ctx)
 
     if not ctx.options['--no-fetch']:
         print('Fetching...')
@@ -835,6 +905,155 @@ def sorted_commits(commits):
     return result
 
 
+def backport(ctx, repo, pr):
+    try:
+        backport_branches = ctx.options['--backport']
+    except KeyError:
+        try:
+            backport_branches = ctx.options['--branch']
+        except KeyError:
+            return
+
+    try:
+        ctx.config['remote']
+        ctx.config['gh-fork-remote']
+        ctx.config['gh-token']
+        ctx.config['clean-repo-path']
+    except KeyError as exc:
+        ctx.die("%s is not set in configuration file. Backport must be "
+                "handled manually." % exc)
+
+    patches = list(ctx.get_patches())
+    os.chdir(cleanpath(ctx.config['clean-repo-path']))
+    github_login = github3.login(token=ctx.config['gh-token']).me().login
+
+    rev_parse = ctx.runprocess(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
+    old_branch = rev_parse.stdout.strip()
+
+    for bb in backport_branches:
+        try:
+            res = ctx.runprocess(
+                ['git', 'checkout', '%s/%s' % (ctx.config['remote'], bb)],
+                check_returncode=None
+            )
+            if res.returncode:
+                print(ctx.term.red(
+                    "Failed to checkout %s/%s. Manual backport is needed. %s"
+                    % (ctx.config['remote'], bb, res.stderr)
+                ))
+                continue
+
+            try:
+                sha = apply_patches(ctx, patches, bb, die_on_fail=False)
+            except RuntimeError as exc:
+                print(ctx.term.red(
+                    "Failed to apply patches onto %s/%s. Manual backport is "
+                    "needed." % (ctx.config['remote'], bb)
+                ))
+                if ctx.verbosity:
+                    print(ctx.term.red(res.stderr))
+                continue
+            print(
+                "Applied patches on %s/%s" % (ctx.config['remote'], bb)
+            )
+
+            backport_name = 'backport_pr%d_%s' % (pr.number, bb)
+            res = ctx.runprocess(
+                ['git', 'push', ctx.config['gh-fork-remote'],
+                 "%s:refs/heads/%s" % (sha, backport_name)],
+                check_returncode=None, timeout=60,
+            )
+            if res.returncode:
+                print(ctx.term.red(
+                    "Failed to push %s to %s/%s"
+                    % (sha, ctx.config['gh-fork-remote'], backport_name)
+                ))
+                continue
+
+            print(
+                "Pushed %s to %s/%s"
+                % (sha, ctx.config['gh-fork-remote'], backport_name)
+            )
+            backport_pr = repo.create_pull(
+                title="[Backport][%s] %s" % (bb, pr.title),
+                base=bb,
+                head="%s:%s" % (github_login, backport_name),
+                body="This PR was opened automatically because PR #%d was "
+                     "pushed to %s and backport to %s is required."
+                     % (pr.number, pr.base.ref, bb),
+            )
+            backport_issue = backport_pr.issue()
+            backport_issue.add_labels('ack')
+            backport_issue.create_comment(
+                'PR was ACKed automatically because this is backport of PR '
+                '#%d. Wait for CI to finish before pushing. In case of '
+                'questions or problems contact @%s who is author of the '
+                'original PR.' % (pr.number, pr.user.login)
+            )
+            print(ctx.term.green(
+                "Created and auto-ACKed PR %d against branch %s: %s"
+                % (pr.number, bb, pr.html_url)
+            ))
+        finally:
+            print('Cleaning up')
+            ctx.runprocess(['git', 'am', '--abort'], check_returncode=None)
+            ctx.runprocess(['git', 'reset', '--hard'], check_returncode=None)
+            ctx.runprocess(['git', 'checkout', old_branch],
+                           check_returncode=None)
+            ctx.runprocess(['git', 'clean', '-fxd'], check_returncode=None)
+
+
+
+@Context.command('backport')
+def backport_command(ctx):
+    if list(ctx.get_patches()):
+        ctx.die('No patches are allowed when pushing pull request')
+
+    repo = get_gh_repo(ctx)
+    target_dir = os.path.expanduser(ctx.config['patchdir'])
+    pr = repo.pull_request(ctx.options['PR_ID'])
+
+    pr_is = repo.issue(pr.number)
+    labels = labels_names(pr_is.labels())
+
+    if 'ack' not in labels:
+        ctx.die('Pull request is not ACKed')
+
+    if 'rejected' in labels:
+        ctx.die('Pull request is rejected')
+
+    if not pr.mergeable:
+        ctx.die('Pull request is not mergeable.')
+
+    most_recent_results = {}
+    for s in repo.commit(pr.head.sha).statuses():
+        if s.context not in most_recent_results:
+            most_recent_results[s.context] = s.state
+
+    states = most_recent_results.values()
+    if 'error' in states or 'failure' in states:
+        ctx.die('Pull request failed CI test(s)')
+    elif 'pending' in states:
+        ctx.die('CI have not completed testing the pull request yet')
+    # remove ^^^
+
+    try:
+        commit_num = 0
+        for commit in sorted_commits(list(pr.commits())):
+            patch_name = patch_filename(commit.message, commit_num)
+            patch_path = os.path.join(target_dir, patch_name)
+            with open(patch_path, 'wb') as patch_file:
+                patch_file.write(commit.patch())
+            commit_num += 1
+    except Exception as e:
+        delete_patches(target_dir)
+        ctx.die('Failed to get patch(es): {}'.format(e))
+
+    backport(ctx, repo, pr)
+    delete_patches(target_dir)
+
+
+
 @Context.command('pr-push')
 def pr_push_command(ctx):
     if list(ctx.get_patches()):
@@ -859,6 +1078,28 @@ def pr_push_command(ctx):
     if 'pushed' in labels:
         ctx.die('Pull request was already pushed')
 
+    if not pr.mergeable:
+        ctx.die('Pull request is not mergeable.')
+
+    # TODO: use with CombinedStatus once released
+    # status = repo.commit(pr.head.sha).status()
+    # if status.state in ('error', 'failure',):
+    #     ctx.die('Pull request failed CI test(s)')
+    # elif status.state == 'pending':
+    #     ctx.die('CI have not completed testing the pull request yet')
+    # remove vvv
+    most_recent_results = {}
+    for s in repo.commit(pr.head.sha).statuses():
+        if s.context not in most_recent_results:
+            most_recent_results[s.context] = s.state
+
+    states = most_recent_results.values()
+    if 'error' in states or 'failure' in states:
+        ctx.die('Pull request failed CI test(s)')
+    elif 'pending' in states:
+        ctx.die('CI have not completed testing the pull request yet')
+    # remove ^^^
+
     try:
         commit_num = 0
         for commit in sorted_commits(list(pr.commits())):
@@ -871,23 +1112,30 @@ def pr_push_command(ctx):
         delete_patches(target_dir)
         ctx.die('Failed to get patch(es): {}'.format(e))
 
+    ctx.options['--branch'] = [pr.base.ref]
     try:
         # use regular `ipatool push`
         push_command(ctx)
+    except libpagure.exceptions.APIError as e:
+        ctx.die('Pagure API Error: {}'.format(e))
+    except Exception:
+        pass
+    else:
+        if ((not ctx.options.get('--dry-run', False)) and
+                ctx.push_info.get('pushed', False)):
+            print("Adding label 'pushed'")
+            pr_is.add_labels('pushed')
+            pr_is.refresh(conditional=True)
+
+            pr_is.create_comment(ctx.push_info['pagure_comment'])
+            pr_is.refresh(conditional=True)
+
+            print("Closing pull request {}".format(pr.number))
+            pr_is.close()
+
+            backport(ctx, repo, pr)
     finally:
         delete_patches(target_dir)
-
-    if ((not ctx.options.get('--dry-run', False)) and
-            ctx.push_info.get('pushed', False)):
-        print("Adding label 'pushed'")
-        pr_is.add_labels('pushed')
-        pr_is.refresh(conditional=True)
-
-        pr_is.create_comment(ctx.push_info['pagure_comment'])
-        pr_is.refresh(conditional=True)
-
-        print("Closing pull request {}".format(pr.number))
-        pr_is.close()
 
 
 @Context.command('pr-ack')
