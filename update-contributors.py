@@ -37,8 +37,8 @@ def chdir(path):
 
 def update_changelog(git_directory, branch):
     with chdir(git_directory):
-        cmd = ['git', 'log', '--format=format:%aN']
-        git_authors = subprocess.check_output(cmd, stderr=subprocess.STDOUT).splitlines()
+        cmd = ['git', 'log', '--format=format:%aN', '--use-mailmap']
+        git_authors = subprocess.check_output(cmd, stderr=subprocess.STDOUT, encoding='UTF-8').splitlines()
         git_authors = set(git_authors)
 
     contributors_file_path = os.path.join(git_directory, 'Contributors.txt')
@@ -58,10 +58,10 @@ def update_changelog(git_directory, branch):
                 in_developers = False
                 authors = list(git_authors | file_authors)
                 collator = icu.Collator.createInstance(icu.Locale('en_US.UTF-8'))
-                authors.sort(cmp=collator.compare, key=lambda x: x.split()[-1].lower())
+                authors.sort(key=collator.getSortKey)
 
                 for author in authors:
-                    new_file.append("\t%s\n" % author)
+                    new_file.append(u"\t%s\n" % author)
 
             if in_developers:
                 author = line.strip()
@@ -70,7 +70,7 @@ def update_changelog(git_directory, branch):
                 new_file.append(line)
 
         (update_fd, update_file) = tempfile.mkstemp()
-        update_file_content = "".join(new_file) #.encode("UTF-8")
+        update_file_content = u"".join(new_file).encode("UTF-8")
         os.write(update_fd, update_file_content)
         os.close(update_fd)
         shutil.move(update_file, contributors_file_path)
