@@ -152,6 +152,7 @@ class App(object):
         self._print_wiki(fixed_here_tickets, bugs, git)
 
     def _get_commits(self):
+        global GIT_DIR
         git = GitInfo(GIT_DIR)
         log = git.get_log(self.args.revision_range)
         git.add_commits(log)
@@ -247,6 +248,7 @@ class App(object):
 
 
 def parse_args():
+    global GIT_DIR;
     desc = """
     Release notes \n \n
 
