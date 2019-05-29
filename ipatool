@@ -252,6 +252,9 @@ class Patch(object):
 
         self.ticket_numbers = []
         for line in self.lines:
+            if line.startswith('-') or line.startswith(' '):
+                # ignore ticket links in removed or context diff lines
+                continue
             regex = '%s(\d+)' % re.escape(config['ticket-url'])
             for match in re.finditer(regex, line):
                 self.ticket_numbers.append(int(match.group(1)))
