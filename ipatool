@@ -1019,7 +1019,7 @@ def backport_command(ctx):
     if 'rejected' in labels:
         ctx.die('Pull request is rejected')
 
-    if not pr.mergeable:
+    if 'pushed' not in labels and not pr.mergeable:
         ctx.die('Pull request is not mergeable.')
 
     most_recent_results = {}
