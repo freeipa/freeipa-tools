@@ -906,13 +906,10 @@ def sorted_commits(commits):
 
 
 def backport(ctx, repo, pr):
-    try:
-        backport_branches = ctx.options['--backport']
-    except KeyError:
-        try:
-            backport_branches = ctx.options['--branch']
-        except KeyError:
-            return
+    backport_branches = (
+        set(ctx.options.get('--backport', []))
+        | set(ctx.options.get('--branch', []))
+    )
 
     try:
         ctx.config['remote']
