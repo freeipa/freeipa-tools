@@ -12,7 +12,7 @@ Usage:
   ipatool [options] [-v...] pr-list [--state=(open|closed|all)]... [--label=NAME...]
   ipatool [options] [-v...] pr-push PR_ID [--backport=BRANCH...] [--reviewer=NAME...]
   ipatool [options] [-v...] pr-reject PR_ID --comment=TEXT
-  ipatool [options] [-v...] backport PR_ID --branch=BRANCH
+  ipatool [options] [-v...] backport PR_ID --branch=BRANCH...
 
 Common Options:
   -h, --help           Display this help and exit
