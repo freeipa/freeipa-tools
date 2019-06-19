@@ -534,7 +534,7 @@ def apply_patches(ctx, patches, branch, die_on_fail=True):
     ctx.runprocess(['git', 'checkout',
                     '%s/%s' % (ctx.config['remote'], branch)])
     for patch in patches:
-        print('Aplying to %s: %s' % (branch, patch.subject))
+        print('Applying to %s: %s' % (branch, patch.subject))
         res = ctx.runprocess(['git', 'am'], stdin_string=''.join(patch.lines),
                              check_returncode=0 if die_on_fail else None)
         if not die_on_fail and res.returncode:
