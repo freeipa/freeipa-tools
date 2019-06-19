@@ -908,12 +908,7 @@ def sorted_commits(commits):
     return result
 
 
-def backport(ctx, repo, pr):
-    backport_branches = (
-        set(ctx.options.get('--backport', []))
-        | set(ctx.options.get('--branch', []))
-    )
-
+def backport(ctx, backport_branches, repo, pr):
     try:
         ctx.config['remote']
         ctx.config['gh-fork-remote']
@@ -1049,7 +1044,7 @@ def backport_command(ctx):
         delete_patches(target_dir)
         ctx.die('Failed to get patch(es): {}'.format(e))
 
-    backport(ctx, repo, pr)
+    backport(ctx, ctx.options.get('--branch', []), repo, pr)
     delete_patches(target_dir)
 
 
@@ -1133,7 +1128,7 @@ def pr_push_command(ctx):
             print("Closing pull request {}".format(pr.number))
             pr_is.close()
 
-            backport(ctx, repo, pr)
+            backport(ctx, ctx.options.get('--backport', []), repo, pr)
     finally:
         delete_patches(target_dir)
 
