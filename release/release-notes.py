@@ -139,7 +139,7 @@ class App(object):
         else:
             fixed_here_tickets = primary_fixed
 
-        ticket_issues = [issue.get('id') for issue in fixed_here_tickets]
+        ticket_issues = list(set([issue.get('id') for issue in fixed_here_tickets]))
         for commit in git.commits:
             if len(commit.tickets) > 0:
                 for issue in commit.tickets:
@@ -147,9 +147,14 @@ class App(object):
                         fixed_here_tickets.append(pagure.issue_info(issue))
                         ticket_issues.append(issue)
 
-        fixed_here_tickets.sort(key=lambda x: x.get('id'))
-        bugs = self._get_bugs(fixed_here_tickets)
-        self._print_wiki(fixed_here_tickets, bugs, git)
+        fixed_tickets = {}
+        for t in fixed_here_tickets:
+            if t['id'] not in fixed_tickets:
+                fixed_tickets[t['id']] = t
+
+        sorted_tickets = sorted(fixed_tickets.values(), key=lambda x: x['id'])
+        bugs = self._get_bugs(sorted_tickets)
+        self._print_wiki(sorted_tickets, bugs, git)
 
     def _get_commits(self):
         global GIT_DIR
@@ -186,6 +191,8 @@ class App(object):
         release_notes = []
         for ticket in tickets:
             release_note = get_custom_field(ticket, 'changelog')
+            if not release_note and '[RFE]' in ticket['title']:
+                release_note = '\n'
             if release_note:
                 release_notes.append(
                     "* {t[id]}: {t[title]}\n{changes}\n--------".format(
@@ -221,7 +228,7 @@ class App(object):
 
     def _print_commits_wiki(self, git):
         print("== Detailed changelog since %s ==" % self.args.prev_version)
-        authors = git.authors.keys()
+        authors = list(git.authors.keys())
         authors.sort()
         for mail in authors:
             author = git.authors[mail]

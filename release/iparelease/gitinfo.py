@@ -87,13 +87,13 @@ class GitInfo():
         datestr = since.isoformat()
         cmd = ["git", "log", "--since", datestr]
         os.chdir(self.repopath)
-        result = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        result = subprocess.check_output(cmd, stderr=subprocess.STDOUT, encoding='utf-8')
         self.add_commits(result)
 
     def get_log(self, revision_range):
         cmd = ["git", "log", revision_range]
         os.chdir(self.repopath)
-        result = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        result = subprocess.check_output(cmd, stderr=subprocess.STDOUT, encoding='utf-8')
         return result
 
     def add_commits(self, git_output):
