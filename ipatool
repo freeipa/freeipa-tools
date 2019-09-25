@@ -988,7 +988,7 @@ def backport(ctx, backport_branches, repo, pr):
             )
             print(ctx.term.green(
                 "Created and auto-ACKed PR %d against branch %s: %s"
-                % (pr.number, bb, pr.html_url)
+                % (backport_pr.number, bb, backport_pr.html_url)
             ))
         finally:
             print('Cleaning up')
