@@ -35,17 +35,32 @@ def chdir(path):
     finally:
         os.chdir(old_dir)
 
-def update_changelog(git_directory, branch):
+def contributors_from_git(git_directory, branch):
+    git_authors = []
     with chdir(git_directory):
         cmd = ['git', 'log', '--format=format:%aN', '--use-mailmap']
         git_authors = subprocess.check_output(cmd, stderr=subprocess.STDOUT, encoding='UTF-8').splitlines()
-        git_authors = set(git_authors)
+    return set(git_authors)
+
+def contributors_from_po(git_directory, branch):
+    po_authors = []
+    with chdir(git_directory):
+        cmd = ['git', 'grep', '-h', '#zanata', 'po/']
+        po_attrs = subprocess.check_output(cmd, stderr=subprocess.STDOUT, encoding='UTF-8').splitlines()
+        for author in po_attrs:
+            po_authors.append(" ".join([x for x in author.split() if x[0] != '#' and x[0] != '<' and not x[0].isdigit()]))
+    return set(po_authors)
+
+def update_changelog(git_directory, branch):
+    git_authors = contributors_from_git(git_directory, branch)
+    po_authors = contributors_from_po(git_directory, branch)
 
     contributors_file_path = os.path.join(git_directory, 'Contributors.txt')
     with open(contributors_file_path, 'r') as f:
         lines = f.readlines()
         new_file = []
         in_developers = False
+        in_translators = False
         file_authors = set()
         for line in lines:
             if line.startswith("Developers:"):
@@ -53,17 +68,28 @@ def update_changelog(git_directory, branch):
                 new_file.append(line)
                 continue
 
-            if in_developers and not line.strip():
+            if line.startswith("Translators:"):
+                in_translators = True
+                new_file.append(line)
+                continue
+
+            if (in_developers or in_translators) and not line.strip():
                 # last developer
-                in_developers = False
-                authors = list(git_authors | file_authors)
+                if in_developers:
+                    in_developers = False
+                    authors = list(git_authors | file_authors)
+                if in_translators:
+                    in_translators = False
+                    authors = list(po_authors | file_authors)
                 collator = icu.Collator.createInstance(icu.Locale('en_US.UTF-8'))
                 authors.sort(key=collator.getSortKey)
 
                 for author in authors:
                     new_file.append(u"\t%s\n" % author)
 
-            if in_developers:
+                file_authors = set()
+
+            if in_developers or in_translators:
                 author = line.strip()
                 file_authors.add(author)
             else:
