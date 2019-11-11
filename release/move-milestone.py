@@ -117,10 +117,16 @@ def main():
         message = args.message.format(
             move_from=args.move_from, move_to=args.move_to)
 
-    pagure = Pagure(
-        pagure_repository=PAGURE_REPO,
-        pagure_token=pagure_token
-    )
+    try:
+        pagure = Pagure(
+            pagure_repository=PAGURE_REPO,
+            pagure_token=pagure_token
+        )
+    except TypeError:
+        pagure = Pagure(
+            repo_to=PAGURE_REPO,
+            pagure_token=pagure_token
+        )
 
     move_tickets_to_milestone(
         pagure, args.move_from, args.move_to, message=message)

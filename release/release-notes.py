@@ -116,10 +116,16 @@ class App(object):
             )
 
     def run(self):
-        pagure = Pagure(
-            pagure_repository=PAGURE_REPO,
-            pagure_token=self.pagure_token
-        )
+        try:
+            pagure = Pagure(
+                pagure_repository=PAGURE_REPO,
+                pagure_token=self.pagure_token
+            )
+        except TypeError:
+            pagure = Pagure(
+                repo_to=PAGURE_REPO,
+                pagure_token=self.pagure_token
+            )
         git = self._get_commits()
 
         # get all fixed tickets from the primary milestone

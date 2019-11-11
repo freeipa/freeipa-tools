@@ -348,10 +348,17 @@ class Context(object):
         if self.options['--no-pagure'] or self.config == None:
             self.pagure = None
         else:
-            self.pagure = libpagure.Pagure(
-                pagure_token=self.config['pagure-token'],
-                pagure_repository=self.config['pagure-repository']
-            )
+            try:
+                self.pagure = libpagure.Pagure(
+                    pagure_token=self.config['pagure-token'],
+                    pagure_repository=self.config['pagure-repository']
+                )
+            except TypeError:
+                self.pagure = libpagure.Pagure(
+                    pagure_token=self.config['pagure-token'],
+                    repo_to=self.config['pagure-repository']
+                )
+
 
         self.color_arg = self.options['--color']
         if self.color_arg == 'auto':
