@@ -140,22 +140,25 @@ class App(object):
             )
         git = self._get_commits()
 
-        # get all fixed tickets from the primary milestone
-        primary_closed = query(
-            pagure, "Closed", milestones=[self.args.milestone])
-        primary_fixed = filter_by_close_status(primary_closed, [u'fixed'])
+        if not self.args.nomilestones:
+            # get all fixed tickets from the primary milestone
+            primary_closed = query(
+                pagure, "Closed", milestones=[self.args.milestone])
+            primary_fixed = filter_by_close_status(primary_closed, [u'fixed'])
 
-        # get all fixed tickets from other milestones that can be possibly
-        # fixed in this release
-        if self.args.milestones:
-            possibly_closed = query(
-                pagure, "Closed", milestones=self.args.milestones)
-            possibly_fixed = filter_by_close_status(
-                possibly_closed, [u'fixed'])
-            fixed_here_tickets = self._filter_tickets(
-                possibly_fixed, git.commits) + primary_fixed
+            # get all fixed tickets from other milestones that can be possibly
+            # fixed in this release
+            if self.args.milestones:
+                possibly_closed = query(
+                    pagure, "Closed", milestones=self.args.milestones)
+                possibly_fixed = filter_by_close_status(
+                    possibly_closed, [u'fixed'])
+                fixed_here_tickets = self._filter_tickets(
+                    possibly_fixed, git.commits) + primary_fixed
+            else:
+                fixed_here_tickets = primary_fixed
         else:
-            fixed_here_tickets = primary_fixed
+            fixed_here_tickets = []
 
         ticket_issues = list(set([issue.get('id') for issue in fixed_here_tickets]))
         for commit in git.commits:
@@ -327,6 +330,9 @@ def parse_args():
     parser.add_argument('--repo', dest='git_repo', action='store',
                         help='Path to git repo to process',
                         metavar='GIT_DIR', default=GIT_DIR)
+    parser.add_argument('--nomilestones', dest='nomilestones',
+                        action="store_true",
+                        help="Only use tickets mentioned in the commits")
 
     args = parser.parse_args()
 
