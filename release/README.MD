@@ -61,3 +61,74 @@ The tool requires to have access to two resources:
 
 A resulting draft is printed on the standard output.
 
+Supported release note sources
+==============================
+
+The tool is capable to pick up release notes from tickets and git commits.
+
+Pagure tickets
+--------------
+
+Each Pagure ticket in FreeIPA project has two custom fields:
+
+ - 'changelog' is a text field that can be used to write down concise
+   description of a release note
+
+ - 'knownissue' is a boolean field ('true' / 'false') that is shown as a
+   checkbox by Pagure.
+
+When a ticket is marked as 'known issue', its release note will be shown in the
+'Known issues' section of the draft document produced by the tool. It makes
+possible to document tickets that currently have no fix implemented.
+
+Git commits
+-----------
+
+Any git commit can contain a reference to a Pagure ticket. For historical
+reasons, two forms of URLs are supported:
+
+TICKET_RE = r"^\s*[\w: ]*\s*https://fedorahosted.org/freeipa/ticket/(\d+)\s*$"
+TICKET_RE2 = r"^\s*[\w: ]*\s*https://pagure.io/freeipa/issue/(\d+)\s*$"
+
+In addition to a ticket reference, it is possible to add a release note
+directly in the commit message by specifying 'RN: ' prefix:
+
+commit 2997a74abcfdb0ad1c0b5356949e557c3b624d3c
+Author: Alexander Bokovoy <abokovoy@redhat.com>
+Date:   Mon Mar 16 10:35:02 2020 +0200
+
+    Prevent adding IPA objects as external members of external groups
+
+    The purpose of external groups in FreeIPA is to be able to reference
+    objects only existing in trusted domains. These members get resolved
+    through SSSD interfaces but there is nothing that prevents SSSD from
+    resolving any IPA user or group if they have security identifiers
+    associated.
+
+    Enforce a check that a SID returned by SSSD does not belong to IPA
+    domain and raise a validation error if this is the case. This would
+    prevent adding IPA users or groups as external members of an external
+    group.
+
+    RN: Command 'ipa group-add-member' allowed to specify any user or group
+    RN: for '--external' option. A stricter check is added to verify that
+    RN: a group or user to be added as an external member does not come
+    RN: from IPA domain.
+
+    Fixes: https://pagure.io/freeipa/issue/8236
+    Signed-off-by: Alexander Bokovoy <abokovoy@redhat.com>
+    Reviewed-By: Florence Blanc-Renaud <flo@redhat.com>
+
+The content of RN:-prefixed lines will be appended to the content of the
+'changelog' field in the ticket and resulted release note will be produced.
+
+Suggested usage
+---------------
+
+These two forms of change log information allow easily to gather details for
+both release notes and known issues. From practical reason, it makes sense to
+use ticket-specific changelog field to document a known issue (by checking the
+'knownissue' checkbox) until an issue is solved. At that point, commit messages
+can include a real release note and 'knownissue' checkbox can be cleared, along
+with a changelog note in the ticket.
+
