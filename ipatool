@@ -952,7 +952,8 @@ def backport(ctx, backport_branches, repo, pr):
 
             try:
                 sha = apply_patches(ctx, patches, bb, die_on_fail=False)
-            except RuntimeError as exc:
+            except RuntimeError as e:
+                print(ctx.term.red('Failure to apply patches: {}'.format(e)))
                 print(ctx.term.red(
                     "Failed to apply patches onto %s/%s. Manual backport is "
                     "needed." % (ctx.config['remote'], bb)
@@ -1144,7 +1145,8 @@ def pr_push_command(ctx):
             if ctx.options['--autobackport']:
                 pat = re.compile(r'^ipa-\d+-\d+$')
                 backport_branches.update(l for l in labels if pat.match(l))
-            backport(ctx, backport_branches, repo, pr)
+            if backport_branches:
+                backport(ctx, backport_branches, repo, pr)
     finally:
         delete_patches(target_dir)
 
