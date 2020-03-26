@@ -17,10 +17,7 @@ WIKI_BLOB = """
 The FreeIPA team would like to announce FreeIPA %(version)s release!
 
 It can be downloaded from http://www.freeipa.org/page/Downloads. Builds for
-Fedora '''FIXME''' VERSION '''END FIXME''' will be available in the official
-'''FIXME LINK'''
-[https://copr.fedorainfracloud.org/coprs/g/freeipa/freeipa-4-7/ COPR repository].
-'''END FIXME'''
+Fedora distributions will be available from the official repository soon.
 
 == Highlights in %(version)s ==
 
@@ -33,7 +30,8 @@ Fedora '''FIXME''' VERSION '''END FIXME''' will be available in the official
 
 === Bug fixes ===
 FreeIPA %(version)s is a stabilization release for the features delivered as a
-part of '''FIXME''' 4.7.0 '''END FIXME'''.
+part of %(major_version)s version series.
+
 There are more than %(num_bugs)s bug-fixes details of which can be seen in
 the list of resolved tickets below.
 
@@ -235,6 +233,7 @@ class App(object):
         wiki = WIKI_BLOB % dict(
             version=self.args.version,
             prev_version=self.args.prev_version,
+            major_version=self.args.major_version,
             release_date=self.args.release_date,
             num_bugs=bugs,
             release_notes=self._release_notes(tickets)
