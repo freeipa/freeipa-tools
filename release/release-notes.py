@@ -27,6 +27,7 @@ Fedora distributions will be available from the official repository soon.
 
 === Enhancements ===
 === Known Issues ===
+%(known_issues)s
 
 === Bug fixes ===
 FreeIPA %(version)s is a stabilization release for the features delivered as a
@@ -209,10 +210,12 @@ class App(object):
 
         return filtered
 
-    def _release_notes(self, tickets):
+    def _release_notes_and_known_issues(self, tickets):
         release_notes = []
+        known_issues = []
         for ticket in tickets:
             release_note = get_custom_field(ticket, 'changelog')
+            knownissue = get_custom_field(ticket, 'knownissue', default='false')
             if isinstance(release_note, str):
                 release_note = ':: ' + release_note
             if isinstance(release_note, list):
@@ -220,15 +223,20 @@ class App(object):
             if not release_note and '[RFE]' in ticket['title']:
                 release_note = '\n'
             if release_note:
-                release_notes.append(
-                    "* {t[id]}: {t[title]}\n{changes}\n--------".format(
+                release_note = "* {t[id]}: {t[title]}\n{changes}\n--------".format(
                         t=ticket, changes=release_note
                     )
-                )
-        return "\n".join(release_notes)
+                if knownissue != 'false':
+                    known_issues.append(release_note)
+                else:
+                    release_notes.append(release_note)
+        result = {'release_notes': "\n".join(release_notes),
+                  'known_issues': "\n".join(known_issues)}
+        return result
 
     def _print_wiki(self, tickets, bugs, git):
         bugs = len(bugs) - len(bugs) % 10 # get only estimate
+        notes = self._release_notes_and_known_issues(tickets)
 
         wiki = WIKI_BLOB % dict(
             version=self.args.version,
@@ -236,7 +244,8 @@ class App(object):
             major_version=self.args.major_version,
             release_date=self.args.release_date,
             num_bugs=bugs,
-            release_notes=self._release_notes(tickets)
+            release_notes=notes['release_notes'],
+            known_issues=notes['known_issues']
         )
         print(wiki)
         self._print_tickets_wiki(tickets)
