@@ -928,7 +928,11 @@ def backport(ctx, backport_branches, repo, pr):
 
     patches = list(ctx.get_patches())
     os.chdir(cleanpath(ctx.config['clean-repo-path']))
-    github_login = github3.login(token=ctx.config['gh-token']).me().login
+    try:
+        github_login = github3.login(token=ctx.config['gh-token']).me().login
+    except KeyError as e:
+        print(ctx.term.red('Github failure response: {}'.format(e)))
+        return
 
     rev_parse = ctx.runprocess(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
     old_branch = rev_parse.stdout.strip()
