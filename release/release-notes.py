@@ -100,6 +100,19 @@ def get_custom_field(ticket, name, default=None):
     return default
 
 
+def append_custom_field(ticket, name, value):
+    for field in ticket.get('custom_fields', ()):
+        if field['name'].lower() == name.lower():
+            field['value'].append(value)
+            return
+    field = {}
+    field['name'] = name
+    field['value'] = value
+    fields = ticket.get('custom_fields', ())
+    fields.append(field)
+    ticket['custom_fields'] = fields
+
+
 class App(object):
     def __init__(self, args):
         self.args = args
@@ -152,6 +165,11 @@ class App(object):
                     if issue not in ticket_issues:
                         fixed_here_tickets.append(pagure.issue_info(issue))
                         ticket_issues.append(issue)
+                    if commit.release_note:
+                        for t in fixed_here_tickets:
+                            if str(t.get('id')) == issue:
+                                append_custom_field(t, 'changelog', commit.release_note)
+                                break
 
         fixed_tickets = {}
         for t in fixed_here_tickets:
@@ -197,6 +215,10 @@ class App(object):
         release_notes = []
         for ticket in tickets:
             release_note = get_custom_field(ticket, 'changelog')
+            if isinstance(release_note, str):
+                release_note = ':: ' + release_note
+            if isinstance(release_note, list):
+                release_note = ':: ' + ' '.join(release_note)
             if not release_note and '[RFE]' in ticket['title']:
                 release_note = '\n'
             if release_note:
