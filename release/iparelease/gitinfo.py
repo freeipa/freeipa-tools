@@ -13,11 +13,11 @@ DESCRIPTION_RE = r"^    (.*)$"
 REVIEWER_RE = r"^\s*Reviewed-By: (.+) <(.+)>$"
 TICKET_RE = r"^\s*[\w: ]*\s*https://fedorahosted.org/freeipa/ticket/(\d+)\s*$"
 TICKET_RE2 = r"^\s*[\w: ]*\s*https://pagure.io/freeipa/issue/(\d+)\s*$"
-
+RELEASENOTE_RE = r"^\s*RN:\s+(.*)$"
 
 class GitCommit(object):
     def __init__(self, commit='', author='', date='',
-                 summary='', description='', reviewers=None):
+                 summary='', description='', reviewers=None, release_note=None):
         self.commit = commit
         self.author = author
         self.date = date
@@ -25,6 +25,7 @@ class GitCommit(object):
         self.description = description
         self.reviewers = reviewers or []
         self.tickets = set()
+        self.release_note = release_note or []
 
     def __str__(self):
         return '\n'.join([
@@ -32,7 +33,8 @@ class GitCommit(object):
             'Author: %s <%s>' % (self.author.name, self.author.mail),
             'Date: %s' % self.date,
             'Summary: %s' % self.summary,
-            'Tickets: %s' % self._tickets()
+            'Tickets: %s' % self._tickets(),
+            'Release notes: %s' % ' '.join(self.release_note)
         ])
 
     def to_short(self):
@@ -158,6 +160,9 @@ class GitInfo():
                 author = self.get_add_author(name, mail)
                 commit.reviewers.append(author)
                 author.reviews.append(commit)
+            release_note = re.match(RELEASENOTE_RE, line)
+            if release_note:
+                commit.release_note.append(release_note.groups()[0])
             ticket_g = re.match(TICKET_RE, line)
             self._get_ticket(line, commit)
 
