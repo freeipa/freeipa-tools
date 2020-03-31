@@ -681,6 +681,10 @@ def _close_issue(ctx, ticket):
         # nothing to do
         print("Issue already closed.")
         return
+    if ctx.options.get('--backport') or ctx.options.get('--autobackport'):
+        # Backports must be pushed, thus ticket must remain opened.
+        return
+
     close_ticket = ctx.config.get('close-issue', 'ask')
     if close_ticket == 'no':
         do_close = False
