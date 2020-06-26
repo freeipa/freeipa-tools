@@ -180,7 +180,7 @@ def profile_ca(builder, ca_nick, ca):
     return builder
 
 
-def profile_server(builder, ca_nick, ca,
+def profile_server(builder, ca_nick, _ca,
                    warp=datetime.timedelta(days=0), dns_name=None,
                    badusage=False):
     now = datetime.datetime.utcnow() + warp
@@ -228,7 +228,7 @@ def profile_server(builder, ca_nick, ca,
 
 
 def profile_kdc(
-        realm, builder, ca_nick,
+        realm, builder, ca_nick, _ca,
         warp=datetime.timedelta(days=0), dns_name=None, badusage=False):
     """Needs to be curried with the realm."""
     now = datetime.datetime.utcnow() + warp
