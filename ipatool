@@ -543,8 +543,11 @@ def apply_patches(ctx, patches, branch, die_on_fail=True):
                     '%s/%s' % (ctx.config['remote'], branch)])
     for patch in patches:
         print('Applying to %s: %s' % (branch, patch.subject))
-        res = ctx.runprocess(['git', 'am'], stdin_string=''.join(patch.lines),
-                             check_returncode=0 if die_on_fail else None)
+        res = ctx.runprocess(
+            ['git', 'am', '--3way'],
+            stdin_string=''.join(patch.lines),
+            check_returncode=0 if die_on_fail else None,
+        )
         if not die_on_fail and res.returncode:
             raise RuntimeError(res.stderr)
     sha1 = ctx.runprocess(['git', 'rev-parse', 'HEAD']).stdout.strip()
