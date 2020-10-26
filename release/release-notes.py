@@ -8,6 +8,7 @@
 import sys
 import argparse
 import traceback
+import re
 from libpagure import Pagure
 
 from iparelease.gitinfo import GitInfo
@@ -102,7 +103,15 @@ def get_custom_field(ticket, name, default=None):
 def append_custom_field(ticket, name, value):
     for field in ticket.get('custom_fields', ()):
         if field['name'].lower() == name.lower():
-            field['value'].append(value)
+            f = field['value']
+            if not isinstance(f, (list, tuple)):
+                f = [f]
+            if isinstance(value, (list, tuple)):
+                for v in value:
+                    f.append(v)
+            else:
+                f.append(value)
+            field['value'] = f
             return
     field = {}
     field['name'] = name
@@ -238,7 +247,9 @@ class App(object):
         return result
 
     def _print_wiki(self, tickets, bugs, git):
-        bugs = len(bugs) - len(bugs) % 10 # get only estimate
+        _bugs = len(bugs) - len(bugs) % 10 # get only estimate
+        if _bugs == 0:
+            _bugs = len(bugs)
         notes = self._release_notes_and_known_issues(tickets)
 
         wiki = WIKI_BLOB % dict(
@@ -246,7 +257,7 @@ class App(object):
             prev_version=self.args.prev_version,
             major_version=self.args.major_version,
             release_date=self.args.release_date,
-            num_bugs=bugs,
+            num_bugs=_bugs,
             release_notes=notes['release_notes'],
             known_issues=notes['known_issues']
         )
@@ -259,11 +270,25 @@ class App(object):
         for ticket in tickets:
             num = ticket.get('id')
             summary = ticket.get('title')
+            rhbz = get_custom_field(ticket, 'rhbz', default=None)
             if self.args.links:
-                print("* [https://pagure.io/freeipa/issue/%s #%s] %s" %
-                    (num, num, summary))
+                format = "* [https://pagure.io/freeipa/issue/%s #%s] %s"
+                data = (num, num, summary)
+                if rhbz is not None:
+                    bz_list = [re.match(r'https://bugzilla.redhat.com/show_bug.cgi\?id=(\d+)', b)
+                          for b in rhbz.split(',')]
+                    bz = []
+                    for b in bz_list:
+                        if b:
+                            bz.append("[%s rhbz#%s]" % (b.group(0), b.group(1)))
+                    if bz:
+                        format = "* [https://pagure.io/freeipa/issue/%s #%s] (%s) %s"
+                        data = (num, num, ', '.join(bz), summary)
             else:
-                print("* %s %s" %(num, summary))
+                format = "* %s %s"
+                data = (num, summary)
+
+            print(format % data)
 
     def _print_commits_wiki(self, git):
         print("== Detailed changelog since %s ==" % self.args.prev_version)
