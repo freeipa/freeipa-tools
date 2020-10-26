@@ -163,6 +163,7 @@ import subprocess
 import re
 import collections
 import pprint
+from itertools import groupby
 
 import yaml       # yum install python3-PyYAML
 import blessings  # yum install python3-blessings
@@ -1205,7 +1206,7 @@ def pr_reject_command(ctx):
 
 @Context.command('pr-list')
 def pr_list_command(ctx):
-    prline_template = '{num: 5}\t{title:.50}\t{labels}\t{url}'
+    prline_template = '{num: 5}\t{title:.50}\t{labels}\t{url}\t{statuses}'
 
     states = ctx.options['--state']
     labels = ctx.options['--label']
@@ -1267,11 +1268,20 @@ def pr_list_command(ctx):
                 continue
             if lnames & labels_neg:
                 continue
+        commit_statuses = []
+        for c in pr.commits():
+            for statuses in c.statuses():
+                commit_statuses.append(statuses.state)
+        status_result = [list(i) for j, i in groupby(commit_statuses, lambda a: a)]
+        statuses = {}
+        for status in status_result:
+            statuses[status[0]] = len(status)
         print(prline_template.format(
             num=pr.number,
             title=pr.title,
             labels=' '.join(labels_colorize(labels)),
             url=pr.html_url,
+            statuses=statuses,
         ))
 
     # Human error detection section
