@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # Authors:
 #   Martin Kosek <mkosek@redhat.com>
 #
@@ -104,7 +104,7 @@ def update_changelog(git_directory, branch):
 def main():
     # Update changelog in current working directory master branch
     path = os.getcwd()
-    update_changelog(path, "master")
+    update_changelog(path, "HEAD")
 
 if __name__ == "__main__":
     main()
