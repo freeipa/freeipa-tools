@@ -42,7 +42,7 @@ Upgrade instructions are available on [[Upgrade]] page.
 == Feedback ==
 Please provide comments, bugs and other feedback via the freeipa-users mailing
 list (https://lists.fedoraproject.org/archives/list/freeipa-users@lists.fedorahosted.org/)
-or #freeipa channel on Freenode.
+or #freeipa channel on libera.chat.
 
 """
 
