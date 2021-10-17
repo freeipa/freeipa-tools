@@ -86,6 +86,24 @@ ipatool backport:
 
 """
 
+import collections
+import glob
+import os
+import pprint
+import re
+import string
+import subprocess
+import sys
+
+import blessings   # dnf install python3-blessings
+import bugzilla    # dnf install python3-bugzilla
+import docopt      # dnf install python3-docopt
+import github3     # dnf install python3-github3py
+import libpagure   # dnf install python3-libpagure
+import unidecode   # dnf install python3-unidecode
+import xtermcolor  # dnf install python3-xtermcolor
+import yaml        # dnf install python3-PyYAML
+
 SAMPLE_CONFIG = """
 # Local "clean" repository
 clean-repo-path: ~/dev/freeipa-clean
@@ -132,6 +150,9 @@ am-command: ["ssh", "ipa-devel-vm.local", "cd ~/freeipa/ ; git am -3"]
 # Currently unused :(
 browser: firefox
 
+# Bugzilla configuration
+bz-token: "0123456789abcdef0123456789abcdef01234567"
+
 # GitHub configuration
 # for the token, we require at least the 'repo', 'admin:org' group permissions
 # and the 'user:email' and 'read:user' permissions
@@ -154,24 +175,6 @@ gh-fork-remote: "mygh"
 # origin  ssh://git@pagure.io/freeipa.git (fetch)
 # origin  ssh://git@pagure.io/freeipa.git (push)
 """
-
-import glob
-import sys
-import os
-import string
-import subprocess
-import re
-import collections
-import pprint
-
-import yaml       # yum install python3-PyYAML
-import blessings  # yum install python3-blessings
-import github3    # yum install python3-github3py
-import unidecode  # yum install python3-unidecode
-import docopt     # yum install python3-docopt
-import xtermcolor # yum install python3-xtermcolor
-import libpagure  # yum install python3-libpagure
-
 
 MILESTONES = {
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
@@ -215,6 +218,7 @@ class Patch(object):
     * subject - name of the patch
     * lines - iterator of lines with the patch
     * ticket_numbers - numbers of referenced tickets
+    * bugzilla_numbers - numbers of referenced Bugzillas
     """
     def __init__(self, config, filename):
         if filename:
@@ -252,6 +256,7 @@ class Patch(object):
         self.patch_lines.extend(lines_iter)
 
         self.ticket_numbers = []
+        self.bugzilla_numbers = []
         for line in self.lines:
             if line.startswith('-') or line.startswith(' '):
                 # ignore ticket links in removed or context diff lines
@@ -259,6 +264,10 @@ class Patch(object):
             regex = '%s(\d+)' % re.escape(config['ticket-url'])
             for match in re.finditer(regex, line):
                 self.ticket_numbers.append(int(match.group(1)))
+
+            bz_regex = r'%s(\d+)' % re.escape(config['bugzilla-bug-url'])
+            for match in re.finditer(bz_regex, line):
+                self.bugzilla_numbers.append(int(match.group(1)))
 
     def add_reviewer(self, reviewer):
         if not re.match('^[-_a-zA-Z0-9]+: .*$', self.head_lines[-1]):
@@ -359,6 +368,19 @@ class Context(object):
                     repo_to=self.config['pagure-repository']
                 )
 
+        try:
+            self.bugzilla = bugzilla.Bugzilla(
+                url='https://bugzilla.redhat.com',
+                api_key=self.config['bz-token'],
+            )
+        except KeyError:
+            self.die(
+                'Attribute "bz-token" is missing, add it your config file.')
+        try:
+            assert self.bugzilla.logged_in
+        except Exception as exc:
+            self.die("Couldn't login to Bugzilla, error: {exc}".format(
+                exc=exc))
 
         self.color_arg = self.options['--color']
         if self.color_arg == 'auto':
@@ -724,6 +746,100 @@ def _close_issue(ctx, ticket):
             print(ctx.term.green('Issue closed'))
 
 
+def _update_bugzilla(ctx, ticket):
+    '''Iterate over `ticket.rhbz` to update its bugzillas.
+
+    Three possible actions for every BZ
+        - add a new comment with commit information
+        - set POST
+        - add keyword `TestCaseProvided`
+    '''
+
+    keyword = 'TestCaseProvided'
+    bugzilla_re = re.compile(
+        r'%s(\d+)' % re.escape(ctx.config['bugzilla-bug-url']))
+
+    bzs_to_add_push_info = []
+    bzs_to_set_post_comment = []
+    bzs_to_add_keyword = []
+
+    all_bugzillas = set()
+    for patch in ctx.get_patches():
+        all_bugzillas.update(patch.bugzilla_numbers)
+
+    all_bugzillas.update([x for x in bugzilla_re.findall(ticket.rhbz)])
+
+    for bz_id in all_bugzillas:
+        try:
+            # If api token is invalid or bug is not found this will fail,
+            # so update calls should not fail
+            bz = ctx.bugzilla.getbug(bz_id)
+        except Exception as exc:
+            print(ctx.term.red(
+                'Failed to get Bugzilla #{bz_id}, reason: {exc} '
+                '(Skipping)'.format(bz_id=bz_id, exc=exc)))
+            continue
+
+        # Add push info
+        response = input(
+            'Update Bugzilla #{bz_id} ({summary}) to include push info? '
+            '[y/N] '.format(bz_id, bz.summary))
+        if response.lower() == 'y':
+            bzs_to_add_push_info.append(bz_id)
+
+        # Set to POST
+        response = input(
+            'Set Bugzilla #{bz_id} ({summary}) to POST? [y/N] '.format(
+                bz_id, bz.summary))
+        if response.lower() == 'y':
+            bzs_to_set_post_comment.append(bz_id)
+
+        # Include "keyword"
+        response = input(
+            'Add keyword "{keyword}" to Bugzilla #{bz_id} ({summary})? '
+            '[y/N] '.format(keyword, bz_id, bz.summary))
+        if response.lower() == 'y':
+            bzs_to_add_keyword.append(bz_id)
+
+    # Updating Bugzilla
+    if bzs_to_add_push_info:
+        print('Adding push info to Bugzilla(s).')
+        try:
+            update_dict = ctx.bugzilla.build_update(
+                comment=ctx.push_info['bugzilla_comment'])
+            ctx.bugzilla.update_bugs(bzs_to_add_push_info, update_dict)
+        except Exception:
+            print(ctx.term.red('Failed to add push info.'))
+        else:
+            print(ctx.term.green(
+                'Push info added to Bugzilla(s): {bzs}'.format(
+                    bzs=', '.join(bzs_to_add_push_info))))
+
+    if bzs_to_set_post_comment:
+        print('Setting Bugzilla(s) to POST.')
+        try:
+            update_dict = ctx.bugzilla.build_update(status='POST')
+            ctx.bugzilla.update_bugs(bzs_to_set_post_comment, update_dict)
+        except Exception:
+            print(ctx.term.red('Failed to set to POST.'))
+        else:
+            print(ctx.term.green('Bugzilla(s) set to POST: {bzs}'.format(
+                bzs=', '.join(bzs_to_set_post_comment)
+            )))
+
+    if bzs_to_add_keyword:
+        print('Adding keyword to Bugzilla(s).')
+        try:
+            update_dict = ctx.bugzilla.build_update(keywords_add=[keyword])
+            ctx.bugzilla.update_bugs(bzs_to_add_keyword, update_dict)
+        except Exception:
+            print(ctx.term.red('Failed to add keyword.'))
+        else:
+            print(ctx.term.green('Keyword added to Bugzilla(s): {bzs}'.format(
+                bzs=', '.join(bzs_to_add_keyword)
+            )))
+
+
 @Context.command('push')
 def push_command(ctx):
     patches = list(ctx.get_patches())
@@ -838,6 +954,7 @@ def push_command(ctx):
     if ctx.push_info['pushed']:
         for ticket in tickets:
             _update_issue(ctx, ticket)
+            _update_bugzilla(ctx, ticket)
             _close_issue(ctx, ticket)
 
 
