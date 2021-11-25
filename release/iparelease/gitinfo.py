@@ -7,7 +7,7 @@ import re
 import subprocess
 
 COMMIT_RE = r"^commit (\w+)$"
-AUTHOR_RE = r"^Author: (.+) <(.+)>$"
+AUTHOR_RE = r"^Author: (.+) <(.*)>$"
 DATE_RE = r"^Date:[ ]+(.+)$"
 DESCRIPTION_RE = r"^    (.*)$"
 REVIEWER_RE = r"^\s*Reviewed-By: (.+) <(.+)>$"
@@ -134,6 +134,10 @@ class GitInfo():
             self.parse_description(commit)
 
     def get_add_author(self, name, mail):
+        if mail == '':
+            mails = [mail  for (mail, author) in self.authors.items()
+                     if author.name == name]
+            mail = mails[0] or 'unindentified'
         author = self.authors.get(mail, None)
         if not author:
             author = GitAuthor(name, mail)
@@ -163,7 +167,6 @@ class GitInfo():
             release_note = re.match(RELEASENOTE_RE, line)
             if release_note:
                 commit.release_note.append(release_note.groups()[0])
-            ticket_g = re.match(TICKET_RE, line)
             self._get_ticket(line, commit)
 
         return commit
