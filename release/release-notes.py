@@ -27,6 +27,7 @@ Fedora distributions will be available from the official repository soon.
 '''END TODO'''
 
 === Enhancements ===
+%(enhancements)s
 === Known Issues ===
 %(known_issues)s
 
@@ -34,8 +35,8 @@ Fedora distributions will be available from the official repository soon.
 FreeIPA %(version)s is a stabilization release for the features delivered as a
 part of %(major_version)s version series.
 
-There are more than %(num_bugs)s bug-fixes details of which can be seen in
-the list of resolved tickets below.
+There are more than %(num_bugs)s bug-fixes since FreeIPA %(prev_version)s release.
+Details of the bug-fixes can be seen in the list of resolved tickets below.
 
 == Upgrading ==
 Upgrade instructions are available on [[Upgrade]] page.
@@ -225,8 +226,10 @@ class App(object):
     def _release_notes_and_known_issues(self, tickets):
         release_notes = []
         known_issues = []
+        enhancements = []
         for ticket in tickets:
             release_note = get_custom_field(ticket, 'changelog')
+            tags = ticket.get('tags', [])
             knownissue = get_custom_field(ticket, 'knownissue', default='false')
             if isinstance(release_note, str):
                 release_note = ':: ' + release_note
@@ -241,9 +244,12 @@ class App(object):
                 if knownissue != 'false':
                     known_issues.append(release_note)
                 else:
+                    if 'rfe' in tags:
+                        enhancements.append(release_note)
                     release_notes.append(release_note)
         result = {'release_notes': "\n".join(release_notes),
-                  'known_issues': "\n".join(known_issues)}
+                  'known_issues': "\n".join(known_issues),
+                  'enhancements': "\n".join(enhancements)}
         return result
 
     def _print_wiki(self, tickets, bugs, git):
@@ -259,7 +265,8 @@ class App(object):
             release_date=self.args.release_date,
             num_bugs=_bugs,
             release_notes=notes['release_notes'],
-            known_issues=notes['known_issues']
+            known_issues=notes['known_issues'],
+            enhancements=notes['enhancements']
         )
         print(wiki)
         self._print_tickets_wiki(tickets)
