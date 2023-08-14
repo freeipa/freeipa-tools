@@ -12,7 +12,7 @@ TLDR
 - Github is a clone of Pagure
 - we use pull requests https://github.com/freeipa/freeipa
 - we use Pagure for tracking bugs
-- and some Pagure tickets are cloned to Bugzilla
+- and some Pagure tickets are cloned to Bugzilla or Jira
 
 These tools might work for other projects that work similarly.
 
