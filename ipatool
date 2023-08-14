@@ -98,6 +98,7 @@ patchdir: ~/patches/to-apply
 ticket-url: https://pagure.io/freeipa/issue/
 commit-url: https://pagure.io/freeipa/c/
 bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
+jira-ticket-url: https://issues.redhat.com/browse/RHEL-
 
 # Pagure login details
 pagure-repository: freeipa
@@ -584,10 +585,15 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     bugzilla_urls = []
     bugzilla_re = re.compile('(%s\d+)' %
                                 re.escape(ctx.config['bugzilla-bug-url']))
+    jira_urls = []
+    jira_re = re.compile('(%s\d+)' % re.escape(ctx.config['jira-ticket-url']))
+
     for ticket in tickets:
         if ticket.rhbz:
             for match in bugzilla_re.finditer(ticket.rhbz):
                 bugzilla_urls.append(match.group(0))
+            for match in jira_re.finditer(ticket.rhbz):
+                jira_urls.append(match.group(0))
 
     for branch in branches:
         print(ctx.term.cyan('=== Diffstat for %s ===' % branch))
@@ -618,7 +624,7 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     print(pagure_msg)
     ctx.push_info['pagure_comment'] = pagure_msg
 
-    print(ctx.term.cyan('=== Bugzilla comment ==='))
+    print(ctx.term.cyan('=== Bugzilla/JIRA comment ==='))
     bugzilla_msg = '\n'.join(bugzilla_log)
     print(bugzilla_msg)
     ctx.push_info['bugzilla_comment'] = bugzilla_msg
@@ -631,6 +637,10 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     if bugzilla_urls:
         print(ctx.term.cyan('=== Bugzillas fixed ==='))
         print('\n'.join(bugzilla_urls))
+    
+    if jira_urls:
+        print(ctx.term.cyan('=== Jira tickets fixed ==='))
+        print('\n'.join(jira_urls))
 
     print(ctx.term.cyan('=== Ready to push ==='))
 
