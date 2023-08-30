@@ -39,7 +39,7 @@ There are more than %(num_bugs)s bug-fixes since FreeIPA %(prev_version)s releas
 Details of the bug-fixes can be seen in the list of resolved tickets below.
 
 == Upgrading ==
-Upgrade instructions are available on [[Upgrade]] page.
+Upgrade instructions are available on [https://www.freeipa.org/page/Upgrade Upgrade] page.
 
 == Feedback ==
 Please provide comments, bugs and other feedback via the freeipa-users mailing
