@@ -185,7 +185,7 @@ MILESTONES = {
 
 COLOR_OPT_MAP = {'auto': False, 'always': True, 'never': None}
 
-SUBJECT_RE = re.compile('^Subject:( *\[PATCH( [^]*])?\])*(?P<subj>.*)')
+SUBJECT_RE = re.compile(r'^Subject:( *\[PATCH( [^]*])?\])*(?P<subj>.*)')
 
 GIT_REMOTE_SERVER = 'pagure.io'
 
@@ -258,7 +258,7 @@ class Patch(object):
             if line.startswith('-') or line.startswith(' '):
                 # ignore ticket links in removed or context diff lines
                 continue
-            regex = '%s(\d+)' % re.escape(config['ticket-url'])
+            regex = r'%s(\d+)' % re.escape(config['ticket-url'])
             for match in re.finditer(regex, line):
                 self.ticket_numbers.append(int(match.group(1)))
 
@@ -584,10 +584,10 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
             for line in reversed(log_result.stdout.splitlines()))
 
     bugzilla_urls = []
-    bugzilla_re = re.compile('(%s\d+)' %
+    bugzilla_re = re.compile(r'(%s\d+)' %
                                 re.escape(ctx.config['bugzilla-bug-url']))
     jira_urls = []
-    jira_re = re.compile('(%s\d+)' % re.escape(ctx.config['jira-ticket-url']))
+    jira_re = re.compile(r'(%s\d+)' % re.escape(ctx.config['jira-ticket-url']))
 
     for ticket in tickets:
         if ticket.rhbz:
