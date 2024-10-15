@@ -1087,7 +1087,10 @@ def pr_push_command(ctx):
 
     target_dir = os.path.expanduser(ctx.config['patchdir'])
     repo = get_gh_repo(ctx)
-    pr = repo.pull_request(ctx.options['PR_ID'])
+    try:
+        pr = repo.pull_request(ctx.options['PR_ID'])
+    except github3.exceptions.NotFoundError:
+        ctx.die('Pull request {} not found'.format(ctx.options['PR_ID']))
 
     pr_is = repo.issue(pr.number)
     labels = labels_names(pr_is.labels())
