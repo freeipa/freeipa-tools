@@ -297,6 +297,7 @@ class Ticket(object):
         if self._data is not None:
             return self._data
         print('Retrieving ticket %s' % self.number)
+        self.pagure.session.headers['Accept'] = "*/*"
         self._data = self.pagure.issue_info(self.number)
         return self._data
 
