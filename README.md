@@ -28,8 +28,8 @@ The most documented script is the all-in-one "ipatool", which can:
 
 Dependencies:
 
-    yum install python3 python3-PyYAML python3-blessings python3-unidecode \
-        python3-docopt python3-github3py python3-xtermcolor python3-libpagure
+    yum install python3 python3-PyYAML python3-rich python3-unidecode \
+        python3-docopt python3-github3py python3-libpagure
 
 See docs in the script itself
 
