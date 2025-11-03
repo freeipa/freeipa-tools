@@ -1,0 +1,5 @@
+docopt
+github3.py
+libpagure
+PyYAML
+rich
