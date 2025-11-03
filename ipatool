@@ -221,7 +221,7 @@ class Patch(object):
     def __init__(self, config, filename):
         if filename:
             self.filename = filename
-            with open(filename) as file:
+            with open(filename, newline='') as file:
                 lines = list(file)
         else:
             self.filename = '(patch)'
@@ -546,7 +546,7 @@ def apply_patches(ctx, patches, branch, die_on_fail=True):
     for patch in patches:
         print('Applying to %s: %s' % (branch, patch.subject))
         res = ctx.runprocess(
-            ['git', 'am', '--3way'],
+            ['git', 'am', '--keep-cr', '--3way'],
             stdin_string=''.join(patch.lines),
             check_returncode=0 if die_on_fail else None,
         )
