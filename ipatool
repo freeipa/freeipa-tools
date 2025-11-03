@@ -163,17 +163,20 @@ import string
 import subprocess
 import re
 import collections
-import pprint
 from itertools import groupby
 
 import yaml       # yum install python3-PyYAML
-import blessings  # yum install python3-blessings
 import github3    # yum install python3-github3py
 import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
-import xtermcolor # yum install python3-xtermcolor
 import libpagure  # yum install python3-libpagure
 
+from rich.console import Console
+from rich.text import Text
+
+console = Console()
+errconsole = Console(stderr = True)
+myprint = console.print
 
 MILESTONES = {
     r"^FreeIPA 3\.3\..*": ['master', 'ipa-4-1', 'ipa-4-0', 'ipa-3-3'],
@@ -296,7 +299,7 @@ class Ticket(object):
     def data(self):
         if self._data is not None:
             return self._data
-        print('Retrieving ticket %s' % self.number)
+        myprint('Retrieving ticket %s' % self.number)
         self._data = self.pagure.issue_info(self.number)
         return self._data
 
@@ -339,13 +342,20 @@ class Context(object):
                 self.config = yaml.safe_load(conf_file)
         except:
             pass
-        self.term = blessings.Terminal(
-            force_styling=COLOR_OPT_MAP[options['--color']])
+
+        self.color_arg = self.options['--color']
+        console_color_system = 'auto'
+        if self.color_arg == 'never':
+            console_color_system = None
+        console = Console(color_system = console_color_system)
+        errconsole = Console(color_system = console_color_system, stderr = True)
+        myprint = console.print
+
         self.verbosity = self.options['--verbose']
         if self.verbosity:
-            print('Options:')
-            pprint.pprint(self.options)
-            print('Config:')
+            myprint('Options:')
+            myprint(self.options)
+            myprint('Config:')
             self.print_sanitized_config()
         if self.options['--no-pagure'] or self.config == None:
             self.pagure = None
@@ -361,14 +371,6 @@ class Context(object):
                     repo_to=self.config['pagure-repository']
                 )
 
-
-        self.color_arg = self.options['--color']
-        if self.color_arg == 'auto':
-            if self.term.is_a_tty:
-                self.color_arg = 'always'
-            else:
-                self.color_arg = 'never'
-
         # ipatool sets GIT_COMMITTER_DATE to a fixed value, so
         # commits to parallel branches hopefully end up identical.
         # Getting the current date with timezone info is a pain in Python
@@ -381,7 +383,7 @@ class Context(object):
     def print_sanitized_config(self):
         # prints the config dictionary with sensitive informations starred
         sensitives = ('gh-token', 'pagure-token')
-        pprint.pprint(dict((attr, val)
+        myprint(dict((attr, val)
                         if attr not in sensitives else (attr, '***')
                         for attr, val in self.config.items()))
 
@@ -398,11 +400,11 @@ class Context(object):
             if self.options[name]:
                 return func(self)
         else:
-            print('Registered commands: %s' % ', '.join(self.commands))
+            myprint('Registered commands: %s' % ', '.join(self.commands))
             self.die('Internal error: No command found')
 
     def die(self, message):
-        print(self.term.red(message))
+        myprint(Text(message, style='red'))
         exit(1)
 
     def get_patches(self):
@@ -427,9 +429,9 @@ class Context(object):
         if verbosity is None:
             verbosity = self.verbosity
         if verbosity:
-            print(self.term.blue(argv_repr))
+            myprint(Text(argv_repr, style='blue'))
         if verbosity > 2:
-            print(self.term.yellow(stdin_string.rstrip()))
+            myprint(Text(stdin_string.rstrip(), style='yellow'))
         PIPE = subprocess.PIPE
         proc = subprocess.Popen(argv, stdout=PIPE, stderr=PIPE, stdin=PIPE,
                                 env=env)
@@ -451,13 +453,13 @@ class Context(object):
             (check_returncode is not None and check_returncode != returncode),
         ])
         if failed and not verbosity:
-            print(self.term.blue(argv_repr))
+            myprint(Text(argv_repr, style='blue'))
         if failed or verbosity >= 2:
             if stdout:
-                print(stdout.rstrip())
+                myprint(stdout.rstrip())
             if stderr:
-                print(self.term.yellow(stderr.rstrip()))
-            print('→ %s' % self.term.blue(str(proc.returncode)))
+                myprint(Text(stderr.rstrip(), style='yellow'))
+            myprint('→ [blue]%s[/blue]' % str(proc.returncode))
         if failed:
             if timeout_expired:
                 self.die('Command timeout expired')
@@ -469,12 +471,11 @@ class Context(object):
 
 @Context.command('sample-config')
 def sample_config_command(ctx):
-    print(ctx.term.cyan('Copy the following to %s, and modify to taste:' %
-                        ctx.options['--config']),
-          file=sys.stderr)
-    print(ctx.term.cyan('---8<---'.ljust(70, '-')), file=sys.stderr)
-    print(SAMPLE_CONFIG.strip())
-    print(ctx.term.cyan('--->8---'.rjust(70, '-')), file=sys.stderr)
+    errconsole.print(Text('Copy the following to %s, and modify to taste:' %
+                     ctx.options['--config'], style='cyan'))
+    errconsole.print(Text('---8<---'.ljust(70, '-'), style='cyan'))
+    myprint(SAMPLE_CONFIG.strip())
+    errconsole.print(Text('--->8---'.rjust(70, '-'), style='cyan'))
 
 def ensure_clean_repo(ctx):
     """Make sure the working tree matches the git index"""
@@ -497,7 +498,7 @@ def get_reviewers(ctx, tickets):
             if ticket.reviewer:
                 reviewers.add(ticket.reviewer)
         if len(reviewers) > 1:
-            print('Reviewers found: %s' % ', '.join(reviewers))
+            myprint('Reviewers found: %s' % ', '.join(reviewers))
             ctx.die('Too many reviewers found in ticket(s), '
                         'specify --reviewer explicitly')
         if not reviewers:
@@ -528,9 +529,9 @@ def normalize_reviewer(ctx, reviewer):
     if not names:
         ctx.die('Reviewer %s not found' % reviewer)
     elif len(names) > 1:
-        print(ctx.term.red('Reviewer %s could be:' % reviewer))
+        myprint(Text('Reviewer %s could be:' % reviewer, style='red'))
         for name in names:
-            print('- %s' % name)
+            myprint('- %s' % name)
         ctx.die('Multiple matches found for reviewer')
     else:
         name = unidecode.unidecode(names[0])
@@ -544,7 +545,7 @@ def apply_patches(ctx, patches, branch, die_on_fail=True):
     ctx.runprocess(['git', 'checkout',
                     '%s/%s' % (ctx.config['remote'], branch)])
     for patch in patches:
-        print('Applying to %s: %s' % (branch, patch.subject))
+        myprint('Applying to %s: %s' % (branch, patch.subject))
         res = ctx.runprocess(
             ['git', 'am', '--keep-cr', '--3way'],
             stdin_string=''.join(patch.lines),
@@ -554,7 +555,7 @@ def apply_patches(ctx, patches, branch, die_on_fail=True):
             raise RuntimeError(res.stderr)
     sha1 = ctx.runprocess(['git', 'rev-parse', 'HEAD']).stdout.strip()
     if ctx.verbosity:
-        print('Resulting hash: %s' % sha1)
+        myprint('Resulting hash: %s' % sha1)
     return sha1
 
 def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
@@ -597,53 +598,53 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
                 jira_urls.append(match.group(0))
 
     for branch in branches:
-        print(ctx.term.cyan('=== Diffstat for %s ===' % branch))
+        myprint(Text('=== Diffstat for %s ===' % branch, style='cyan'))
         log_result = ctx.runprocess(
             ['git', 'diff', '--stat', '--color=%s' % ctx.color_arg,
              '%s/%s..%s' % (remote, branch, sha1s[branch])],
             verbosity=2)
-        print(ctx.term.cyan('=== Log for %s ===' % branch))
+        myprint(Text('=== Log for %s ===' % branch, style='cyan'))
         log_result = ctx.runprocess(
             ['git', 'log', '--reverse', '--color=%s' % ctx.color_arg,
              '%s/%s..%s' % (remote, branch, sha1s[branch])],
             verbosity=2)
 
-    print(ctx.term.cyan('=== Patches pushed ==='))
+    myprint(Text('=== Patches pushed ===', style='cyan'))
     for patch in patches:
-        print(patch.filename)
+        myprint(patch.filename)
 
-    print(ctx.term.cyan('=== Mail summary ==='))
+    myprint(Text('=== Mail summary ===', style='cyan'))
     if len(branches) == 1:
-        print('Pushed to ', end='')
+        myprint('Pushed to ', end='')
     else:
-        print('Pushed to:')
+        myprint('Pushed to:')
     for branch in branches:
-        print('%s: %s' % (branch, sha1s[branch]))
+        myprint('%s: %s' % (branch, sha1s[branch]))
 
-    print(ctx.term.cyan('=== Ticket comment ==='))
+    myprint(Text('=== Ticket comment ===', style='cyan'))
     pagure_msg = '\n'.join(pagure_log)
-    print(pagure_msg)
+    myprint(pagure_msg)
     ctx.push_info['pagure_comment'] = pagure_msg
 
-    print(ctx.term.cyan('=== Bugzilla/JIRA comment ==='))
+    myprint(Text('=== Bugzilla/JIRA comment ===', style='cyan'))
     bugzilla_msg = '\n'.join(bugzilla_log)
-    print(bugzilla_msg)
+    myprint(bugzilla_msg)
     ctx.push_info['bugzilla_comment'] = bugzilla_msg
 
     if ticket_numbers:
-        print(ctx.term.cyan('=== Tickets fixed ==='))
+        myprint(Text('=== Tickets fixed ===', style='cyan'))
         for number in sorted(ticket_numbers):
-            print('%s%s' % (ctx.config['ticket-url'], number))
+            myprint('%s%s' % (ctx.config['ticket-url'], number))
 
     if bugzilla_urls:
-        print(ctx.term.cyan('=== Bugzillas fixed ==='))
-        print('\n'.join(bugzilla_urls))
+        myprint(Text('[cyan]=== Bugzillas fixed ===', style='cyan'))
+        myprint('\n'.join(bugzilla_urls))
     
     if jira_urls:
-        print(ctx.term.cyan('=== Jira tickets fixed ==='))
-        print('\n'.join(jira_urls))
+        myprint(Text('[cyan]=== Jira tickets fixed ===', style='cyan'))
+        myprint('\n'.join(jira_urls))
 
-    print(ctx.term.cyan('=== Ready to push ==='))
+    myprint(Text('=== Ready to push ===', style='cyan'))
 
 
 def _update_issue(ctx, ticket):
@@ -654,8 +655,8 @@ def _update_issue(ctx, ticket):
         do_comment = True
     else:
         if update_issue != 'ask':
-            print(ctx.term.red(
-                'Invalid value for "update-issue" in config file'))
+            myprint(Text(
+                'Invalid value for "update-issue" in config file', style='red'))
         response = input(
             'Update issue "#{}: {}" with commit info? [y/n] '.format(
                 ticket.number,
@@ -670,10 +671,10 @@ def _update_issue(ctx, ticket):
             ctx.pagure.comment_issue(ticket.number,
                 ctx.push_info['pagure_comment'])
         except Exception as e:
-            print(ctx.term.red('Comment failed: {}'.format(e)))
-            print(ctx.term.yellow('Please update issue manually'))
+            myprint(Text('Comment failed: {}'.format(e), style='red'))
+            myprint(Text('Please update issue manually', style='yellow'))
         else:
-            print(ctx.term.green('Comment added'))
+            myprint(Text('Comment added', style='green'))
 
 def verify_remote_url(ctx):
     remote = ctx.config['remote']
@@ -681,9 +682,9 @@ def verify_remote_url(ctx):
     remote_url = stdout.splitlines()[0]
 
     if GIT_REMOTE_SERVER not in remote_url:
-        print(ctx.term.red(
-            '!!! WARNING !!! not pushing to {} git repo').format(
-                GIT_REMOTE_SERVER))
+        myprint(Text(
+            '!!! WARNING !!! not pushing to {} git repo'.format(
+                GIT_REMOTE_SERVER), style='red'))
         response = input(
             'Push to "{}"? [y/n] '.format(
                 remote_url))
@@ -693,7 +694,7 @@ def verify_remote_url(ctx):
 def _close_issue(ctx, ticket):
     if ticket.is_closed():
         # nothing to do
-        print("Issue already closed.")
+        myprint("Issue already closed.")
         return
     if ctx.options.get('--backport') or ctx.options.get('--autobackport'):
         # Backports must be pushed, thus ticket must remain opened.
@@ -704,8 +705,8 @@ def _close_issue(ctx, ticket):
         do_close = False
     else:
         if close_ticket != 'ask':
-            print(ctx.term.red(
-                'Invalid value for "close-issue" in config file'))
+            myprint(Text(
+                'Invalid value for "close-issue" in config file', style='red'))
         response = input(
             'Close issue "#{}: {}"? [y/n] '.format(
                 ticket.number,
@@ -729,10 +730,10 @@ def _close_issue(ctx, ticket):
                 if not updated_ticket.is_fixed():
                     raise
         except Exception as e:
-            print(ctx.term.red('Failed to close the issue: {}'.format(e)))
-            print(ctx.term.yellow('Please close the issue manually'))
+            myprint(Text('Failed to close the issue: {}'.format(e), style='red'))
+            myprint(Text('Please close the issue manually', style='yellow'))
         else:
-            print(ctx.term.green('Issue closed'))
+            myprint(Text('Issue closed', style='green'))
 
 
 @Context.command('push')
@@ -755,11 +756,11 @@ def push_command(ctx):
     reviewers = get_reviewers(ctx, tickets)
     if reviewers:
         for reviewer in reviewers:
-            print('Reviewer: %s' % reviewer)
+            myprint('Reviewer: %s' % reviewer)
             for patch in patches:
                 patch.add_reviewer(reviewer)
     else:
-        print('No reviewer')
+        myprint('No reviewer')
 
     branches = ctx.options['--branch']
     if not branches:
@@ -769,7 +770,7 @@ def push_command(ctx):
             else:
                 ctx.die('No branches specified and Pagure disabled')
         if ctx.verbosity:
-            print('Divining branches from tickets: %s' %
+            myprint('Divining branches from tickets: %s' %
                     ', '.join(str(t.number) for t in tickets))
         milestones = set(t.milestone for t in tickets)
         if not milestones:
@@ -785,20 +786,20 @@ def push_command(ctx):
         else:
             ctx.die('No branches correspond to `%s`. ' % milestone +
                         'Update MILESTONES in the ipatool script.')
-    print('Will apply %s patches to: %s' %
+    myprint('Will apply %s patches to: %s' %
             (len(patches), ', '.join(branches)))
 
     remote = ctx.config['remote']
     verify_remote_url(ctx)
 
     if not ctx.options['--no-fetch']:
-        print('Fetching...')
+        myprint('Fetching...')
         ctx.runprocess(['git', 'fetch', remote], timeout=60)
 
     rev_parse = ctx.runprocess(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
     old_branch = rev_parse.stdout.strip()
     if ctx.verbosity:
-        print('Old branch: %s' % old_branch)
+        myprint('Old branch: %s' % old_branch)
     try:
         sha1s = collections.OrderedDict()
         for branch in branches:
@@ -806,19 +807,23 @@ def push_command(ctx):
 
         push_args = ['%s:%s' % (sha1, branch)
                         for branch, sha1 in sha1s.items()]
-        print('Trying push...')
+        myprint('Trying push...')
         ctx.runprocess(['git', 'push', '--dry-run', remote] + push_args,
                        timeout=60, verbosity=2)
 
-        print('Generating info...')
-        print_push_info(ctx, patches, sha1s, ticket_numbers, tickets)
+        myprint('Generating info...')
+        try:
+            print_push_info(ctx, patches, sha1s, ticket_numbers, tickets)
+        except e:
+            myprint(e)
 
         if ctx.options['--dry-run']:
-            print('Exiting, --dry-run specified')
+            myprint('Exiting, --dry-run specified')
             ctx.push_info['pushed'] = False
         else:
+            myprint('Starting the push...')
             while True:
-                print('(k will start `gitk`)')
+                myprint('(k will start `gitk`)')
                 branchesrepr = ', '.join(branches)
                 response = input('Push to %s? [y/n/k] ' % branchesrepr)
                 if response.lower() == 'n':
@@ -829,7 +834,7 @@ def push_command(ctx):
                                     list(sha1s.values()),
                                    timeout=None)
                 elif response.lower() == 'y':
-                    print('Pushing')
+                    myprint('Pushing')
                     ctx.runprocess(['git', 'push', remote] + push_args,
                                    timeout=60, verbosity=2)
                     break
@@ -840,7 +845,7 @@ def push_command(ctx):
                 ctx.push_info['pushed'] = False
 
     finally:
-        print('Cleaning up')
+        myprint('Cleaning up')
         ctx.runprocess(['git', 'am', '--abort'], check_returncode=None)
         ctx.runprocess(['git', 'reset', '--hard'], check_returncode=None)
         ctx.runprocess(['git', 'checkout', old_branch], check_returncode=None)
@@ -884,7 +889,8 @@ def labels_names(labels):
 
 
 def labels_colorize(labels):
-    return [xtermcolor.colorize(l.name, rgb=int(l.color, 16)) for l in labels]
+    return Text(",").join(
+               [Text(l.name, style=f"color({int(l.color, 16)})") for l in labels])
 
 
 def patch_filename(msg, num):
@@ -949,7 +955,7 @@ def backport(ctx, backport_branches, repo, pr):
     try:
         github_login = github3.login(token=ctx.config['gh-token']).me().login
     except KeyError as e:
-        print(ctx.term.red('Github failure response: {}'.format(e)))
+        myprint('[red]Github failure response: {}[/red]'.format(e))
         return
 
     rev_parse = ctx.runprocess(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
@@ -962,24 +968,24 @@ def backport(ctx, backport_branches, repo, pr):
                 check_returncode=None
             )
             if res.returncode:
-                print(ctx.term.red(
-                    "Failed to checkout %s/%s. Manual backport is needed. %s"
+                myprint(
+                    "[red]Failed to checkout %s/%s. Manual backport is needed. %s[/red]"
                     % (ctx.config['remote'], bb, res.stderr)
-                ))
+                )
                 continue
 
             try:
                 sha = apply_patches(ctx, patches, bb, die_on_fail=False)
             except RuntimeError as e:
-                print(ctx.term.red('Failure to apply patches: {}'.format(e)))
-                print(ctx.term.red(
-                    "Failed to apply patches onto %s/%s. Manual backport is "
-                    "needed." % (ctx.config['remote'], bb)
-                ))
+                myprint('[red]Failure to apply patches: {}[/red]'.format(e))
+                myprint(
+                    "[red]Failed to apply patches onto %s/%s. Manual backport is "
+                    "needed.[/red]" % (ctx.config['remote'], bb)
+                )
                 if ctx.verbosity:
-                    print(ctx.term.red(res.stderr))
+                    myprint(res.stderr, style='red')
                 continue
-            print(
+            myprint(
                 "Applied patches on %s/%s" % (ctx.config['remote'], bb)
             )
 
@@ -990,13 +996,13 @@ def backport(ctx, backport_branches, repo, pr):
                 check_returncode=None, timeout=60,
             )
             if res.returncode:
-                print(ctx.term.red(
-                    "Failed to push %s to %s/%s"
+                myprint(
+                    "[red]Failed to push %s to %s/%s[/red]"
                     % (sha, ctx.config['gh-fork-remote'], backport_name)
-                ))
+                )
                 continue
 
-            print(
+            myprint(
                 "Pushed %s to %s/%s"
                 % (sha, ctx.config['gh-fork-remote'], backport_name)
             )
@@ -1016,12 +1022,13 @@ def backport(ctx, backport_branches, repo, pr):
                 'questions or problems contact @%s who is author of the '
                 'original PR.' % (pr.number, pr.user.login)
             )
-            print(ctx.term.green(
+            myprint("[green]"
                 "Created and auto-ACKed PR %d against branch %s: %s"
+                "[/green]"
                 % (backport_pr.number, bb, backport_pr.html_url)
-            ))
+            )
         finally:
-            print('Cleaning up')
+            myprint('Cleaning up')
             ctx.runprocess(['git', 'am', '--abort'], check_returncode=None)
             ctx.runprocess(['git', 'reset', '--hard'], check_returncode=None)
             ctx.runprocess(['git', 'checkout', old_branch],
@@ -1061,7 +1068,6 @@ def backport_command(ctx):
         ctx.die('Pull request failed CI test(s)')
     elif 'pending' in states:
         ctx.die('CI have not completed testing the pull request yet')
-    # remove ^^^
 
     try:
         commit_num = 0
@@ -1127,7 +1133,6 @@ def pr_push_command(ctx):
         ctx.die('Pull request failed CI test(s)')
     elif 'pending' in states:
         ctx.die('CI have not completed testing the pull request yet')
-    # remove ^^^
 
     try:
         commit_num = 0
@@ -1152,14 +1157,14 @@ def pr_push_command(ctx):
     else:
         if ((not ctx.options.get('--dry-run', False)) and
                 ctx.push_info.get('pushed', False)):
-            print("Adding label 'pushed'")
+            myprint("Adding label 'pushed'")
             pr_is.add_labels('pushed')
             pr_is.refresh(conditional=True)
 
             pr_is.create_comment(ctx.push_info['pagure_comment'])
             pr_is.refresh(conditional=True)
 
-            print("Closing pull request {}".format(pr.number))
+            myprint("Closing pull request {}".format(pr.number))
             pr_is.close()
 
             backport_branches = set(ctx.options.get('--backport', []))
@@ -1184,7 +1189,7 @@ def pr_ack_command(ctx):
     if 'rejected' in labels:
         ctx.die('Pull request was rejected')
 
-    print("Adding 'ack' label to PR {}".format(pr_is.number))
+    myprint("Adding 'ack' label to PR {}".format(pr_is.number))
     pr_is.add_labels('ack')
     pr_is.refresh(conditional=True)
 
@@ -1198,14 +1203,14 @@ def pr_reject_command(ctx):
     labels = labels_names(pr_is.labels())
 
     if 'rejected' in labels:
-        print("Pull request is already rejected")
+        myprint("Pull request is already rejected")
     else:
-        print("Adding 'rejected' label to PR {}".format(pr_is.number))
+        myprint("Adding 'rejected' label to PR {}".format(pr_is.number))
         pr_is.add_labels('rejected')
         pr_is.refresh(conditional=True)
 
     if 'ack' in labels:
-        print("Removing 'ack' label from PR {}".format(pr_is.number))
+        myprint("Removing 'ack' label from PR {}".format(pr_is.number))
         pr_is.remove_label('ack')
         pr_is.refresh(conditional=True)
 
@@ -1213,7 +1218,7 @@ def pr_reject_command(ctx):
     pr_is.refresh(conditional=True)
 
     if not pr_is.is_closed():
-        print("Closing pull request")
+        myprint("Closing pull request")
         pr_is.close()
 
 
@@ -1289,16 +1294,16 @@ def pr_list_command(ctx):
         statuses = {}
         for status in status_result:
             statuses[status[0]] = len(status)
-        print(prline_template.format(
+        myprint(prline_template.format(
             num=pr.number,
             title=pr.title,
-            labels=' '.join(labels_colorize(labels)),
+            labels=labels_colorize(labels),
             url=pr.html_url,
             statuses=statuses,
         ))
 
     # Human error detection section
-    print(xtermcolor.colorize("Checking for common mistakes...", rgb=0xff3311))
+    myprint("Checking for common mistakes...", style="#ff3311")
     pull_requests = repo.pull_requests(
         state='all', sort='updated', direction='desc', number=100
     )
@@ -1307,25 +1312,25 @@ def pr_list_command(ctx):
         labels = pr_is.labels()
         lnames = labels_names(labels)
         if (pr.is_merged() and 'pushed' not in lnames):
-            print(xtermcolor.colorize(
+            myprint(
                 "Pull request was merged but not labeled 'pushed'!",
-                rgb=0xff0000,
-            ))
-            print(prline_template.format(
+                style="red"
+            )
+            myprint(prline_template.format(
                 num=pr.number,
                 title=pr.title,
-                labels=' '.join(labels_colorize(labels)),
+                labels=labels_colorize(labels),
                 url=pr.html_url,
             ))
         if ('pushed' in lnames and 'ack' not in lnames):
-            print(xtermcolor.colorize(
+            myprint(
                 "Pull request was pushed without 'ack'!",
-                rgb=0xff0000,
-            ))
-            print(prline_template.format(
+                style="red"
+            )
+            myprint(prline_template.format(
                 num=pr.number,
                 title=pr.title,
-                labels=' '.join(labels_colorize(labels)),
+                labels=labels_colorize(labels),
                 url=pr.html_url,
             ))
 
@@ -1337,7 +1342,7 @@ def start_review_command(ctx):
     if ctx.options['PATCH']:
         patches = ctx.get_patches()
     if not ticket_numbers:
-        print(ctx.term.yellow('Using patches from %s' % ctx.config['patchdir']))
+        myprint(Text('Using patches from %s' % ctx.config['patchdir'], style='yellow'))
         patches = ctx.get_patches()
     else:
         patches = ()
@@ -1345,7 +1350,7 @@ def start_review_command(ctx):
         ticket_numbers.update(patch.ticket_numbers)
     ticket_numbers = sorted(ticket_numbers)
     if ctx.verbosity:
-        print('Tickets selected: %s' % ticket_numbers)
+        myprint('Tickets selected: %s' % ticket_numbers)
     tickets = [Ticket(ctx.pagure, int(n)) for n in ticket_numbers]
     if not tickets:
         ctx.die('No tickets selected')
@@ -1354,15 +1359,15 @@ def start_review_command(ctx):
 
     existing_reviewers = []
     for ticket in tickets:
-        print(ctx.term.blue('Ticket #%s' % ticket.number))
-        print('- summary:', ticket.summary)
+        myprint(Text('Ticket #%s' % ticket.number, style='blue'))
+        myprint('- summary:', ticket.summary)
         reviewer = ticket.reviewer
-        print('- reviewer:', ctx.term.yellow(str(reviewer or '')) or 'none')
+        myprint('- reviewer:' + str(Text(str(reviewer or ''), style='blue') or 'none'))
         if reviewer:
             existing_reviewers.append(reviewer)
     if existing_reviewers:
         if ctx.options['--force']:
-            print(ctx.term.yellow('Existing reviewer(s) found'))
+            myprint(Text('Existing reviewer(s) found', style='yellow'))
         else:
             ctx.die("Existing reviewer(s) found; "
                     "won't overwrite without --force")
@@ -1378,17 +1383,17 @@ def start_review_command(ctx):
                 break
 
     for ticket in tickets:
-        print('Starting review: #%s' % ticket.number)
-        print(ctx.term.red('Does not work temporary, update tickets manually'))
+        myprint('Starting review: #%s' % ticket.number)
+        myprint(Text('Does not work temporary, update tickets manually', style='red'))
 
     if ctx.options['--am']:
-        print('Applying patches to worktree...')
+        myprint('Applying patches to worktree...')
         am_patches(ctx, patches)
 
 
 def am_patches(ctx, patches):
     for patch in patches:
-        print('Applying patch:', patch.filename)
+        myprint('Applying patch:', patch.filename)
         ctx.runprocess(ctx.config['am-command'],
                        stdin_string=''.join(patch.lines),
                        timeout=60, verbosity=2)
