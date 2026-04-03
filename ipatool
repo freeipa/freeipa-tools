@@ -206,8 +206,6 @@ MILESTONES = {
     r"^FreeIPA 4\.7.*": ['master'],
 }
 
-COLOR_OPT_MAP = {'auto': False, 'always': True, 'never': None}
-
 SUBJECT_RE = re.compile(r'^Subject:( *\[PATCH( [^]*])?\])*(?P<subj>.*)')
 
 GIT_REMOTE_SERVER = 'pagure.io'
@@ -442,12 +440,17 @@ class Context(object):
         except:
             pass
 
+        global console, errconsole, myprint
         self.color_arg = self.options['--color']
-        console_color_system = 'auto'
         if self.color_arg == 'never':
-            console_color_system = None
-        console = Console(color_system = console_color_system)
-        errconsole = Console(color_system = console_color_system, stderr = True)
+            console = Console(color_system=None)
+            errconsole = Console(color_system=None, stderr=True)
+        elif self.color_arg == 'always':
+            console = Console(force_terminal=True)
+            errconsole = Console(force_terminal=True, stderr=True)
+        else:
+            console = Console()
+            errconsole = Console(stderr=True)
         myprint = console.print
 
         self.verbosity = self.options['--verbose']
@@ -784,35 +787,34 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
             myprint('%s%s' % (ctx.config['ticket-url'], number))
 
     if bugzilla_urls:
-        myprint(Text('[cyan]=== Bugzillas fixed ===', style='cyan'))
+        myprint(Text('=== Bugzillas fixed ===', style='cyan'))
         myprint('\n'.join(bugzilla_urls))
-    
+
     if jira_urls:
-        myprint(Text('[cyan]=== Jira tickets fixed ===', style='cyan'))
+        myprint(Text('=== Jira tickets fixed ===', style='cyan'))
         myprint('\n'.join(jira_urls))
     ctx.push_info['jira_urls'] = jira_urls
 
     myprint(Text('=== Ready to push ===', style='cyan'))
 
 
+def _ask_yn(config_val, config_key, prompt):
+    """Resolve a yes/no/ask config value, prompting the user if 'ask'."""
+    if config_val == 'no':
+        return False
+    if config_val == 'yes':
+        return True
+    if config_val != 'ask':
+        myprint(Text('Invalid value for "%s" in config file' % config_key, style='red'))
+    return input(prompt + ' [y/n] ').lower() == 'y'
+
+
 def _update_issue(ctx, ticket):
-    update_issue = ctx.config.get('update-issue', 'ask')
-    if update_issue == 'no':
-        do_comment = False
-    elif update_issue == 'yes':
-        do_comment = True
-    else:
-        if update_issue != 'ask':
-            myprint(Text(
-                'Invalid value for "update-issue" in config file', style='red'))
-        response = input(
-            'Update issue "#{}: {}" with commit info? [y/n] '.format(
-                ticket.number,
-                ticket.title))
-        if response.lower() == 'y':
-            do_comment = True
-        else:
-            do_comment = False
+    do_comment = _ask_yn(
+        ctx.config.get('update-issue', 'ask'),
+        'update-issue',
+        'Update issue "#{}: {}" with commit info?'.format(
+            ticket.number, ticket.title))
 
     if do_comment:
         try:
@@ -847,21 +849,10 @@ def _close_issue(ctx, ticket):
         # Backports must be pushed, thus ticket must remain opened.
         return
 
-    close_ticket = ctx.config.get('close-issue', 'ask')
-    if close_ticket == 'no':
-        do_close = False
-    else:
-        if close_ticket != 'ask':
-            myprint(Text(
-                'Invalid value for "close-issue" in config file', style='red'))
-        response = input(
-            'Close issue "#{}: {}"? [y/n] '.format(
-                ticket.number,
-                ticket.title))
-        if response.lower() == 'y':
-            do_close = True
-        else:
-            do_close = False
+    do_close = _ask_yn(
+        ctx.config.get('close-issue', 'ask'),
+        'close-issue',
+        'Close issue "#{}: {}"?'.format(ticket.number, ticket.title))
 
     if do_close:
         try:
@@ -891,17 +882,9 @@ def _update_jira_issues(ctx):
     for url in jira_urls:
         issue_key = url[len(browse_prefix):]
 
-        if update_jira == 'no':
-            do_comment = False
-        elif update_jira == 'yes':
-            do_comment = True
-        else:
-            if update_jira != 'ask':
-                myprint(Text(
-                    'Invalid value for "update-jira" in config file', style='red'))
-            response = input(
-                'Add commit info comment to Jira {}? [y/n] '.format(issue_key))
-            do_comment = response.lower() == 'y'
+        do_comment = _ask_yn(
+            update_jira, 'update-jira',
+            'Add commit info comment to Jira {}?'.format(issue_key))
 
         if do_comment:
             try:
@@ -915,18 +898,11 @@ def _update_jira_issues(ctx):
                 myprint(Text(
                     'Comment added to Jira {}'.format(issue_key), style='green'))
 
-        if close_jira == 'no':
+        do_close = _ask_yn(
+            close_jira, 'close-jira',
+            'Transition Jira {} to "{}"?'.format(issue_key, transition_name))
+        if not do_close:
             continue
-        elif close_jira == 'yes':
-            do_close = True
-        else:
-            if close_jira != 'ask':
-                myprint(Text(
-                    'Invalid value for "close-jira" in config file', style='red'))
-            response = input(
-                'Transition Jira {} to "{}"? [y/n] '.format(
-                    issue_key, transition_name))
-            do_close = response.lower() == 'y'
 
         if do_close:
             try:
@@ -1029,10 +1005,7 @@ def push_command(ctx):
                        timeout=60, verbosity=2)
 
         myprint('Generating info...')
-        try:
-            print_push_info(ctx, patches, sha1s, ticket_numbers, tickets)
-        except e:
-            myprint(e)
+        print_push_info(ctx, patches, sha1s, ticket_numbers, tickets)
 
         if ctx.options['--dry-run']:
             myprint('Exiting, --dry-run specified')
@@ -1107,8 +1080,8 @@ def labels_names(labels):
 
 
 def labels_colorize(labels):
-    return Text(",").join(
-               [Text(l.name, style=f"color({int(l.color, 16)})") for l in labels])
+    parts = ['[color(%d)]%s[/]' % (int(l.color, 16), l.name) for l in labels]
+    return ','.join(parts)
 
 
 def patch_filename(msg, num):
@@ -1541,6 +1514,7 @@ def pr_list_command(ctx):
                 title=pr.title,
                 labels=labels_colorize(labels),
                 url=pr.html_url,
+                statuses='',
             ))
         if ('pushed' in lnames and 'ack' not in lnames):
             myprint(
@@ -1552,6 +1526,7 @@ def pr_list_command(ctx):
                 title=pr.title,
                 labels=labels_colorize(labels),
                 url=pr.html_url,
+                statuses='',
             ))
 
 
@@ -1582,7 +1557,7 @@ def start_review_command(ctx):
         myprint(Text('Ticket #%s' % ticket.number, style='blue'))
         myprint('- summary:', ticket.summary)
         reviewer = ticket.reviewer
-        myprint('- reviewer:' + str(Text(str(reviewer or ''), style='blue') or 'none'))
+        myprint('- reviewer:', Text(reviewer, style='blue') if reviewer else 'none')
         if reviewer:
             existing_reviewers.append(reviewer)
     if existing_reviewers:
