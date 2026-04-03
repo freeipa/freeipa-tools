@@ -21,6 +21,7 @@ Common Options:
   --no-reviewer        Do not add a Reviewed-By: line
   -n, --dry-run        Do not push
   --no-pagure          Do not contact Pagure.io
+  --no-forgejo         Do not contact Forgejo
   --no-fetch           Do not synchronize before pushing
   --color=(auto|always|never)  Colorize output [default: auto]
   PATCH                Patch to push, or directory with *.patch files
@@ -100,7 +101,7 @@ commit-url: https://pagure.io/freeipa/c/
 bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 jira-ticket-url: https://issues.redhat.com/browse/RHEL-
 
-# Pagure login details
+# Pagure login details (use either Pagure or Forgejo, not both)
 pagure-repository: freeipa
 # Create the token in https://pagure.io/freeipa/settings
 # For token you need:
@@ -117,7 +118,12 @@ pagure-token: "0123456789abcdef0123456789abcdef01234567"
 # dynamically detect username
 username: username
 
-# Pagure issues operations
+# Forgejo login details (alternative to Pagure for issue tracking)
+# forgejo-url: https://forgejo.example.com
+# forgejo-repo: owner/repository
+# forgejo-token: "0123456789abcdef0123456789abcdef01234567"
+
+# Issue tracker operations (apply to both Pagure and Forgejo)
 # update-issue options: yes/no/ask
 update-issue: ask
 # close-issue options: no/ask
@@ -170,6 +176,7 @@ import github3    # yum install python3-github3py
 import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
 import libpagure  # yum install python3-libpagure
+import pyforgejo  # yum install python3-pyforgejo
 
 from rich.console import Console
 from rich.text import Text
@@ -332,6 +339,84 @@ class Ticket(object):
     def close_status(self):
         return self.data['close_status']
 
+    def comment(self, text):
+        self.pagure.comment_issue(self.number, text)
+
+    def close(self):
+        # workaround https://pagure.io/libpagure/issue/22
+        try:
+            self.pagure.change_issue_status(
+                self.number,
+                new_status='Closed',
+                close_status='fixed'
+            )
+        except AttributeError:
+            updated_ticket = Ticket(self.pagure, self.number)
+            if not updated_ticket.is_fixed():
+                raise
+
+
+class ForgejoTicket(object):
+    """Forgejo issue with lazily fetched information"""
+    def __init__(self, forgejo, owner, repo, number):
+        self.forgejo = forgejo
+        self.owner = owner
+        self.repo = repo
+        self.number = number
+        self._data = None
+
+    def is_closed(self):
+        return self.status == 'Closed'
+
+    def is_fixed(self):
+        return self.is_closed()
+
+    @property
+    def data(self):
+        if self._data is not None:
+            return self._data
+        myprint('Retrieving issue %s' % self.number)
+        self._data = self.forgejo.issue.get_issue(self.owner, self.repo, self.number)
+        return self._data
+
+    @property
+    def reviewer(self):
+        return None  # Forgejo has no custom fields; reviewer must be specified explicitly
+
+    @property
+    def rhbz(self):
+        return None  # Forgejo has no custom fields
+
+    @property
+    def milestone(self):
+        if self.data.milestone:
+            return self.data.milestone.title
+        return None
+
+    @property
+    def summary(self):
+        return self.data.body
+
+    @property
+    def title(self):
+        return self.data.title
+
+    @property
+    def status(self):
+        if self.data.state == 'open':
+            return 'Open'
+        return 'Closed'
+
+    @property
+    def close_status(self):
+        return None
+
+    def comment(self, text):
+        self.forgejo.issue.create_comment(self.owner, self.repo, self.number, body=text)
+
+    def close(self):
+        self.forgejo.issue.edit_issue(self.owner, self.repo, self.number, state='closed')
+
 
 class Context(object):
     """Holds options, configuration, and helpers for a tool"""
@@ -358,18 +443,39 @@ class Context(object):
             myprint(self.options)
             myprint('Config:')
             self.print_sanitized_config()
-        if self.options['--no-pagure'] or self.config == None:
+        if self.config is None:
             self.pagure = None
+            self.forgejo = None
+            self._forgejo_owner = None
+            self._forgejo_repo = None
         else:
-            try:
-                self.pagure = libpagure.Pagure(
-                    pagure_token=self.config['pagure-token'],
-                    pagure_repository=self.config['pagure-repository']
-                )
-            except TypeError:
-                self.pagure = libpagure.Pagure(
-                    pagure_token=self.config['pagure-token'],
-                    repo_to=self.config['pagure-repository']
+            if self.options['--no-pagure'] or 'pagure-token' not in self.config:
+                self.pagure = None
+            else:
+                try:
+                    self.pagure = libpagure.Pagure(
+                        pagure_token=self.config['pagure-token'],
+                        pagure_repository=self.config['pagure-repository']
+                    )
+                except TypeError:
+                    self.pagure = libpagure.Pagure(
+                        pagure_token=self.config['pagure-token'],
+                        repo_to=self.config['pagure-repository']
+                    )
+
+            if (self.options['--no-forgejo'] or
+                    'forgejo-token' not in self.config or
+                    'forgejo-url' not in self.config or
+                    'forgejo-repo' not in self.config):
+                self.forgejo = None
+                self._forgejo_owner = None
+                self._forgejo_repo = None
+            else:
+                forgejo_repo = self.config['forgejo-repo']
+                self._forgejo_owner, self._forgejo_repo = forgejo_repo.split('/', 1)
+                self.forgejo = pyforgejo.PyforgejoApi(
+                    base_url=self.config['forgejo-url'],
+                    api_key=self.config['forgejo-token'],
                 )
 
         # ipatool sets GIT_COMMITTER_DATE to a fixed value, so
@@ -383,10 +489,24 @@ class Context(object):
 
     def print_sanitized_config(self):
         # prints the config dictionary with sensitive informations starred
-        sensitives = ('gh-token', 'pagure-token')
+        sensitives = ('gh-token', 'pagure-token', 'forgejo-token')
         myprint(dict((attr, val)
                         if attr not in sensitives else (attr, '***')
                         for attr, val in self.config.items()))
+
+    @property
+    def tracker(self):
+        """Return the active issue tracker client, or None if none configured"""
+        return self.pagure or self.forgejo
+
+    def make_ticket(self, number):
+        """Create a Ticket or ForgejoTicket for the given issue number"""
+        if self.pagure:
+            return Ticket(self.pagure, number)
+        elif self.forgejo:
+            return ForgejoTicket(self.forgejo, self._forgejo_owner,
+                                 self._forgejo_repo, number)
+        return None
 
     commands = {}
     @classmethod
@@ -493,7 +613,7 @@ def get_reviewers(ctx, tickets):
     if ctx.options['--no-reviewer']:
         return []
     reviewers = ctx.options['--reviewer']
-    if ctx.pagure and not reviewers:
+    if ctx.tracker and not reviewers:
         reviewers = set()
         for ticket in tickets:
             if ticket.reviewer:
@@ -669,8 +789,7 @@ def _update_issue(ctx, ticket):
 
     if do_comment:
         try:
-            ctx.pagure.comment_issue(ticket.number,
-                ctx.push_info['pagure_comment'])
+            ticket.comment(ctx.push_info['pagure_comment'])
         except Exception as e:
             myprint(Text('Comment failed: {}'.format(e), style='red'))
             myprint(Text('Please update issue manually', style='yellow'))
@@ -719,17 +838,7 @@ def _close_issue(ctx, ticket):
 
     if do_close:
         try:
-            # workaround https://pagure.io/libpagure/issue/22
-            try:
-                ctx.pagure.change_issue_status(
-                    ticket.number,
-                    new_status='Closed',
-                    close_status='fixed'
-                )
-            except AttributeError:
-                updated_ticket = Ticket(ctx.pagure, ticket.number)
-                if not updated_ticket.is_fixed():
-                    raise
+            ticket.close()
         except Exception as e:
             myprint(Text('Failed to close the issue: {}'.format(e), style='red'))
             myprint(Text('Please close the issue manually', style='yellow'))
@@ -749,8 +858,8 @@ def push_command(ctx):
     ticket_numbers = set()
     for patch in patches:
         ticket_numbers.update(patch.ticket_numbers)
-    if ctx.pagure:
-        tickets = [Ticket(ctx.pagure, n) for n in ticket_numbers]
+    if ctx.tracker:
+        tickets = [ctx.make_ticket(n) for n in ticket_numbers]
     else:
         tickets = []
 
@@ -766,10 +875,10 @@ def push_command(ctx):
     branches = ctx.options['--branch']
     if not branches:
         if not tickets:
-            if ctx.pagure:
+            if ctx.tracker:
                 ctx.die('No branches specified and no tickets found')
             else:
-                ctx.die('No branches specified and Pagure disabled')
+                ctx.die('No branches specified and no issue tracker configured')
         if ctx.verbosity:
             myprint('Divining branches from tickets: %s' %
                     ', '.join(str(t.number) for t in tickets))
@@ -1153,6 +1262,8 @@ def pr_push_command(ctx):
         push_command(ctx)
     except libpagure.exceptions.APIError as e:
         ctx.die('Pagure API Error: {}'.format(e))
+    except pyforgejo.core.api_error.ApiError as e:
+        ctx.die('Forgejo API Error: {}'.format(e))
     except Exception:
         pass
     else:
@@ -1352,11 +1463,11 @@ def start_review_command(ctx):
     ticket_numbers = sorted(ticket_numbers)
     if ctx.verbosity:
         myprint('Tickets selected: %s' % ticket_numbers)
-    tickets = [Ticket(ctx.pagure, int(n)) for n in ticket_numbers]
+    tickets = [ctx.make_ticket(int(n)) for n in ticket_numbers]
     if not tickets:
         ctx.die('No tickets selected')
-    if not ctx.pagure:
-        ctx.die('Cannot work with --no-pagure')
+    if not ctx.tracker:
+        ctx.die('Cannot work without an issue tracker (--no-pagure/--no-forgejo)')
 
     existing_reviewers = []
     for ticket in tickets:
