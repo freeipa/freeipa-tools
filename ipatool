@@ -22,6 +22,7 @@ Common Options:
   -n, --dry-run        Do not push
   --no-pagure          Do not contact Pagure.io
   --no-forgejo         Do not contact Forgejo
+  --no-jira            Do not contact Jira
   --no-fetch           Do not synchronize before pushing
   --color=(auto|always|never)  Colorize output [default: auto]
   PATCH                Patch to push, or directory with *.patch files
@@ -129,6 +130,17 @@ update-issue: ask
 # close-issue options: no/ask
 close-issue: ask
 
+# Jira configuration (secondary tracker; ticket keys come from the 'rhbz'
+# custom field of Pagure/Forgejo issues, matched against jira-ticket-url)
+# The Jira server URL is derived automatically from jira-ticket-url.
+# jira-token: "your-personal-access-token"
+# update-jira options: yes/no/ask
+# update-jira: ask
+# close-jira options: yes/no/ask (transitions the issue; default: no)
+# close-jira: no
+# Transition name to use when closing a Jira issue (default: Fixed)
+# jira-close-transition: Fixed
+
 # Mapping of logins to Git-style author lines
 trac-username-map:
     abbra: Alexander Bokovoy <abokovoy@redhat.com>
@@ -177,6 +189,7 @@ import unidecode  # yum install python3-unidecode
 import docopt     # yum install python3-docopt
 import libpagure  # yum install python3-libpagure
 import pyforgejo  # yum install python3-pyforgejo
+import jira as jiralib  # yum install python3-jira
 
 from rich.console import Console
 from rich.text import Text
@@ -478,6 +491,19 @@ class Context(object):
                     api_key=self.config['forgejo-token'],
                 )
 
+            jira_ticket_url = self.config.get('jira-ticket-url', '')
+            jira_server = (jira_ticket_url.split('/browse/')[0]
+                           if '/browse/' in jira_ticket_url else '')
+            if (self.options['--no-jira'] or
+                    'jira-token' not in self.config or not jira_server):
+                self.jira = None
+            else:
+                self.jira = jiralib.JIRA(
+                    server=jira_server,
+                    token_auth=self.config['jira-token'],
+                    get_server_info=False,
+                )
+
         # ipatool sets GIT_COMMITTER_DATE to a fixed value, so
         # commits to parallel branches hopefully end up identical.
         # Getting the current date with timezone info is a pain in Python
@@ -489,7 +515,7 @@ class Context(object):
 
     def print_sanitized_config(self):
         # prints the config dictionary with sensitive informations starred
-        sensitives = ('gh-token', 'pagure-token', 'forgejo-token')
+        sensitives = ('gh-token', 'pagure-token', 'forgejo-token', 'jira-token')
         myprint(dict((attr, val)
                         if attr not in sensitives else (attr, '***')
                         for attr, val in self.config.items()))
@@ -764,6 +790,7 @@ def print_push_info(ctx, patches, sha1s, ticket_numbers, tickets):
     if jira_urls:
         myprint(Text('[cyan]=== Jira tickets fixed ===', style='cyan'))
         myprint('\n'.join(jira_urls))
+    ctx.push_info['jira_urls'] = jira_urls
 
     myprint(Text('=== Ready to push ===', style='cyan'))
 
@@ -844,6 +871,86 @@ def _close_issue(ctx, ticket):
             myprint(Text('Please close the issue manually', style='yellow'))
         else:
             myprint(Text('Issue closed', style='green'))
+
+
+def _update_jira_issues(ctx):
+    """Comment on and optionally transition Jira tickets linked from push info"""
+    if not ctx.jira:
+        return
+    jira_urls = ctx.push_info.get('jira_urls', [])
+    if not jira_urls:
+        return
+
+    jira_ticket_url = ctx.config['jira-ticket-url']
+    browse_prefix = jira_ticket_url.split('/browse/')[0] + '/browse/'
+
+    update_jira = ctx.config.get('update-jira', 'ask')
+    close_jira = ctx.config.get('close-jira', 'no')
+    transition_name = ctx.config.get('jira-close-transition', 'Fixed')
+
+    for url in jira_urls:
+        issue_key = url[len(browse_prefix):]
+
+        if update_jira == 'no':
+            do_comment = False
+        elif update_jira == 'yes':
+            do_comment = True
+        else:
+            if update_jira != 'ask':
+                myprint(Text(
+                    'Invalid value for "update-jira" in config file', style='red'))
+            response = input(
+                'Add commit info comment to Jira {}? [y/n] '.format(issue_key))
+            do_comment = response.lower() == 'y'
+
+        if do_comment:
+            try:
+                ctx.jira.add_comment(issue_key, ctx.push_info['bugzilla_comment'])
+            except Exception as e:
+                myprint(Text(
+                    'Failed to comment on Jira {}: {}'.format(issue_key, e),
+                    style='red'))
+                myprint(Text('Please update Jira manually', style='yellow'))
+            else:
+                myprint(Text(
+                    'Comment added to Jira {}'.format(issue_key), style='green'))
+
+        if close_jira == 'no':
+            continue
+        elif close_jira == 'yes':
+            do_close = True
+        else:
+            if close_jira != 'ask':
+                myprint(Text(
+                    'Invalid value for "close-jira" in config file', style='red'))
+            response = input(
+                'Transition Jira {} to "{}"? [y/n] '.format(
+                    issue_key, transition_name))
+            do_close = response.lower() == 'y'
+
+        if do_close:
+            try:
+                transitions = ctx.jira.transitions(issue_key)
+                transition_id = next(
+                    (t['id'] for t in transitions if t['name'] == transition_name),
+                    None)
+                if transition_id is None:
+                    available = ', '.join(t['name'] for t in transitions)
+                    myprint(Text(
+                        'Transition "{}" not found for {}. Available: {}'.format(
+                            transition_name, issue_key, available),
+                        style='red'))
+                else:
+                    ctx.jira.transition_issue(issue_key, transition_id)
+                    myprint(Text(
+                        'Jira {} transitioned to "{}"'.format(
+                            issue_key, transition_name),
+                        style='green'))
+            except Exception as e:
+                myprint(Text(
+                    'Failed to transition Jira {}: {}'.format(issue_key, e),
+                    style='red'))
+                myprint(Text('Please transition Jira manually', style='yellow'))
 
 
 @Context.command('push')
@@ -965,6 +1072,7 @@ def push_command(ctx):
         for ticket in tickets:
             _update_issue(ctx, ticket)
             _close_issue(ctx, ticket)
+        _update_jira_issues(ctx)
 
 
 
