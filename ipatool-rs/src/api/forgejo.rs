@@ -69,7 +69,10 @@ impl ForgejoClient {
     }
 
     pub fn get_issue(&self, number: u64) -> Result<ForgejoIssue> {
-        let url = self.api_url(&format!("/repos/{}/{}/issues/{}", self.owner, self.repo, number));
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/issues/{}",
+            self.owner, self.repo, number
+        ));
         let resp = self
             .http
             .get(&url)
@@ -83,8 +86,10 @@ impl ForgejoClient {
     }
 
     pub fn comment_issue(&self, number: u64, text: &str) -> Result<()> {
-        let url =
-            self.api_url(&format!("/repos/{}/{}/issues/{}/comments", self.owner, self.repo, number));
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/issues/{}/comments",
+            self.owner, self.repo, number
+        ));
         let body = CommentBody { body: text };
         let resp = self
             .http
@@ -102,8 +107,10 @@ impl ForgejoClient {
     }
 
     pub fn close_issue(&self, number: u64) -> Result<()> {
-        let url =
-            self.api_url(&format!("/repos/{}/{}/issues/{}", self.owner, self.repo, number));
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/issues/{}",
+            self.owner, self.repo, number
+        ));
         let body = EditIssueBody { state: "closed" };
         let resp = self
             .http

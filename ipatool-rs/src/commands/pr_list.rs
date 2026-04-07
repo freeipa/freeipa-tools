@@ -36,10 +36,7 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
     };
 
     // Discard "all" as a real state filter
-    let states_pos: HashSet<String> = states_pos
-        .into_iter()
-        .filter(|s| s != "all")
-        .collect();
+    let states_pos: HashSet<String> = states_pos.into_iter().filter(|s| s != "all").collect();
 
     let prs = gh.list_prs(&search_state)?;
 
@@ -92,8 +89,10 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
     }
 
     // Human error detection: last 100 updated PRs
-    ctx.out
-        .print_colored("Checking for common mistakes...", crate::output::Color::Rgb(0xff, 0x33, 0x11));
+    ctx.out.print_colored(
+        "Checking for common mistakes...",
+        crate::output::Color::Rgb(0xff, 0x33, 0x11),
+    );
 
     // Phase 1: fetch PR list, showing page progress so the user sees activity.
     let checked = gh.list_prs_limited("all", 100, |page, collected| {
@@ -144,7 +143,10 @@ fn fetch_progress(page: u32, collected: usize, color: bool) {
             page, collected
         )
     } else {
-        format!("\rFetching page {} ({} PRs so far)...\x1b[K", page, collected)
+        format!(
+            "\rFetching page {} ({} PRs so far)...\x1b[K",
+            page, collected
+        )
     };
     eprint!("{}", line);
     let _ = std::io::stderr().flush();
@@ -168,7 +170,12 @@ struct ProgressBar {
 
 impl ProgressBar {
     fn new(total: usize, color: bool) -> Self {
-        ProgressBar { total, color, width: 30, last_len: 0 }
+        ProgressBar {
+            total,
+            color,
+            width: 30,
+            last_len: 0,
+        }
     }
 
     /// Render the bar for item `done` (0-based) which is PR `pr_num`.
@@ -179,7 +186,11 @@ impl ProgressBar {
         } else {
             0
         };
-        let pct = if self.total > 0 { done * 100 / self.total } else { 0 };
+        let pct = if self.total > 0 {
+            done * 100 / self.total
+        } else {
+            0
+        };
 
         let bar = format!(
             "[{}{}] {}/{} PR #{}",

@@ -22,10 +22,7 @@ pub fn run(
 
     let patches = if !patch_paths.is_empty() || ticket_numbers.is_empty() {
         if ticket_numbers.is_empty() {
-            println!(
-                "\x1b[33mUsing patches from {}\x1b[0m",
-                patchdir.display()
-            );
+            println!("\x1b[33mUsing patches from {}\x1b[0m", patchdir.display());
         }
         collect_patches(patch_paths, &patchdir, &ticket_url)?
     } else {
@@ -53,8 +50,7 @@ pub fn run(
 
     let mut existing_reviewers = Vec::new();
     for ticket in &tickets {
-        ctx.out
-            .print_blue(&format!("Ticket #{}", ticket.number()));
+        ctx.out.print_blue(&format!("Ticket #{}", ticket.number()));
         let summary = match ticket {
             super::Ticket::Pagure(t) => t.data().map(|d| d.content.clone()).unwrap_or_default(),
             super::Ticket::Forgejo(t) => t

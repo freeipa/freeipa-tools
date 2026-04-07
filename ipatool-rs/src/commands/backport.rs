@@ -114,14 +114,14 @@ pub fn run_backport(
             .map_err(|e| {
                 anyhow::anyhow!(
                     "Failed to push {} to {}/{}: {}",
-                    sha, fork_remote, backport_name, e
+                    sha,
+                    fork_remote,
+                    backport_name,
+                    e
                 )
             })?;
 
-            println!(
-                "Pushed {} to {}/{}",
-                sha, fork_remote, backport_name
-            );
+            println!("Pushed {} to {}/{}", sha, fork_remote, backport_name);
 
             let backport_pr = gh.create_pr(
                 &format!("[Backport][{}] {}", bb, pr.title),
@@ -164,7 +164,7 @@ pub fn run_backport(
 }
 
 pub fn download_pr_patches(
-    ctx: &Ctx,
+    _ctx: &Ctx,
     gh: &Arc<GitHubClient>,
     pr: &GitHubPR,
     patchdir: &std::path::Path,

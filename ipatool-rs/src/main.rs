@@ -272,7 +272,8 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
             // File-not-found is fine (user may not have created a config yet).
             // Any other error (parse failure, permission denied) is fatal.
             let is_not_found = e.chain().any(|cause| {
-                cause.downcast_ref::<std::io::Error>()
+                cause
+                    .downcast_ref::<std::io::Error>()
                     .map(|io| io.kind() == std::io::ErrorKind::NotFound)
                     .unwrap_or(false)
             });
@@ -393,10 +394,10 @@ fn main() {
             "\x1b[36mCopy the following to {}, and modify to taste:\x1b[0m",
             cli.config
         );
-        eprintln!("\x1b[36m{}\x1b[0m", format!("{:-<70}", "---8<---"));
+        eprintln!("\x1b[36m{:-<70}\x1b[0m", "---8<---");
         print!("{}", SAMPLE_CONFIG.trim());
         println!();
-        eprintln!("\x1b[36m{}\x1b[0m", format!("{:->70}", "--->8---"));
+        eprintln!("\x1b[36m{:->70}\x1b[0m", "--->8---");
         return;
     }
 
@@ -437,13 +438,9 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
 
         Command::PrList { states, labels } => commands::pr_list::run(ctx, states, labels),
 
-        Command::PrAck { pr_id, comment } => {
-            commands::pr_ack::run(ctx, *pr_id, comment.as_deref())
-        }
+        Command::PrAck { pr_id, comment } => commands::pr_ack::run(ctx, *pr_id, comment.as_deref()),
 
-        Command::PrReject { pr_id, comment } => {
-            commands::pr_reject::run(ctx, *pr_id, comment)
-        }
+        Command::PrReject { pr_id, comment } => commands::pr_reject::run(ctx, *pr_id, comment),
 
         Command::PrPush {
             pr_id,

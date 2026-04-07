@@ -188,9 +188,11 @@ impl TuiStyle {
     /// Apply this style to a cursive instance.
     pub fn apply(&self, siv: &mut cursive::Cursive) {
         use cursive::theme::Theme;
-        let mut theme = Theme::default();
-        theme.shadow = self.shadow;
-        theme.borders = self.borders.to_cursive();
+        let mut theme = Theme {
+            shadow: self.shadow,
+            borders: self.borders.to_cursive(),
+            ..Theme::default()
+        };
         theme.palette[PaletteColor::Background] = self.background.to_cursive();
         theme.palette[PaletteColor::View] = self.view.to_cursive();
         theme.palette[PaletteColor::Primary] = self.primary.to_cursive();

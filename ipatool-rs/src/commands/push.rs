@@ -3,8 +3,8 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 use super::{
-    apply_patches_to_branch, close_issue, git_cleanup, milestone_branches, update_issue,
-    update_jira_issues, Ctx, PushInfo, get_reviewers,
+    apply_patches_to_branch, close_issue, get_reviewers, git_cleanup, milestone_branches,
+    update_issue, update_jira_issues, Ctx, PushInfo,
 };
 use crate::output::prompt;
 use crate::patch::{collect_patches, Patch};
@@ -150,10 +150,7 @@ pub fn run(
             match response.to_lowercase().as_str() {
                 "n" => return Ok(false),
                 "k" => {
-                    let sha_vals: Vec<String> = branches
-                        .iter()
-                        .map(|b| sha1s[b].clone())
-                        .collect();
+                    let sha_vals: Vec<String> = branches.iter().map(|b| sha1s[b].clone()).collect();
                     crate::git::gitk(&branches, &sha_vals, &ctx.git_env)?;
                 }
                 "y" => {

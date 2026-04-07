@@ -7,15 +7,12 @@ static SUBJECT_RE: OnceLock<Regex> = OnceLock::new();
 static REVIEWER_LINE_RE: OnceLock<Regex> = OnceLock::new();
 
 fn subject_re() -> &'static Regex {
-    SUBJECT_RE.get_or_init(|| {
-        Regex::new(r"^Subject:(?:\s*\[PATCH[^\]]*\])*\s*(?P<subj>.*)").unwrap()
-    })
+    SUBJECT_RE
+        .get_or_init(|| Regex::new(r"^Subject:(?:\s*\[PATCH[^\]]*\])*\s*(?P<subj>.*)").unwrap())
 }
 
 fn reviewer_line_re() -> &'static Regex {
-    REVIEWER_LINE_RE.get_or_init(|| {
-        Regex::new(r"^[-_a-zA-Z0-9]+: .*$").unwrap()
-    })
+    REVIEWER_LINE_RE.get_or_init(|| Regex::new(r"^[-_a-zA-Z0-9]+: .*$").unwrap())
 }
 
 /// A sanitized patch ready for application
@@ -56,7 +53,10 @@ impl Patch {
             }
 
             if let Some(caps) = subject_re().captures(line) {
-                subject = caps.name("subj").map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+                subject = caps
+                    .name("subj")
+                    .map(|m| m.as_str().trim().to_string())
+                    .unwrap_or_default();
                 in_subject = true;
             }
 
@@ -67,10 +67,7 @@ impl Patch {
 
             if line.starts_with(">From") {
                 head_lines.push(format!("{}\n", &line[1..]));
-            } else if line == "---"
-                || line.starts_with("diff -")
-                || line.starts_with("Index: ")
-            {
+            } else if line == "---" || line.starts_with("diff -") || line.starts_with("Index: ") {
                 patch_lines.push(line_with_nl);
                 found_patch_start = true;
             } else {
@@ -101,7 +98,7 @@ impl Patch {
         }
 
         Ok(Patch {
-            filename: filename,
+            filename,
             subject,
             ticket_numbers,
             head_lines,
@@ -116,8 +113,7 @@ impl Patch {
                 self.head_lines.push("\n".to_string());
             }
         }
-        self.head_lines
-            .push(format!("Reviewed-By: {}\n", reviewer));
+        self.head_lines.push(format!("Reviewed-By: {}\n", reviewer));
     }
 
     pub fn content(&self) -> String {
@@ -152,11 +148,7 @@ pub fn collect_patches(paths: &[String], patchdir: &Path, ticket_url: &str) -> R
                 .map_err(|e| anyhow::anyhow!("Cannot read dir {}: {}", path.display(), e))?
                 .filter_map(|e| e.ok())
                 .map(|e| e.path())
-                .filter(|p| {
-                    p.extension()
-                        .map(|ext| ext == "patch")
-                        .unwrap_or(false)
-                })
+                .filter(|p| p.extension().map(|ext| ext == "patch").unwrap_or(false))
                 .collect();
             entries.sort();
             for entry in entries {
@@ -197,7 +189,11 @@ mod tests {
     use super::*;
 
     fn from_str(content: &str) -> Result<Patch> {
-        Patch::from_content(PathBuf::from("test.patch"), content, "https://pagure.io/freeipa/issue/")
+        Patch::from_content(
+            PathBuf::from("test.patch"),
+            content,
+            "https://pagure.io/freeipa/issue/",
+        )
     }
 
     // Standard minimal patch (subject without PATCH tag)
@@ -226,7 +222,10 @@ diff --git a/src/main.rs b/src/main.rs
 
     #[test]
     fn test_patch_filename_basic() {
-        assert_eq!(patch_filename("Fix LDAP timeout", 1), "0001-Fix-LDAP-timeout.patch");
+        assert_eq!(
+            patch_filename("Fix LDAP timeout", 1),
+            "0001-Fix-LDAP-timeout.patch"
+        );
     }
 
     #[test]
@@ -423,7 +422,10 @@ diff --git a/x b/x
             "https://pagure.io/freeipa/issue/",
         )
         .unwrap();
-        assert_eq!(patch.ticket_numbers.iter().filter(|&&n| n == 1234).count(), 1);
+        assert_eq!(
+            patch.ticket_numbers.iter().filter(|&&n| n == 1234).count(),
+            1
+        );
     }
 
     #[test]

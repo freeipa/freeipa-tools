@@ -63,11 +63,7 @@ pub fn run(
     );
 
     // Post-push actions
-    let pushed = ctx
-        .push_info
-        .as_ref()
-        .map(|i| i.pushed)
-        .unwrap_or(false);
+    let pushed = ctx.push_info.as_ref().map(|i| i.pushed).unwrap_or(false);
 
     if !ctx.dry_run && pushed {
         let push_info = ctx.push_info.clone().unwrap_or_default();
