@@ -578,24 +578,26 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
         }
     }
 
-    // ── Recent comments ──────────────────────────────────────────────────────
+    // ── Comments ─────────────────────────────────────────────────────────────
     if !comments.is_empty() {
-        let total = pr.comments.unwrap_or(comments.len() as u64);
         s.append_plain("\n");
-        s.append_styled(&format!("Recent comments ({} total):\n", total), bold());
+        s.append_styled(&format!("Comments ({}):\n", comments.len()), bold());
         for c in &comments {
             let date = c.created_at.get(..10).unwrap_or(&c.created_at);
-            let first_line = c.body
+            s.append_styled(&format!("  @{} [{}]:\n", c.user.login, date), bold());
+            // Show up to 5 non-empty lines of the comment body, indented.
+            let body_lines: Vec<&str> = c.body
                 .lines()
                 .map(str::trim)
-                .find(|l| !l.is_empty())
-                .unwrap_or("");
-            s.append_plain(&format!(
-                "  @{} [{}]: {}\n",
-                c.user.login,
-                date,
-                truncate(first_line, 72),
-            ));
+                .filter(|l| !l.is_empty())
+                .collect();
+            let shown = body_lines.len().min(5);
+            for line in &body_lines[..shown] {
+                s.append_plain(&format!("    {}\n", truncate(line, 76)));
+            }
+            if body_lines.len() > 5 {
+                s.append_plain(&format!("    … ({} more lines)\n", body_lines.len() - 5));
+            }
         }
     }
 
@@ -647,9 +649,9 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: 
     let sha = pr.head.sha.clone();
     let cb = siv.cb_sink().clone();
     std::thread::spawn(move || {
-        // All three fetches run sequentially in the background thread.
+        // All fetches run sequentially in the background thread.
         let statuses = gh.most_recent_statuses(&sha).unwrap_or_default();
-        let comments = gh.get_last_issue_comments(pr_number, 2).unwrap_or_default();
+        let comments = gh.get_all_issue_comments(pr_number).unwrap_or_default();
         let files    = gh.get_pr_files(pr_number).unwrap_or_default();
 
         // Persist so the next offline session can show these details.

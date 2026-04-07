@@ -55,7 +55,7 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
         let _ = std::io::stderr().flush();
 
         let statuses = gh.most_recent_statuses(&pr.head.sha).unwrap_or_default();
-        let comments = gh.get_last_issue_comments(pr.number, 2).unwrap_or_default();
+        let comments = gh.get_all_issue_comments(pr.number).unwrap_or_default();
         let files    = gh.get_pr_files(pr.number).unwrap_or_default();
         let commits  = gh.get_pr_commits(pr.number)
             .ok()
