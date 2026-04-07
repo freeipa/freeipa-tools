@@ -585,19 +585,8 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
         for c in &comments {
             let date = c.created_at.get(..10).unwrap_or(&c.created_at);
             s.append_styled(&format!("  @{} [{}]:\n", c.user.login, date), bold());
-            // Show up to 5 non-empty lines of the comment body, indented.
-            let body_lines: Vec<&str> = c.body
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .collect();
-            let shown = body_lines.len().min(5);
-            for line in &body_lines[..shown] {
-                s.append_plain(&format!("    {}\n", truncate(line, 76)));
-            }
-            if body_lines.len() > 5 {
-                s.append_plain(&format!("    … ({} more lines)\n", body_lines.len() - 5));
-            }
+            s.append(cursive::utils::markup::markdown::parse(&c.body));
+            s.append_plain("\n");
         }
     }
 
