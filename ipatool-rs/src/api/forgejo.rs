@@ -16,7 +16,6 @@ pub struct ForgejoMilestone {
 
 #[derive(Debug, Deserialize)]
 pub struct ForgejoIssue {
-    pub number: u64,
     pub title: String,
     #[serde(default)]
     pub body: Option<String>,

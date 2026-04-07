@@ -39,10 +39,6 @@ impl Output {
         Output { color }
     }
 
-    pub fn print(&self, msg: &str) {
-        println!("{}", msg);
-    }
-
     pub fn print_colored(&self, msg: &str, color: Color) {
         if self.color.enabled() {
             println!("{}{}{}", color.ansi_code(), msg, RESET);
@@ -69,14 +65,6 @@ impl Output {
 
     pub fn print_cyan(&self, msg: &str) {
         self.print_colored(msg, Color::Cyan);
-    }
-
-    pub fn eprint_cyan(&self, msg: &str) {
-        if self.color.enabled() {
-            eprintln!("{}{}{}", Color::Cyan.ansi_code(), msg, RESET);
-        } else {
-            eprintln!("{}", msg);
-        }
     }
 
     pub fn section(&self, title: &str) {
@@ -107,17 +95,6 @@ impl Color {
         }
     }
 
-    pub fn from_hex(hex: &str) -> Option<Self> {
-        let hex = hex.trim_start_matches('#');
-        if hex.len() == 6 {
-            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-            Some(Color::Rgb(r, g, b))
-        } else {
-            None
-        }
-    }
 }
 
 pub fn prompt(msg: &str) -> String {
@@ -183,73 +160,6 @@ mod tests {
     #[test]
     fn test_color_rgb_zeros() {
         assert_eq!(Color::Rgb(0, 0, 0).ansi_code(), "\x1b[38;2;0;0;0m");
-    }
-
-    // ── Color::from_hex ───────────────────────────────────────────────────────
-
-    #[test]
-    fn test_from_hex_with_hash() {
-        let color = Color::from_hex("#ff3311").unwrap();
-        match color {
-            Color::Rgb(r, g, b) => {
-                assert_eq!(r, 0xff);
-                assert_eq!(g, 0x33);
-                assert_eq!(b, 0x11);
-            }
-            _ => panic!("Expected Rgb"),
-        }
-    }
-
-    #[test]
-    fn test_from_hex_without_hash() {
-        let color = Color::from_hex("00ff80").unwrap();
-        match color {
-            Color::Rgb(r, g, b) => {
-                assert_eq!(r, 0x00);
-                assert_eq!(g, 0xff);
-                assert_eq!(b, 0x80);
-            }
-            _ => panic!("Expected Rgb"),
-        }
-    }
-
-    #[test]
-    fn test_from_hex_all_zeros() {
-        let color = Color::from_hex("000000").unwrap();
-        match color {
-            Color::Rgb(r, g, b) => assert_eq!((r, g, b), (0, 0, 0)),
-            _ => panic!("Expected Rgb"),
-        }
-    }
-
-    #[test]
-    fn test_from_hex_all_ff() {
-        let color = Color::from_hex("ffffff").unwrap();
-        match color {
-            Color::Rgb(r, g, b) => assert_eq!((r, g, b), (255, 255, 255)),
-            _ => panic!("Expected Rgb"),
-        }
-    }
-
-    #[test]
-    fn test_from_hex_invalid_chars() {
-        assert!(Color::from_hex("gghhii").is_none());
-        assert!(Color::from_hex("zzzzzz").is_none());
-    }
-
-    #[test]
-    fn test_from_hex_wrong_length_short() {
-        assert!(Color::from_hex("ff33").is_none());
-    }
-
-    #[test]
-    fn test_from_hex_wrong_length_long() {
-        assert!(Color::from_hex("ff3311aa").is_none());
-    }
-
-    #[test]
-    fn test_from_hex_empty() {
-        assert!(Color::from_hex("").is_none());
     }
 
     // ── ColorMode ─────────────────────────────────────────────────────────────

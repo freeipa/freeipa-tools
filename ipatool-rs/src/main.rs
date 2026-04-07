@@ -347,14 +347,13 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         }
     };
 
-    // Get ISO date for GIT_COMMITTER_DATE
-    let isodate_now = git::get_iso_date();
-
+    // Set GIT_COMMITTER_DATE so backported commits carry the current date.
     let mut git_env: HashMap<String, String> = std::env::vars().collect();
+    let isodate_now = git::get_iso_date();
     if !isodate_now.is_empty() {
         git_env
             .entry("GIT_COMMITTER_DATE".to_string())
-            .or_insert_with(|| isodate_now.clone());
+            .or_insert_with(|| isodate_now);
     }
 
     let style_path = tui_style::style_config_path(&cli.config);
@@ -374,7 +373,6 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         no_reviewer: cli.no_reviewer,
         no_fetch: cli.no_fetch,
         color: cli.color.clone(),
-        isodate_now,
         out,
         push_info: None,
         git_env,

@@ -85,7 +85,6 @@ pub struct GitHubFile {
 /// A single pull-request review comment (line-level).
 #[derive(Debug, Deserialize, Clone)]
 pub struct GitHubReviewComment {
-    pub id: u64,
     pub user: GitHubUser,
     pub body: String,
     pub path: String,
@@ -95,11 +94,7 @@ pub struct GitHubReviewComment {
     pub original_line: Option<u64>,
     /// "LEFT" or "RIGHT".
     pub side: Option<String>,
-    pub diff_hunk: String,
     pub created_at: String,
-    pub commit_id: String,
-    #[serde(default)]
-    pub in_reply_to_id: Option<u64>,
 }
 
 impl GitHubPR {
@@ -107,15 +102,10 @@ impl GitHubPR {
         self.merged.unwrap_or(false)
     }
 
-    pub fn is_open(&self) -> bool {
-        self.state == "open"
-    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct GitHubIssue {
-    pub number: u64,
-    pub title: String,
     pub state: String,
     pub labels: Vec<GitHubLabel>,
 }
@@ -753,26 +743,10 @@ mod tests {
         let pr: GitHubPR = serde_json::from_str(json).unwrap();
         assert_eq!(pr.number, 99);
         assert!(pr.is_merged());
-        assert!(!pr.is_open());
         assert_eq!(pr.labels.len(), 1);
         assert_eq!(pr.labels[0].name, "ack");
         assert_eq!(pr.updated_at.as_deref(), Some("2024-06-01T12:00:00Z"));
         assert_eq!(pr.additions, Some(50));
-    }
-
-    #[test]
-    fn test_pr_is_open_true() {
-        let json = r#"{"number":1,"title":"t","state":"open","html_url":"u","head":{"ref":"r","sha":"s"},"base":{"ref":"m","sha":"b"},"user":{"login":"u"}}"#;
-        let pr: GitHubPR = serde_json::from_str(json).unwrap();
-        assert!(pr.is_open());
-        assert!(!pr.is_merged());
-    }
-
-    #[test]
-    fn test_pr_is_open_false_when_closed() {
-        let json = r#"{"number":1,"title":"t","state":"closed","html_url":"u","head":{"ref":"r","sha":"s"},"base":{"ref":"m","sha":"b"},"user":{"login":"u"}}"#;
-        let pr: GitHubPR = serde_json::from_str(json).unwrap();
-        assert!(!pr.is_open());
     }
 
     #[test]
