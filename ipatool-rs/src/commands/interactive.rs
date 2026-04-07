@@ -578,6 +578,15 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
         }
     }
 
+    // ── Description ──────────────────────────────────────────────────────────
+    if let Some(ref body) = pr.body {
+        if !body.trim().is_empty() {
+            s.append_plain("\n");
+            s.append_styled("Description:\n", bold());
+            s.append(cursive::utils::markup::markdown::parse(body));
+        }
+    }
+
     // ── Comments ─────────────────────────────────────────────────────────────
     if !comments.is_empty() {
         s.append_plain("\n");
@@ -588,14 +597,6 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
             s.append(cursive::utils::markup::markdown::parse(&c.body));
             s.append_plain("\n");
         }
-    }
-
-    // ── Description ──────────────────────────────────────────────────────────
-    let excerpt = body_excerpt(pr);
-    if !excerpt.is_empty() {
-        s.append_plain("\n");
-        s.append_styled("Description:", bold());
-        s.append_plain(&format!("\n{}", excerpt));
     }
 
     s
