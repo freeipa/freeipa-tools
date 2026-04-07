@@ -251,6 +251,12 @@ enum Command {
         #[arg(long, default_value = "open")]
         state: String,
     },
+
+    /// List pending offline review actions without submitting them
+    QueueList,
+
+    /// Submit all pending offline review actions to GitHub
+    QueueSubmit,
 }
 
 fn build_ctx(cli: &Cli) -> Result<Ctx> {
@@ -442,5 +448,9 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
         Command::Tui { state } => commands::interactive::run(ctx, state),
 
         Command::CacheUpdate { state } => commands::cache_update::run(ctx, state),
+
+        Command::QueueList => commands::queue_submit::run_list(ctx),
+
+        Command::QueueSubmit => commands::queue_submit::run_submit(ctx),
     }
 }

@@ -21,6 +21,7 @@ pub mod pr_list;
 pub mod pr_push;
 pub mod pr_reject;
 pub mod push;
+pub mod queue_submit;
 pub mod start_review;
 
 pub const GIT_REMOTE_SERVER: &str = "pagure.io";
