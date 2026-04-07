@@ -505,6 +505,33 @@ impl GitHubClient {
         Ok(comments)
     }
 
+    /// Return all issue comments in chronological order, paging automatically.
+    pub fn get_all_issue_comments(&self, number: u64) -> Result<Vec<GitHubComment>> {
+        let mut all = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let url = self.api_url(&format!(
+                "/issues/{}/comments?sort=created&direction=asc&per_page=100&page={}",
+                number, page
+            ));
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", self.auth_header())
+                .header("Accept", "application/vnd.github.v3+json")
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            let comments: Vec<GitHubComment> =
+                resp.json().with_context(|| format!("Parsing comments for issue {}", number))?;
+            if comments.is_empty() {
+                break;
+            }
+            all.extend(comments);
+            page += 1;
+        }
+        Ok(all)
+    }
+
     /// Return the changed-file list for a PR (first page, up to 100 files).
     /// Each `GitHubFile` includes the `patch` field when available.
     pub fn get_pr_files(&self, number: u64) -> Result<Vec<GitHubFile>> {
