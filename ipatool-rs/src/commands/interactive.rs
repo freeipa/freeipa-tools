@@ -114,44 +114,80 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
 
     let state = state.to_string();
     let gh2 = Arc::clone(&gh);
-    siv.add_layer(loading_dialog("Fetching pull requests…"));
 
-    let cb = siv.cb_sink().clone();
-    std::thread::spawn(move || {
-        let result: anyhow::Result<Vec<_>> = (|| {
-            if offline {
-                match &db {
-                    Some(db) => {
-                        let prs = db.load_prs(crate::db::Provider::GitHub, &state)?;
-                        if prs.is_empty() {
-                            Err(anyhow::anyhow!("No cached data available in offline mode."))
-                        } else {
-                            Ok(prs)
+    // In online mode, if the cache already holds PRs for the requested state,
+    // display them immediately so the TUI is interactive right away.  A silent
+    // background thread then fetches fresh data and swaps the list in once it
+    // arrives.  On network error the cached view remains untouched.
+    let cached_prs = if !offline {
+        db.as_ref()
+            .and_then(|d| d.load_prs(crate::db::Provider::GitHub, &state).ok())
+            .filter(|v| !v.is_empty())
+    } else {
+        None
+    };
+
+    if let Some(initial_prs) = cached_prs {
+        build_two_pane(&mut siv, Arc::clone(&gh), initial_prs);
+        let cb = siv.cb_sink().clone();
+        let db2 = db.clone();
+        std::thread::spawn(move || {
+            if let Ok(prs) = gh2.list_prs(&state) {
+                if let Some(ref d) = db2 {
+                    if let Err(e) = d.cache_prs(crate::db::Provider::GitHub, &prs) {
+                        eprintln!("Warning: failed to update PR cache: {}", e);
+                    }
+                }
+                let gh3 = gh2;
+                cb.send(Box::new(move |s: &mut Cursive| {
+                    while s.pop_layer().is_some() {}
+                    build_two_pane(s, gh3, prs);
+                }))
+                .ok();
+            }
+            // On network error: silently keep the cached view.
+            // The user can press 'r' to retry manually.
+        });
+    } else {
+        // No cached data: show a blocking loading dialog until the fetch lands.
+        siv.add_layer(loading_dialog("Fetching pull requests…"));
+        let cb = siv.cb_sink().clone();
+        std::thread::spawn(move || {
+            let result: anyhow::Result<Vec<_>> = (|| {
+                if offline {
+                    match &db {
+                        Some(db) => {
+                            let prs = db.load_prs(crate::db::Provider::GitHub, &state)?;
+                            if prs.is_empty() {
+                                Err(anyhow::anyhow!("No cached data available in offline mode."))
+                            } else {
+                                Ok(prs)
+                            }
+                        }
+                        None => Err(anyhow::anyhow!("No cached data available in offline mode.")),
+                    }
+                } else {
+                    let prs = gh2.list_prs(&state)?;
+                    if let Some(ref db) = db {
+                        if let Err(e) = db.cache_prs(crate::db::Provider::GitHub, &prs) {
+                            eprintln!("Warning: failed to cache PRs: {}", e);
                         }
                     }
-                    None => Err(anyhow::anyhow!("No cached data available in offline mode.")),
+                    Ok(prs)
                 }
-            } else {
-                let prs = gh2.list_prs(&state)?;
-                if let Some(ref db) = db {
-                    if let Err(e) = db.cache_prs(crate::db::Provider::GitHub, &prs) {
-                        eprintln!("Warning: failed to cache PRs: {}", e);
-                    }
+            })();
+            let gh3 = gh2;
+            cb.send(Box::new(move |s: &mut Cursive| {
+                s.pop_layer();
+                match result {
+                    Err(e) => show_error(s, &format!("Failed to load PRs: {}", e)),
+                    Ok(prs) if prs.is_empty() => show_error(s, "No pull requests found."),
+                    Ok(prs) => build_two_pane(s, gh3, prs),
                 }
-                Ok(prs)
-            }
-        })();
-        let gh3 = gh2;
-        cb.send(Box::new(move |s: &mut Cursive| {
-            s.pop_layer();
-            match result {
-                Err(e) => show_error(s, &format!("Failed to load PRs: {}", e)),
-                Ok(prs) if prs.is_empty() => show_error(s, "No pull requests found."),
-                Ok(prs) => build_two_pane(s, gh3, prs),
-            }
-        }))
-        .ok();
-    });
+            }))
+            .ok();
+        });
+    }
 
     siv.run();
     Ok(siv.user_data::<TuiState>().and_then(|t| t.pending_action.clone()))
