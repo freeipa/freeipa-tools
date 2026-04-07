@@ -915,6 +915,7 @@ dependencies = [
  "clap",
  "cursive",
  "dirs",
+ "pulldown-cmark",
  "regex",
  "reqwest",
  "rusqlite",
