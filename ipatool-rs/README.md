@@ -218,6 +218,9 @@ List GitHub pull requests with optional state and label filters.  After
 listing, also scans the last 100 recently-updated PRs for common mistakes
 (merged without `pushed` label, pushed without `ack` label).
 
+Results are also written to the local SQLite cache so the TUI and offline mode
+have fresh data without a separate `cache-update` run.
+
 ```
 ipatool pr-list                       # open PRs
 ipatool pr-list -s closed             # closed PRs
@@ -244,6 +247,7 @@ post a comment.
 ```
 ipatool pr-ack 8309
 ipatool pr-ack 8309 -c "LGTM, thanks"
+ipatool --offline pr-ack 8309 -c "LGTM"   # queued for later sync
 ```
 
 **Arguments:** `<pr_id>` (required)
@@ -254,6 +258,9 @@ ipatool pr-ack 8309 -c "LGTM, thanks"
 |------|-------------|
 | `-c`, `--comment <text>` | Comment text (optional) |
 
+In offline mode (`--offline`) the action is queued in the local database and
+applied when connectivity is restored via `queue-submit` or the TUI `s` key.
+
 ---
 
 ### `pr-reject`
@@ -263,6 +270,7 @@ and close the PR.
 
 ```
 ipatool pr-reject 8309 -c "Needs rebase on top of master"
+ipatool --offline pr-reject 8309 -c "Needs rebase"   # queued
 ```
 
 **Arguments:** `<pr_id>` (required)
@@ -348,10 +356,22 @@ ipatool --offline tui        # use cached data (no network)
 |------|---------|-------------|
 | `--state` | `open` | Which PRs to load: `open`, `closed`, `all` |
 
+#### Startup behaviour
+
+- **Online, no cache:** a loading spinner is shown while PRs are fetched from
+  GitHub.
+- **Online, cache available:** cached PRs are displayed immediately so the TUI
+  is interactive at once.  A background thread fetches fresh data and swaps the
+  list in silently when it arrives.  On network error the cached view stays and
+  the user can press `r` to retry.
+- **Offline:** PRs and full detail data (CI status, comments, changed files) are
+  served entirely from the local SQLite cache populated by `cache-update` or
+  previous online sessions.
+
 #### Layout
 
 ```
- a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  …  Enter:Actions
+  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  j/↓:Down  k/↑:Up  d/u:Scroll  Enter:Actions
 ┌── 47 PRs ────────────────────┐┌── Details ──────────────────────────────────┐
 │ #8309 ○ Fix LDAP timeout  …  ││ PR #8309: Fix LDAP connection timeout        │
 │ #8308 ○ Add KDC support   …  ││                                              │
@@ -365,27 +385,49 @@ ipatool --offline tui        # use cached data (no network)
 │                              ││   ✗ ci/lint                                  │
 │                              ││                                              │
 │                              ││ Changed files (3 files, +42 / -7):           │
-│                              ││   M  ipaserver/plugins/ldap2.py              │
+│                              ││   M  ipaserver/plugins/ldap2.py  (+38 / -5)  │
+│                              ││                                              │
+│                              ││ Description:                                 │
+│                              ││   Fix the LDAP connection timeout by …       │
+│                              ││                                              │
+│                              ││ Comments (2):                                │
+│                              ││   @reviewer [2024-03-01]:                    │
+│                              ││   LGTM, one nit below                        │
 └──────────────────────────────┘└─────────────────────────────────────────────┘
 ```
 
-The left pane colour-codes PRs:  green = acked, red = rejected/closed,
-default = pending.  The right pane refreshes in the background as you move
-between PRs.
+In offline mode the help bar shows instead:
+```
+[OFFLINE | 3 queued | s:Sync]  a:ACK  x:Reject  …
+```
+The offline tag is shown in yellow.
 
-#### Global keyboard shortcuts
+The left pane colour-codes PRs: green = acked, red = rejected/closed,
+default = pending.  The right pane refreshes in the background as you move
+between PRs.  The right pane shows the full PR description and all issue
+comments, both rendered as Markdown.  Use `d`/`u` to scroll the detail pane
+without changing the selected PR.
+
+#### Default keyboard shortcuts
+
+All keys listed below are the defaults.  Every key can be remapped in
+`~/.ipa/toolconf-keys.yaml` (see [TUI customisation](#tui-customisation)).
+
+**Main PR list**
 
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Move down in list |
-| `k` / `↑` | Move up in list |
+| `j` / `↓` | Move selection down |
+| `k` / `↑` | Move selection up |
+| `d` | Scroll detail pane down (5 lines) |
+| `u` | Scroll detail pane up (5 lines) |
 | `Enter` | Open action menu for selected PR |
 | `a` | ACK selected PR |
 | `x` | Reject selected PR |
 | `c` | Open diff review for selected PR |
 | `b` | Open PR in browser |
-| `r` | Refresh PR list |
-| `s` | Sync queued offline actions |
+| `r` | Refresh PR list from GitHub |
+| `s` | Sync queued offline actions to GitHub |
 | `q` | Quit |
 
 #### Action menu (`Enter`)
@@ -435,7 +477,7 @@ Pre-fills file path and line number from the selected diff line.
 
 Split view: label checkboxes (left) and PR summary (right).
 Space toggles a label; Tab moves to the next checkbox.
-Apply / Cancel / `Esc` close the editor.  In offline mode, changes are queued.
+Apply / Cancel / `q` / `Esc` close the editor.  In offline mode, changes are queued.
 
 #### Push form (`p`)
 
@@ -453,9 +495,10 @@ backport pipeline in the terminal, and returns.
 ### `cache-update`
 
 Fetch pull requests from GitHub and store them — together with their CI
-statuses, recent comments, and changed-file lists — in the local SQLite cache.
-Subsequent calls are incremental: only PRs whose `updated_at` timestamp has
-changed since the last fetch have their details re-fetched.
+statuses, all issue comments, PR commits, and changed-file lists — in the
+local SQLite cache.  Subsequent calls are incremental: only PRs whose
+`updated_at` timestamp has changed since the last fetch have their details
+re-fetched.
 
 ```
 ipatool cache-update              # cache open PRs
@@ -479,6 +522,46 @@ Details: 3 updated, 49 unchanged (skipped).
 
 ---
 
+### `queue-list`
+
+List all pending offline actions stored in the local SQLite database without
+executing them.  Useful for reviewing what will be sent when connectivity is
+restored.
+
+```
+ipatool queue-list
+```
+
+Example output:
+```
+Pending offline actions (2):
+  [1] GitHub: ACK PR #8309
+  [2] GitHub: Reject PR #8310 — "Needs rebase"
+```
+
+---
+
+### `queue-submit`
+
+Replay all queued offline actions against the live GitHub API, in the order
+they were recorded.  Successfully applied actions are removed from the queue.
+The first failure halts the queue so ordering is preserved.
+
+```
+ipatool queue-submit
+```
+
+Actions that can be queued and submitted:
+
+| Action | Source |
+|--------|--------|
+| ACK PR | `--offline pr-ack` or TUI offline ACK dialog |
+| Reject PR | `--offline pr-reject` or TUI offline reject dialog |
+| Update labels | TUI label editor (offline) |
+| Post review comment | TUI comment form (offline review view) |
+
+---
+
 ## Offline mode
 
 Run `ipatool --offline <subcommand>` to work without network access.
@@ -494,22 +577,19 @@ ipatool --offline tui
 ```
 
 In offline mode the TUI:
-- loads the PR list and full detail pane (CI status, comments, files) from the
-  local SQLite database,
-- queues mutations (ACK, reject, label changes, comments) in the database
-  instead of executing them immediately,
-- shows `[OFFLINE | N queued | s:Sync]` in the help bar.
+- loads the PR list and full detail pane (CI status, all comments, changed
+  files) from the local SQLite database,
+- queues mutations (ACK, reject, label changes, review comments) in the
+  database instead of executing them immediately,
+- shows `[OFFLINE | N queued | s:Sync]` in yellow in the help bar.
 
-Details for PRs viewed online are cached automatically, so revisiting them
-offline shows the full information.
+Details for PRs viewed in an online session are cached automatically, so
+revisiting them offline shows the full information.
 
 ### Syncing queued actions
 
-Press `s` in the TUI (or go back online) to replay the queue:
-
-```
-[OFFLINE | 3 queued | s:Sync]
-```
+In the TUI, press `s` to replay the queue against GitHub.  From the command
+line, use `queue-submit` (or inspect the queue first with `queue-list`).
 
 Actions are replayed in order; the first failure halts the queue so ordering
 is preserved.  Successfully replayed actions are deleted from the queue.
@@ -518,19 +598,82 @@ is preserved.  Successfully replayed actions are deleted from the queue.
 
 | Data | Cached when |
 |------|------------|
-| PR list (all fields) | `cache-update` or online TUI load |
-| CI statuses, comments, changed files | `cache-update` or when a PR is selected in the online TUI |
+| PR list (all fields) | `cache-update`, online TUI load, or `pr-list` |
+| CI statuses, all comments, changed files, commits | `cache-update` or when a PR is selected in the online TUI |
 | Mutations (ACK, reject, labels, comments) | Immediately, when performed in offline mode |
 
-### Queued action types
+---
 
-| Action | Triggered by |
-|--------|-------------|
-| `Ack` | ACK dialog in offline TUI |
-| `Reject` | Reject dialog in offline TUI |
-| `UpdateLabels` | Label editor Apply in offline TUI |
-| `PostComment` | General comment (future) |
-| `PostReviewComment` | Comment form in offline review view |
+## TUI customisation
+
+The TUI appearance and keybindings are each controlled by a YAML file that is
+written with annotated defaults on first run.  Edit either file and restart the
+TUI for changes to take effect.
+
+### Appearance — `~/.ipa/toolconf-style.yaml`
+
+(Derived from the main config path by replacing the extension with `-style.yaml`.)
+
+```yaml
+# Colors: default, dark-black, dark-red, dark-green, dark-yellow, dark-blue,
+#   dark-magenta, dark-cyan, dark-white, light-black, light-red, light-green,
+#   light-yellow, light-blue, light-magenta, light-cyan, light-white
+#
+# Borders: none, simple, outset
+
+shadow: false
+borders: simple
+
+# Selection highlight color (focused and unfocused panels)
+highlight: dark-blue
+highlight-inactive: dark-blue
+
+# Terminal palette colors ("default" inherits the terminal's own colors)
+background: default
+view: default
+primary: default
+title-primary: default
+```
+
+Any missing field falls back to the compiled-in default.  Parse errors warn to
+stderr and the TUI starts with defaults rather than crashing.
+
+### Keybindings — `~/.ipa/toolconf-keys.yaml`
+
+(Derived from the main config path by replacing the extension with `-keys.yaml`.)
+
+Each field is a single character.  All keys listed in the table below are
+independent, so the same character can be reused across different views without
+conflict (the views are on separate layers).
+
+```yaml
+# Main two-pane view
+quit:        q
+ack:         a
+reject:      x
+browser:     b
+refresh:     r
+review:      c
+sync:        s
+down:        j
+up:          k
+scroll-down: d
+scroll-up:   u
+
+# Code review diff view
+review-comment: c
+review-down:    j
+review-up:      k
+review-close:   q
+
+# Action dialog
+action-review:   v
+action-labels:   l
+action-push:     p
+action-backport: B
+```
+
+Any missing field falls back to the compiled-in default shown above.
 
 ---
 
@@ -595,3 +738,20 @@ ipatool backport 8309 -b ipa-4-12
 ```
 
 All of steps 2–5 can also be done entirely inside the TUI (`ipatool tui`).
+
+### Offline review workflow
+
+```bash
+# 1. While online, populate the cache
+ipatool cache-update
+
+# 2. Work offline — review, ACK, and comment without network
+ipatool --offline tui
+
+# 3. When back online, inspect what was queued
+ipatool queue-list
+
+# 4. Replay actions against GitHub
+ipatool queue-submit
+# or press 's' inside the TUI
+```
