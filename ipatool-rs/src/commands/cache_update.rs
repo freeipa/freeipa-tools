@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 use std::io::Write;
 
 use super::Ctx;
+use crate::api::github::sorted_commits;
 use crate::db::{CachedPrDetails, Provider};
 
 pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
@@ -56,8 +57,12 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
         let statuses = gh.most_recent_statuses(&pr.head.sha).unwrap_or_default();
         let comments = gh.get_last_issue_comments(pr.number, 2).unwrap_or_default();
         let files    = gh.get_pr_files(pr.number).unwrap_or_default();
+        let commits  = gh.get_pr_commits(pr.number)
+            .ok()
+            .and_then(|c| sorted_commits(c).ok())
+            .unwrap_or_default();
 
-        let cached = CachedPrDetails { statuses, comments, files };
+        let cached = CachedPrDetails { statuses, comments, files, commits };
         match db.cache_pr_details(Provider::GitHub, pr.number, &cached, pr_updated_at) {
             Ok(()) => fetched += 1,
             Err(e) => {

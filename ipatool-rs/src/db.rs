@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::api::github::{GitHubComment, GitHubFile, GitHubPR};
+use crate::api::github::{GitHubComment, GitHubCommit, GitHubFile, GitHubPR};
 
 // ── Provider identifier ───────────────────────────────────────────────────────
 
@@ -29,13 +29,18 @@ impl Provider {
 // ── Cached PR details ─────────────────────────────────────────────────────────
 
 /// The supplementary per-PR data fetched in the background (CI statuses,
-/// recent comments, changed files).  Stored separately from the PR list so
-/// the two can be refreshed independently.
+/// recent comments, changed files, commits).  Stored separately from the PR
+/// list so the two can be refreshed independently.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CachedPrDetails {
     pub statuses: HashMap<String, String>,
     pub comments: Vec<GitHubComment>,
     pub files: Vec<GitHubFile>,
+    /// PR commits in topological order (oldest first).
+    /// `#[serde(default)]` ensures old cached records (before this field was added)
+    /// deserialize without error.
+    #[serde(default)]
+    pub commits: Vec<GitHubCommit>,
 }
 
 // ── Queued mutations ──────────────────────────────────────────────────────────
@@ -367,6 +372,7 @@ mod tests {
                 previous_filename: None,
                 patch: Some("@@ -1 +1 @@\n-old\n+new".to_string()),
             }],
+            commits: vec![],
         }
     }
 

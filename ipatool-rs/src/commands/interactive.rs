@@ -620,6 +620,7 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: 
                 statuses: statuses.clone(),
                 comments: comments.clone(),
                 files: files.clone(),
+                commits: vec![],
             };
             let updated_at = pr.updated_at.as_deref();
             let _ = db.cache_pr_details(crate::db::Provider::GitHub, pr_number, &cached, updated_at);
