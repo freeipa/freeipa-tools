@@ -1,18 +1,24 @@
 use anyhow::Result;
 use cursive::{
+    event::{EventResult, Key},
     reexports::enumset::EnumSet,
     theme::{BaseColor, Color, ColorStyle, Effect, Style},
     traits::*,
     utils::markup::StyledString,
     view::scroll::Scroller,
-    views::{Checkbox, Dialog, EditView, LinearLayout, NamedView, OnEventView, Panel, ScrollView, SelectView, TextArea, TextView},
+    views::{
+        Checkbox, Dialog, EditView, LinearLayout, NamedView, OnEventView, Panel, ScrollView,
+        SelectView, TextArea, TextView,
+    },
     Cursive,
 };
 use std::{collections::HashMap, sync::Arc};
 
-use crate::api::github::{GitHubClient, GitHubComment, GitHubFile, GitHubLabel, GitHubPR, GitHubReviewComment};
-use crate::tui_keys::TuiKeys;
 use super::Ctx;
+use crate::api::github::{
+    GitHubClient, GitHubComment, GitHubFile, GitHubLabel, GitHubPR, GitHubReviewComment,
+};
+use crate::tui_keys::TuiKeys;
 
 // ─── Persistent TUI state (survives layer pops on resize) ─────────────────────
 
@@ -51,6 +57,8 @@ struct TuiState {
     /// The PR state filter in use ("open", "closed", "all").
     state: String,
     tui_keys: TuiKeys,
+    /// Whether keyboard focus is on the right (detail) pane.
+    focus_right: bool,
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -61,18 +69,25 @@ pub fn run(ctx: &mut Ctx, state: &str) -> Result<()> {
     loop {
         match run_tui_once(ctx, state)? {
             None => return Ok(()),
-            Some(PendingTuiAction::PrPush { pr_id, reviewers, backport_branches, autobackport }) => {
+            Some(PendingTuiAction::PrPush {
+                pr_id,
+                reviewers,
+                backport_branches,
+                autobackport,
+            }) => {
                 if let Err(e) = crate::commands::pr_push::run(
-                    ctx, pr_id, &reviewers, &backport_branches, autobackport,
+                    ctx,
+                    pr_id,
+                    &reviewers,
+                    &backport_branches,
+                    autobackport,
                 ) {
                     eprintln!("\x1b[31mPush failed: {:#}\x1b[0m", e);
                 }
                 crate::output::prompt("Press Enter to return to the TUI…");
             }
             Some(PendingTuiAction::Backport { pr_id, branches }) => {
-                if let Err(e) =
-                    crate::commands::backport::run_backport_cmd(ctx, pr_id, &branches)
-                {
+                if let Err(e) = crate::commands::backport::run_backport_cmd(ctx, pr_id, &branches) {
                     eprintln!("\x1b[31mBackport failed: {:#}\x1b[0m", e);
                 }
                 crate::output::prompt("Press Enter to return to the TUI…");
@@ -97,9 +112,15 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
 
     // Initialise user_data so the resize callback can always read it.
     siv.set_user_data(TuiState {
-        gh: None, prs: None, review: None, offline, db: db.clone(), pending_action: None,
+        gh: None,
+        prs: None,
+        review: None,
+        offline,
+        db: db.clone(),
+        pending_action: None,
         state: state.to_string(),
         tui_keys: ctx.tui_keys.clone(),
+        focus_right: false,
     });
 
     siv.add_global_callback(ctx.tui_keys.quit, |s| s.quit());
@@ -107,7 +128,12 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
     // Rebuild the pane layout whenever the terminal is resized.
     siv.add_global_callback(cursive::event::Event::WindowResize, |s| {
         let state = s.user_data::<TuiState>().cloned();
-        if let Some(TuiState { gh: Some(gh), prs: Some(prs), .. }) = state {
+        if let Some(TuiState {
+            gh: Some(gh),
+            prs: Some(prs),
+            ..
+        }) = state
+        {
             // Close every layer (dialogs + main layout) so we can rebuild clean.
             while s.pop_layer().is_some() {}
             build_two_pane(s, gh, prs);
@@ -194,7 +220,9 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
     }
 
     siv.run();
-    Ok(siv.user_data::<TuiState>().and_then(|t| t.pending_action.clone()))
+    Ok(siv
+        .user_data::<TuiState>()
+        .and_then(|t| t.pending_action.clone()))
 }
 
 // ─── Two-pane layout ─────────────────────────────────────────────────────────
@@ -202,15 +230,23 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
 /// Computes the left-pane width from the terminal width.
 /// 40 % of the screen, clamped to [35, 60].
 fn compute_left_width(screen_width: usize) -> usize {
-    (screen_width * 2 / 5).max(35).min(60)
+    (screen_width * 2 / 5).clamp(35, 60)
 }
 
 fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) {
-    // Preserve offline/db/state/keys from existing user_data (set during run()) or use defaults.
-    let (offline, db, current_state, tui_keys) = siv
+    // Preserve offline/db/state/keys/focus from existing user_data (set during run()) or use defaults.
+    let (offline, db, current_state, tui_keys, focus_right) = siv
         .user_data::<TuiState>()
-        .map(|t| (t.offline, t.db.clone(), t.state.clone(), t.tui_keys.clone()))
-        .unwrap_or_else(|| (false, None, "open".to_string(), TuiKeys::default()));
+        .map(|t| {
+            (
+                t.offline,
+                t.db.clone(),
+                t.state.clone(),
+                t.tui_keys.clone(),
+                t.focus_right,
+            )
+        })
+        .unwrap_or_else(|| (false, None, "open".to_string(), TuiKeys::default(), false));
 
     // Persist the current dataset so the resize callback can rebuild.
     siv.set_user_data(TuiState {
@@ -222,6 +258,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
         pending_action: None,
         state: current_state,
         tui_keys: tui_keys.clone(),
+        focus_right,
     });
 
     let left_width = compute_left_width(siv.screen_size().x);
@@ -254,16 +291,16 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
     });
 
     // Extract key copies (char: Copy) for use in the closure chain below.
-    let key_ack         = tui_keys.ack;
-    let key_reject      = tui_keys.reject;
-    let key_browser     = tui_keys.browser;
-    let key_refresh     = tui_keys.refresh;
-    let key_review      = tui_keys.review;
-    let key_sync        = tui_keys.sync;
-    let key_down        = tui_keys.down;
-    let key_up          = tui_keys.up;
+    let key_ack = tui_keys.ack;
+    let key_reject = tui_keys.reject;
+    let key_browser = tui_keys.browser;
+    let key_refresh = tui_keys.refresh;
+    let key_review = tui_keys.review;
+    let key_sync = tui_keys.sync;
+    let key_down = tui_keys.down;
+    let key_up = tui_keys.up;
     let key_scroll_down = tui_keys.scroll_down;
-    let key_scroll_up   = tui_keys.scroll_up;
+    let key_scroll_up = tui_keys.scroll_up;
 
     let select_with_keys = OnEventView::new(ScrollView::new(select.with_name("pr_list")))
         .on_event(key_ack, move |s| {
@@ -293,43 +330,43 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
             let _ = &gh_s; // keep Arc alive
             sync_queued_actions(s);
         })
-        // down/up: call select_down/up and then invoke the returned EventResult
-        // callback.  That callback is the same one the arrow-key path fires,
-        // which triggers both the internal scroll update and on_select (keeping
-        // the selected row visible and refreshing the right pane).
+        // j: move PR selection (left focus) or scroll detail pane (right focus).
+        // Uses on_event (AfterChild) because SelectView ignores 'j'.
         .on_event(key_down, |s| {
-            if let Some(cb) = s
-                .call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.select_down(1))
-            {
-                cb(s);
-            }
+            nav_down(s);
         })
+        // ↓: must use on_pre_event_inner (BeforeChild) because SelectView *consumes*
+        // Key::Down for its own navigation, so on_event (AfterChild) would never fire.
+        .on_pre_event_inner(Key::Down, |_, _| Some(EventResult::with_cb(nav_down)))
+        // k: move PR selection (left focus) or scroll detail pane (right focus).
         .on_event(key_up, |s| {
-            if let Some(cb) = s
-                .call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.select_up(1))
-            {
-                cb(s);
-            }
+            nav_up(s);
         })
-        // scroll_down/scroll_up: scroll the right detail pane without moving the PR selection.
+        // ↑: same reasoning as ↓.
+        .on_pre_event_inner(Key::Up, |_, _| Some(EventResult::with_cb(nav_up)))
+        // d / u: scroll the detail pane 5 lines at a time regardless of pane focus.
         .on_event(key_scroll_down, |s| {
-            s.call_on_name("pr_detail_scroll", |v: &mut ScrollView<NamedView<TextView>>| {
-                let cur = v.get_scroller().content_viewport().top();
-                v.set_offset(cursive::Vec2::new(0, cur + 5));
-            });
+            scroll_detail(s, 5);
         })
         .on_event(key_scroll_up, |s| {
-            s.call_on_name("pr_detail_scroll", |v: &mut ScrollView<NamedView<TextView>>| {
-                let cur = v.get_scroller().content_viewport().top();
-                v.set_offset(cursive::Vec2::new(0, cur.saturating_sub(5)));
-            });
+            scroll_detail(s, -5);
+        })
+        // Tab: toggle focus between the left (PR list) and right (detail) pane.
+        .on_event(Key::Tab, |s| {
+            if let Some(t) = s.user_data::<TuiState>() {
+                t.focus_right = !t.focus_right;
+            }
+            update_help_bar(s);
         });
 
     let left_panel = Panel::new(select_with_keys.full_height())
         .title(format!("{} PRs", prs.len()))
         .fixed_width(left_width);
 
-    let initial_detail = prs.first().map(pr_summary).unwrap_or_else(StyledString::new);
+    let initial_detail = prs
+        .first()
+        .map(pr_summary)
+        .unwrap_or_default();
     let right_panel = Panel::new(
         ScrollView::new(TextView::new(initial_detail).with_name("pr_detail"))
             .with_name("pr_detail_scroll")
@@ -340,42 +377,122 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
 
     let (offline_bar, queued) = siv
         .user_data::<TuiState>()
-        .map(|t| (t.offline, t.db.as_ref().map(|d| d.pending_count()).unwrap_or(0)))
+        .map(|t| {
+            (
+                t.offline,
+                t.db.as_ref().map(|d| d.pending_count()).unwrap_or(0),
+            )
+        })
         .unwrap_or((false, 0));
 
-    let keys = format!(
-        "  {}:ACK  {}:Reject  {}:Review  {}:Browser  {}:Refresh  {}:Quit  \
-         {}/↓:Down  {}/↑:Up  {}/{}:Scroll  Enter:Actions",
-        tui_keys.ack, tui_keys.reject, tui_keys.review, tui_keys.browser,
-        tui_keys.refresh, tui_keys.quit,
-        tui_keys.down, tui_keys.up,
-        tui_keys.scroll_down, tui_keys.scroll_up,
-    );
-    let help_styled: StyledString = if offline_bar {
-        let offline_tag = format!("[OFFLINE | {} queued | {}:Sync]", queued, tui_keys.sync);
-        let yellow = Style::from(Color::Light(BaseColor::Yellow));
-        let mut s = StyledString::styled(offline_tag, yellow);
-        s.append_plain(&keys);
-        s
-    } else {
-        StyledString::plain(format!(" {}", keys.trim_start()))
-    };
-    let help = TextView::new(help_styled);
+    let help_styled = build_help_content(&tui_keys, focus_right, offline_bar, queued);
+    let help = TextView::new(help_styled).with_name("help_bar");
 
-    let layout = LinearLayout::vertical()
-        .child(help)
-        .child(
-            LinearLayout::horizontal()
-                .child(left_panel)
-                .child(right_panel)
-                .full_screen(),
-        );
+    let layout = LinearLayout::vertical().child(help).child(
+        LinearLayout::horizontal()
+            .child(left_panel)
+            .child(right_panel)
+            .full_screen(),
+    );
 
     siv.add_fullscreen_layer(layout);
 
     // Kick off detail fetch for the initially-focused PR.
     if let Some(pr) = prs.first() {
         fetch_pr_details_in_background(siv, gh, pr.clone());
+    }
+}
+
+// ─── Help bar ─────────────────────────────────────────────────────────────────
+
+/// Build the help-bar content reflecting the current pane focus and offline state.
+fn build_help_content(
+    tui_keys: &TuiKeys,
+    focus_right: bool,
+    offline: bool,
+    queued: usize,
+) -> StyledString {
+    let keys = format!(
+        "  {}:ACK  {}:Reject  {}:Review  {}:Browser  {}:Refresh  {}:Quit  \
+         {}/↓:Down  {}/↑:Up  {}/{}:Scroll  Tab:Pane  Enter:Actions",
+        tui_keys.ack,
+        tui_keys.reject,
+        tui_keys.review,
+        tui_keys.browser,
+        tui_keys.refresh,
+        tui_keys.quit,
+        tui_keys.down,
+        tui_keys.up,
+        tui_keys.scroll_down,
+        tui_keys.scroll_up,
+    );
+    let mut s = StyledString::new();
+    if offline {
+        let offline_tag = format!("[OFFLINE | {} queued | {}:Sync]", queued, tui_keys.sync);
+        s.append_styled(offline_tag, Style::from(Color::Light(BaseColor::Yellow)));
+    }
+    if focus_right {
+        s.append_styled("[Detail] ", Style::from(Color::Light(BaseColor::Cyan)));
+    }
+    s.append_plain(format!(" {}", keys.trim_start()));
+    s
+}
+
+/// Scroll the detail pane by `lines` (positive = down, negative = up).
+fn scroll_detail(siv: &mut Cursive, lines: i32) {
+    siv.call_on_name(
+        "pr_detail_scroll",
+        |v: &mut ScrollView<NamedView<TextView>>| {
+            let cur = v.get_scroller().content_viewport().top() as i32;
+            let next = (cur + lines).max(0) as usize;
+            v.set_offset(cursive::Vec2::new(0, next));
+        },
+    );
+}
+
+/// Move selection down (left focus) or scroll detail pane down 1 line (right focus).
+fn nav_down(siv: &mut Cursive) {
+    let right = siv
+        .user_data::<TuiState>()
+        .map(|t| t.focus_right)
+        .unwrap_or(false);
+    if right {
+        scroll_detail(siv, 1);
+    } else if let Some(cb) =
+        siv.call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.select_down(1))
+    {
+        cb(siv);
+    }
+}
+
+/// Move selection up (left focus) or scroll detail pane up 1 line (right focus).
+fn nav_up(siv: &mut Cursive) {
+    let right = siv
+        .user_data::<TuiState>()
+        .map(|t| t.focus_right)
+        .unwrap_or(false);
+    if right {
+        scroll_detail(siv, -1);
+    } else if let Some(cb) =
+        siv.call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.select_up(1))
+    {
+        cb(siv);
+    }
+}
+
+/// Rebuild the help bar `TextView` to reflect the current `TuiState`.
+fn update_help_bar(siv: &mut Cursive) {
+    let data = siv.user_data::<TuiState>().map(|t| {
+        (
+            t.tui_keys.clone(),
+            t.focus_right,
+            t.offline,
+            t.db.as_ref().map(|d| d.pending_count()).unwrap_or(0),
+        )
+    });
+    if let Some((keys, focus_right, offline, queued)) = data {
+        let content = build_help_content(&keys, focus_right, offline, queued);
+        siv.call_on_name("help_bar", |v: &mut TextView| v.set_content(content));
     }
 }
 
@@ -471,7 +588,11 @@ fn body_excerpt(pr: &GitHubPR) -> String {
 
 fn detail_header(pr: &GitHubPR) -> StyledString {
     let labels = pr_label_names(pr);
-    let labels_str = if labels.is_empty() { "none".to_string() } else { labels.join(", ") };
+    let labels_str = if labels.is_empty() {
+        "none".to_string()
+    } else {
+        labels.join(", ")
+    };
 
     let mut s = StyledString::new();
 
@@ -487,7 +608,7 @@ fn detail_header(pr: &GitHubPR) -> StyledString {
     s.append_plain(&pr.state);
     s.append_plain("  |  ");
     s.append_styled("Author: ", bold());
-    s.append_plain(&format!("@{}\n", pr.user.login));
+    s.append_plain(format!("@{}\n", pr.user.login));
 
     append_field(&mut s, "Labels: ", &labels_str);
     append_field(&mut s, "Base:   ", &pr.base.ref_name);
@@ -515,7 +636,7 @@ fn pr_summary(pr: &GitHubPR) -> StyledString {
     if !excerpt.is_empty() {
         s.append_plain("\n\n");
         s.append_styled("Description:", bold());
-        s.append_plain(&format!("\n{}", excerpt));
+        s.append_plain(format!("\n{}", excerpt));
     }
     s
 }
@@ -525,31 +646,39 @@ fn pr_summary(pr: &GitHubPR) -> StyledString {
 fn append_stats_line(s: &mut StyledString, pr: &GitHubPR) {
     let mut has = false;
     let mut sep = |s: &mut StyledString| {
-        if has { s.append_plain("  |  "); }
+        if has {
+            s.append_plain("  |  ");
+        }
         has = true;
     };
     if let Some(n) = pr.commits {
         sep(&mut *s);
         s.append_styled("Commits: ", bold());
-        s.append_plain(&n.to_string());
+        s.append_plain(n.to_string());
     }
     if let Some(n) = pr.comments {
         sep(&mut *s);
         s.append_styled("Comments: ", bold());
-        s.append_plain(&n.to_string());
+        s.append_plain(n.to_string());
     }
     if let Some(n) = pr.review_comments {
         sep(&mut *s);
         s.append_styled("Reviews: ", bold());
-        s.append_plain(&n.to_string());
+        s.append_plain(n.to_string());
     }
-    if has { s.append_plain("\n"); }
+    if has {
+        s.append_plain("\n");
+    }
 }
 
 // ── Full summary (replaces immediate version when background fetch finishes) ──
 
 fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
-    let PrDetails { statuses, comments, files } = details;
+    let PrDetails {
+        statuses,
+        comments,
+        files,
+    } = details;
 
     let mut s = detail_header(pr);
     append_stats_line(&mut s, pr);
@@ -569,7 +698,7 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
                 "pending" => "⏳",
                 _ => "?",
             };
-            s.append_plain(&format!("  {} {}\n", icon, ctx_name));
+            s.append_plain(format!("  {} {}\n", icon, ctx_name));
         }
     }
 
@@ -585,18 +714,21 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
 
         s.append_plain("\n");
         s.append_styled(
-            &format!("Changed files ({} files, +{} / -{}):\n", file_count, total_adds, total_dels),
+            format!(
+                "Changed files ({} files, +{} / -{}):\n",
+                file_count, total_adds, total_dels
+            ),
             bold(),
         );
         const MAX_FILES: usize = 15;
         for file in files.iter().take(MAX_FILES) {
             let icon = match file.status.as_str() {
-                "added"    => "A",
+                "added" => "A",
                 "removed" | "deleted" => "D",
                 "modified" | "changed" => "M",
-                "renamed"  => "R",
-                "copied"   => "C",
-                _          => "?",
+                "renamed" => "R",
+                "copied" => "C",
+                _ => "?",
             };
             let name = if file.status == "renamed" {
                 if let Some(ref prev) = file.previous_filename {
@@ -607,13 +739,13 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
             } else {
                 truncate(&file.filename, 50).to_string()
             };
-            s.append_plain(&format!(
+            s.append_plain(format!(
                 "  {}  {}  (+{} / -{})\n",
                 icon, name, file.additions, file.deletions
             ));
         }
         if files.len() > MAX_FILES {
-            s.append_plain(&format!("  … and {} more\n", files.len() - MAX_FILES));
+            s.append_plain(format!("  … and {} more\n", files.len() - MAX_FILES));
         }
     }
 
@@ -622,18 +754,22 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
         if !body.trim().is_empty() {
             s.append_plain("\n");
             s.append_styled("Description:\n", bold());
-            s.append(cursive::utils::markup::markdown::parse(body));
+            s.append(crate::md_render::render(body));
         }
     }
 
     // ── Comments ─────────────────────────────────────────────────────────────
     if !comments.is_empty() {
         s.append_plain("\n");
-        s.append_styled(&format!("Comments ({}):\n", comments.len()), bold());
-        for c in &comments {
+        s.append_styled(format!("Comments ({}):\n", comments.len()), bold());
+        let sep = "\u{2500}".repeat(40);
+        for (i, c) in comments.iter().enumerate() {
             let date = c.created_at.get(..10).unwrap_or(&c.created_at);
-            s.append_styled(&format!("  @{} [{}]:\n", c.user.login, date), bold());
-            s.append(cursive::utils::markup::markdown::parse(&c.body));
+            if i > 0 {
+                s.append_plain(format!("{}\n", sep));
+            }
+            s.append_styled(format!("@{} [{}]:\n", c.user.login, date), bold());
+            s.append(crate::md_render::render_indented(&c.body, "  "));
             s.append_plain("\n");
         }
     }
@@ -656,7 +792,10 @@ fn update_detail_full(siv: &mut Cursive, pr: &GitHubPR, details: PrDetails) {
 }
 
 fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
-    let offline = siv.user_data::<TuiState>().map(|t| t.offline).unwrap_or(false);
+    let offline = siv
+        .user_data::<TuiState>()
+        .map(|t| t.offline)
+        .unwrap_or(false);
     let db = siv.user_data::<TuiState>().and_then(|t| t.db.clone());
 
     if offline {
@@ -681,7 +820,7 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: 
         // All fetches run sequentially in the background thread.
         let statuses = gh.most_recent_statuses(&sha).unwrap_or_default();
         let comments = gh.get_all_issue_comments(pr_number).unwrap_or_default();
-        let files    = gh.get_pr_files(pr_number).unwrap_or_default();
+        let files = gh.get_pr_files(pr_number).unwrap_or_default();
 
         // Persist so the next offline session can show these details.
         if let Some(ref db) = db {
@@ -692,10 +831,15 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: 
                 commits: vec![],
             };
             let updated_at = pr.updated_at.as_deref();
-            let _ = db.cache_pr_details(crate::db::Provider::GitHub, pr_number, &cached, updated_at);
+            let _ =
+                db.cache_pr_details(crate::db::Provider::GitHub, pr_number, &cached, updated_at);
         }
 
-        let details = PrDetails { statuses, comments, files };
+        let details = PrDetails {
+            statuses,
+            comments,
+            files,
+        };
         cb.send(Box::new(move |s: &mut Cursive| {
             let current = selected_pr(s).map(|p| p.number);
             if current == Some(pr_number) {
@@ -860,7 +1004,12 @@ fn build_review_items(data: &ReviewData, body_width: usize) -> Vec<ReviewItem> {
                         kind: ReviewItemKind::Added,
                         path: Some(file.filename.clone()),
                         new_line: Some(this_new),
-                        content: format!("{}  {} {}", fmt_lineno(None), fmt_lineno(Some(this_new)), raw),
+                        content: format!(
+                            "{}  {} {}",
+                            fmt_lineno(None),
+                            fmt_lineno(Some(this_new)),
+                            raw
+                        ),
                     });
                     // Inline RIGHT-side review comments for this line.
                     for c in data.review_comments.iter().filter(|c| {
@@ -886,7 +1035,12 @@ fn build_review_items(data: &ReviewData, body_width: usize) -> Vec<ReviewItem> {
                         kind: ReviewItemKind::Removed,
                         path: Some(file.filename.clone()),
                         new_line: None,
-                        content: format!("{}  {} {}", fmt_lineno(Some(this_old)), fmt_lineno(None), raw),
+                        content: format!(
+                            "{}  {} {}",
+                            fmt_lineno(Some(this_old)),
+                            fmt_lineno(None),
+                            raw
+                        ),
                     });
                     // Inline LEFT-side review comments.
                     for c in data.review_comments.iter().filter(|c| {
@@ -912,7 +1066,12 @@ fn build_review_items(data: &ReviewData, body_width: usize) -> Vec<ReviewItem> {
                         kind: ReviewItemKind::Context,
                         path: Some(file.filename.clone()),
                         new_line: Some(this_new),
-                        content: format!("{}  {} {}", fmt_lineno(Some(old_line)), fmt_lineno(Some(this_new)), raw),
+                        content: format!(
+                            "{}  {} {}",
+                            fmt_lineno(Some(old_line)),
+                            fmt_lineno(Some(this_new)),
+                            raw
+                        ),
                     });
                     new_line += 1;
                     old_line += 1;
@@ -997,9 +1156,15 @@ fn review_item_label(item: &ReviewItem) -> StyledString {
 }
 
 fn show_review_view(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
-    let offline = siv.user_data::<TuiState>().map(|t| t.offline).unwrap_or(false);
+    let offline = siv
+        .user_data::<TuiState>()
+        .map(|t| t.offline)
+        .unwrap_or(false);
     if offline {
-        show_error(siv, "Review diff not available in offline mode (diff data is not cached).");
+        show_error(
+            siv,
+            "Review diff not available in offline mode (diff data is not cached).",
+        );
         return;
     }
     siv.add_layer(loading_dialog("Fetching PR diff and comments…"));
@@ -1009,8 +1174,14 @@ fn show_review_view(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
     std::thread::spawn(move || {
         let files = gh2.get_pr_files(pr2.number).unwrap_or_default();
         let review_comments = gh2.list_review_comments(pr2.number).unwrap_or_default();
-        let issue_comments = gh2.get_last_issue_comments(pr2.number, 100).unwrap_or_default();
-        let data = ReviewData { files, review_comments, issue_comments };
+        let issue_comments = gh2
+            .get_last_issue_comments(pr2.number, 100)
+            .unwrap_or_default();
+        let data = ReviewData {
+            files,
+            review_comments,
+            issue_comments,
+        };
         let gh3 = gh2;
         cb.send(Box::new(move |s: &mut Cursive| {
             s.pop_layer();
@@ -1050,9 +1221,9 @@ fn assemble_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, focus_idx: us
         .map(|s| s.tui_keys.clone())
         .unwrap_or_default();
     let key_comment = tui_keys.review_comment;
-    let key_down    = tui_keys.review_down;
-    let key_up      = tui_keys.review_up;
-    let key_close   = tui_keys.review_close;
+    let key_down = tui_keys.review_down;
+    let key_up = tui_keys.review_up;
+    let key_close = tui_keys.review_close;
 
     let pr = session.pr.clone();
     let items = session.items.clone();
@@ -1073,8 +1244,7 @@ fn assemble_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, focus_idx: us
     let gh_enter = Arc::clone(&gh);
     let commit_enter = commit_id.clone();
 
-    let review_scroll =
-        ScrollView::new(select.with_name("review_list")).with_name("review_scroll");
+    let review_scroll = ScrollView::new(select.with_name("review_list")).with_name("review_scroll");
 
     let view = OnEventView::new(review_scroll)
         .on_event(key_comment, move |s| {
@@ -1114,16 +1284,16 @@ fn assemble_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, focus_idx: us
             );
         })
         .on_event(key_down, |s| {
-            if let Some(cb) =
-                s.call_on_name("review_list", |v: &mut SelectView<ReviewItem>| v.select_down(1))
-            {
+            if let Some(cb) = s.call_on_name("review_list", |v: &mut SelectView<ReviewItem>| {
+                v.select_down(1)
+            }) {
                 cb(s);
             }
         })
         .on_event(key_up, |s| {
-            if let Some(cb) =
-                s.call_on_name("review_list", |v: &mut SelectView<ReviewItem>| v.select_up(1))
-            {
+            if let Some(cb) = s.call_on_name("review_list", |v: &mut SelectView<ReviewItem>| {
+                v.select_up(1)
+            }) {
                 cb(s);
             }
         })
@@ -1199,14 +1369,17 @@ fn open_review_comment_form(
             }
             out
         })
-        .unwrap_or_else(StyledString::new);
+        .unwrap_or_default();
 
     let screen_height = siv.screen_size().y;
     // Form: ~3 labels + 2 EditViews + TextArea(6) + buttons + panel borders ≈ 14 rows.
     let form_height: usize = 14;
     let review_height = screen_height.saturating_sub(form_height + 2).max(5);
 
-    let default_path = selected.as_ref().and_then(|i| i.path.clone()).unwrap_or_default();
+    let default_path = selected
+        .as_ref()
+        .and_then(|i| i.path.clone())
+        .unwrap_or_default();
     let default_line = selected
         .as_ref()
         .and_then(|i| i.new_line)
@@ -1220,11 +1393,9 @@ fn open_review_comment_form(
 
     let split_layer = LinearLayout::vertical()
         .child(
-            Panel::new(
-                ScrollView::new(TextView::new(content)).with_name("split_review_scroll"),
-            )
-            .title("Diff")
-            .fixed_height(review_height),
+            Panel::new(ScrollView::new(TextView::new(content)).with_name("split_review_scroll"))
+                .title("Diff")
+                .fixed_height(review_height),
         )
         .child(
             Dialog::around(
@@ -1265,7 +1436,10 @@ fn open_review_comment_form(
                     );
                     return;
                 }
-                let offline = s.user_data::<TuiState>().map(|t| t.offline).unwrap_or(false);
+                let offline = s
+                    .user_data::<TuiState>()
+                    .map(|t| t.offline)
+                    .unwrap_or(false);
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 if offline {
                     s.pop_layer();
@@ -1310,11 +1484,10 @@ fn open_review_comment_form(
             .full_width(),
         );
 
-    let split_layer = OnEventView::new(split_layer)
-        .on_event(cursive::event::Key::Esc, move |s| {
-            s.pop_layer();
-            restore_review_layer(s, focus_cancel);
-        });
+    let split_layer = OnEventView::new(split_layer).on_event(cursive::event::Key::Esc, move |s| {
+        s.pop_layer();
+        restore_review_layer(s, focus_cancel);
+    });
 
     siv.add_fullscreen_layer(split_layer);
 
@@ -1343,66 +1516,68 @@ fn show_action_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
         .user_data::<TuiState>()
         .map(|s| s.tui_keys.clone())
         .unwrap_or_default();
-    let key_review   = tui_keys.action_review;
-    let key_labels   = tui_keys.action_labels;
-    let key_push     = tui_keys.action_push;
+    let key_review = tui_keys.action_review;
+    let key_labels = tui_keys.action_labels;
+    let key_push = tui_keys.action_push;
     let key_backport = tui_keys.action_backport;
 
     let pr_number = pr.number;
     let pr_title = truncate(&pr.title, 50);
     let pr_url = pr.html_url.clone();
     let labels = pr_label_names(&pr);
-    let is_acked   = labels.iter().any(|l| l == "ack");
+    let is_acked = labels.iter().any(|l| l == "ack");
     let is_rejected = labels.iter().any(|l| l == "rejected");
-    let is_pushed  = labels.iter().any(|l| l == "pushed");
-    let is_closed  = pr.state == "closed";
+    let is_pushed = labels.iter().any(|l| l == "pushed");
+    let is_closed = pr.state == "closed";
 
     let mut dlg = Dialog::new().title(format!("PR #{}: {}", pr_number, pr_title));
 
     // Review is always first so it gets default focus when the dialog opens.
     let gh_v = Arc::clone(&gh);
     let pr_v = pr.clone();
-    dlg = dlg.button(&format!("Review ({})", key_review), move |s| {
+    dlg = dlg.button(format!("Review ({})", key_review), move |s| {
         s.pop_layer();
         show_review_view(s, Arc::clone(&gh_v), pr_v.clone());
     });
 
     let gh_l = Arc::clone(&gh);
     let pr_l = pr.clone();
-    dlg = dlg.button(&format!("Labels ({})", key_labels), move |s| {
+    dlg = dlg.button(format!("Labels ({})", key_labels), move |s| {
         s.pop_layer();
         show_label_editor(s, Arc::clone(&gh_l), pr_l.clone());
     });
 
     if !is_closed && !is_rejected && !is_acked {
         let gh_a = Arc::clone(&gh);
-        dlg = dlg.button(&format!("ACK ({})", tui_keys.ack), move |s| {
+        dlg = dlg.button(format!("ACK ({})", tui_keys.ack), move |s| {
             s.pop_layer();
             show_ack_dialog(s, Arc::clone(&gh_a), pr_number);
         });
     }
     if !is_closed && !is_rejected {
         let gh_x = Arc::clone(&gh);
-        dlg = dlg.button(&format!("Reject ({})", tui_keys.reject), move |s| {
+        dlg = dlg.button(format!("Reject ({})", tui_keys.reject), move |s| {
             s.pop_layer();
             show_reject_dialog(s, Arc::clone(&gh_x), pr_number);
         });
     }
     if !is_closed && is_acked && !is_rejected && !is_pushed {
-        dlg = dlg.button(&format!("Push ({})", key_push), move |s| {
+        dlg = dlg.button(format!("Push ({})", key_push), move |s| {
             s.pop_layer();
             show_push_dialog(s, pr_number);
         });
     }
     if is_acked && !is_rejected {
-        dlg = dlg.button(&format!("Backport ({})", key_backport), move |s| {
+        dlg = dlg.button(format!("Backport ({})", key_backport), move |s| {
             s.pop_layer();
             show_backport_dialog(s, pr_number);
         });
     }
 
     let dlg = dlg
-        .button(&format!("Browser ({})", tui_keys.browser), move |_s| open_browser(&pr_url))
+        .button(format!("Browser ({})", tui_keys.browser), move |_s| {
+            open_browser(&pr_url)
+        })
         .button("Close (Esc)", |s| {
             s.pop_layer();
         });
@@ -1477,17 +1652,17 @@ fn build_label_editor_layer(
     let mut left_text = StyledString::new();
     left_text.append_styled(format!("PR #{}\n", pr.number), bold());
     left_text.append_styled("Title:  ", bold());
-    left_text.append_plain(&format!("{}\n", pr.title));
+    left_text.append_plain(format!("{}\n", pr.title));
     left_text.append_styled("Author: ", bold());
-    left_text.append_plain(&format!("@{}\n", pr.user.login));
+    left_text.append_plain(format!("@{}\n", pr.user.login));
     left_text.append_styled("State:  ", bold());
-    left_text.append_plain(&format!("{}\n\n", pr.state));
+    left_text.append_plain(format!("{}\n\n", pr.state));
     left_text.append_styled("Current labels:\n", bold());
     if pr_current.is_empty() {
         left_text.append_plain("  (none)\n");
     } else {
         for name in &pr_current {
-            left_text.append_plain(&format!("  • {}\n", name));
+            left_text.append_plain(format!("  • {}\n", name));
         }
     }
 
@@ -1534,7 +1709,10 @@ fn build_label_editor_layer(
                 s.pop_layer();
                 return;
             }
-            let offline = s.user_data::<TuiState>().map(|t| t.offline).unwrap_or(false);
+            let offline = s
+                .user_data::<TuiState>()
+                .map(|t| t.offline)
+                .unwrap_or(false);
             let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
             s.pop_layer();
             if offline {
@@ -1590,14 +1768,12 @@ fn build_label_editor_layer(
 
     let help = TextView::new(format!(" Space:Toggle  Tab:Next  {}/Esc:Cancel", key_quit));
 
-    let layout = LinearLayout::vertical()
-        .child(help)
-        .child(
-            LinearLayout::horizontal()
-                .child(right_pane)
-                .child(left_panel)
-                .full_screen(),
-        );
+    let layout = LinearLayout::vertical().child(help).child(
+        LinearLayout::horizontal()
+            .child(right_pane)
+            .child(left_panel)
+            .full_screen(),
+    );
 
     let layout = OnEventView::new(layout)
         .on_event(cursive::event::Key::Esc, |s| {
@@ -1624,9 +1800,14 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) {
             )
             .button("ACK", move |s| {
                 let comment = s
-                    .call_on_name("ack_comment", |v: &mut EditView| v.get_content().to_string())
+                    .call_on_name("ack_comment", |v: &mut EditView| {
+                        v.get_content().to_string()
+                    })
                     .unwrap_or_default();
-                let offline = s.user_data::<TuiState>().map(|t| t.offline).unwrap_or(false);
+                let offline = s
+                    .user_data::<TuiState>()
+                    .map(|t| t.offline)
+                    .unwrap_or(false);
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
@@ -1638,7 +1819,9 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) {
                                 comment: Some(comment).filter(|c| !c.is_empty()),
                             },
                         }) {
-                            Ok(()) => show_info(s, &format!("ACK for PR #{} queued for sync.", pr_number)),
+                            Ok(()) => {
+                                show_info(s, &format!("ACK for PR #{} queued for sync.", pr_number))
+                            }
                             Err(e) => show_error(s, &format!("Failed to queue action: {}", e)),
                         }
                     } else {
@@ -1659,7 +1842,9 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) {
                             }
                         },
                         move |s, res| match res {
-                            Ok(()) => show_info(s, &format!("PR #{} ACKed successfully.", pr_number)),
+                            Ok(()) => {
+                                show_info(s, &format!("PR #{} ACKed successfully.", pr_number))
+                            }
                             Err(e) => show_error(s, &format!("ACK failed: {}", e)),
                         },
                     );
@@ -1685,13 +1870,18 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) 
             )
             .button("Reject", move |s| {
                 let reason = s
-                    .call_on_name("reject_reason", |v: &mut EditView| v.get_content().to_string())
+                    .call_on_name("reject_reason", |v: &mut EditView| {
+                        v.get_content().to_string()
+                    })
                     .unwrap_or_default();
                 if reason.trim().is_empty() {
                     show_error(s, "A reason is required.");
                     return;
                 }
-                let offline = s.user_data::<TuiState>().map(|t| t.offline).unwrap_or(false);
+                let offline = s
+                    .user_data::<TuiState>()
+                    .map(|t| t.offline)
+                    .unwrap_or(false);
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
@@ -1703,7 +1893,10 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) 
                                 comment: reason,
                             },
                         }) {
-                            Ok(()) => show_info(s, &format!("Reject for PR #{} queued for sync.", pr_number)),
+                            Ok(()) => show_info(
+                                s,
+                                &format!("Reject for PR #{} queued for sync.", pr_number),
+                            ),
                             Err(e) => show_error(s, &format!("Failed to queue action: {}", e)),
                         }
                     } else {
@@ -1756,10 +1949,14 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
             )
             .button("Execute", move |s| {
                 let reviewer_str = s
-                    .call_on_name("push_reviewer", |v: &mut EditView| v.get_content().to_string())
+                    .call_on_name("push_reviewer", |v: &mut EditView| {
+                        v.get_content().to_string()
+                    })
                     .unwrap_or_default();
                 let backport_str = s
-                    .call_on_name("push_backport", |v: &mut EditView| v.get_content().to_string())
+                    .call_on_name("push_backport", |v: &mut EditView| {
+                        v.get_content().to_string()
+                    })
                     .unwrap_or_default();
                 let autobackport = s
                     .call_on_name("push_autobackport", |v: &mut Checkbox| v.is_checked())
@@ -1807,7 +2004,9 @@ fn show_backport_dialog(siv: &mut Cursive, pr_number: u64) {
             )
             .button("Execute", move |s| {
                 let branches_str = s
-                    .call_on_name("bp_branches", |v: &mut EditView| v.get_content().to_string())
+                    .call_on_name("bp_branches", |v: &mut EditView| {
+                        v.get_content().to_string()
+                    })
                     .unwrap_or_default();
                 let branches: Vec<String> = branches_str
                     .split(',')
@@ -1821,8 +2020,10 @@ fn show_backport_dialog(siv: &mut Cursive, pr_number: u64) {
                 }
 
                 if let Some(state) = s.user_data::<TuiState>() {
-                    state.pending_action =
-                        Some(PendingTuiAction::Backport { pr_id: pr_number, branches });
+                    state.pending_action = Some(PendingTuiAction::Backport {
+                        pr_id: pr_number,
+                        branches,
+                    });
                 }
                 s.quit();
             })
@@ -1837,39 +2038,51 @@ fn show_backport_dialog(siv: &mut Cursive, pr_number: u64) {
 fn sync_queued_actions(siv: &mut Cursive) {
     let gh = match siv.user_data::<TuiState>().and_then(|t| t.gh.clone()) {
         Some(g) => g,
-        None => { show_error(siv, "No GitHub client available."); return; }
+        None => {
+            show_error(siv, "No GitHub client available.");
+            return;
+        }
     };
     let db = match siv.user_data::<TuiState>().and_then(|t| t.db.clone()) {
         Some(d) => d,
-        None => { show_info(siv, "No local database – nothing to sync."); return; }
+        None => {
+            show_info(siv, "No local database – nothing to sync.");
+            return;
+        }
     };
     let actions = match db.pending_actions() {
         Ok(a) => a,
-        Err(e) => { show_error(siv, &format!("Failed to read queue: {}", e)); return; }
+        Err(e) => {
+            show_error(siv, &format!("Failed to read queue: {}", e));
+            return;
+        }
     };
     if actions.is_empty() {
         show_info(siv, "No queued actions to sync.");
         return;
     }
 
-    siv.add_layer(loading_dialog(&format!("Syncing {} queued action(s)…", actions.len())));
+    siv.add_layer(loading_dialog(&format!(
+        "Syncing {} queued action(s)…",
+        actions.len()
+    )));
     let cb = siv.cb_sink().clone();
     std::thread::spawn(move || {
         let mut ok = 0usize;
         let mut errors: Vec<String> = Vec::new();
         for pa in actions {
             let result = match pa.provider_action.provider {
-                crate::db::Provider::GitHub =>
-                    apply_github_action(&gh, &pa.provider_action.action),
-                crate::db::Provider::Forgejo =>
-                    Err(anyhow::anyhow!("Forgejo sync not yet implemented")),
+                crate::db::Provider::GitHub => apply_github_action(&gh, &pa.provider_action.action),
+                crate::db::Provider::Forgejo => {
+                    Err(anyhow::anyhow!("Forgejo sync not yet implemented"))
+                }
             };
-            if result.is_ok() {
+            if let Err(e) = result {
+                errors.push(format!("{:?}: {}", pa.provider_action.action, e));
+                break; // stop on first error to preserve ordering
+            } else {
                 let _ = db.delete_action(pa.id);
                 ok += 1;
-            } else {
-                errors.push(format!("{:?}: {}", pa.provider_action.action, result.unwrap_err()));
-                break; // stop on first error to preserve ordering
             }
         }
         cb.send(Box::new(move |s: &mut Cursive| {
@@ -1877,10 +2090,10 @@ fn sync_queued_actions(siv: &mut Cursive) {
             if errors.is_empty() {
                 show_info(s, &format!("Synced {} action(s) successfully.", ok));
             } else {
-                show_error(s, &format!(
-                    "Synced {} action(s). First error:\n{}",
-                    ok, errors[0]
-                ));
+                show_error(
+                    s,
+                    &format!("Synced {} action(s). First error:\n{}", ok, errors[0]),
+                );
             }
             // Refresh PR list after sync
             let gh2 = s.user_data::<TuiState>().and_then(|t| t.gh.clone());
@@ -1892,22 +2105,33 @@ fn sync_queued_actions(siv: &mut Cursive) {
     });
 }
 
-fn apply_github_action(gh: &Arc<GitHubClient>, action: &crate::db::QueuedAction) -> anyhow::Result<()> {
+fn apply_github_action(
+    gh: &Arc<GitHubClient>,
+    action: &crate::db::QueuedAction,
+) -> anyhow::Result<()> {
     use crate::db::QueuedAction::*;
     match action {
-        AddLabel { pr_number, label } =>
-            gh.add_labels(*pr_number, &[label.as_str()]),
-        RemoveLabel { pr_number, label } =>
-            gh.remove_label(*pr_number, label),
-        PostComment { pr_number, body } =>
-            gh.create_comment(*pr_number, body),
-        PostReviewComment { pr_number, commit_id, path, line, body } =>
-            gh.create_review_comment(*pr_number, commit_id, path, *line, body),
-        Ack { pr_number, comment } =>
-            crate::commands::pr_ack::run_api(gh, *pr_number, comment.as_deref()),
-        Reject { pr_number, comment } =>
-            crate::commands::pr_reject::run_api(gh, *pr_number, comment),
-        UpdateLabels { pr_number, to_add, to_remove } => {
+        AddLabel { pr_number, label } => gh.add_labels(*pr_number, &[label.as_str()]),
+        RemoveLabel { pr_number, label } => gh.remove_label(*pr_number, label),
+        PostComment { pr_number, body } => gh.create_comment(*pr_number, body),
+        PostReviewComment {
+            pr_number,
+            commit_id,
+            path,
+            line,
+            body,
+        } => gh.create_review_comment(*pr_number, commit_id, path, *line, body),
+        Ack { pr_number, comment } => {
+            crate::commands::pr_ack::run_api(gh, *pr_number, comment.as_deref())
+        }
+        Reject { pr_number, comment } => {
+            crate::commands::pr_reject::run_api(gh, *pr_number, comment)
+        }
+        UpdateLabels {
+            pr_number,
+            to_add,
+            to_remove,
+        } => {
             if !to_add.is_empty() {
                 let refs: Vec<&str> = to_add.iter().map(|s| s.as_str()).collect();
                 gh.add_labels(*pr_number, &refs)?;
@@ -2002,19 +2226,15 @@ fn pr_row_styled(pr: &GitHubPR, inner_width: usize) -> StyledString {
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
 fn show_info(siv: &mut Cursive, msg: &str) {
-    siv.add_layer(
-        Dialog::text(msg).title("Done").button("OK", |s| {
-            s.pop_layer();
-        }),
-    );
+    siv.add_layer(Dialog::text(msg).title("Done").button("OK", |s| {
+        s.pop_layer();
+    }));
 }
 
 fn show_error(siv: &mut Cursive, msg: &str) {
-    siv.add_layer(
-        Dialog::text(msg).title("Error").button("OK", |s| {
-            s.pop_layer();
-        }),
-    );
+    siv.add_layer(Dialog::text(msg).title("Error").button("OK", |s| {
+        s.pop_layer();
+    }));
 }
 
 fn loading_dialog(msg: &str) -> impl cursive::View {
@@ -2034,4 +2254,3 @@ fn truncate(s: &str, max_chars: usize) -> String {
         collected
     }
 }
-
