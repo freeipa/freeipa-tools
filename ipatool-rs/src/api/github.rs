@@ -203,7 +203,10 @@ impl GitHubClient {
     }
 
     fn api_url(&self, path: &str) -> String {
-        format!("https://api.github.com/repos/{}/{}{}", self.owner, self.repo, path)
+        format!(
+            "https://api.github.com/repos/{}/{}{}",
+            self.owner, self.repo, path
+        )
     }
 
     fn auth_header(&self) -> String {
@@ -222,7 +225,9 @@ impl GitHubClient {
         if resp.status().as_u16() == 404 {
             anyhow::bail!("Pull request {} not found", number);
         }
-        let pr: GitHubPR = resp.json().with_context(|| format!("Parsing PR {}", number))?;
+        let pr: GitHubPR = resp
+            .json()
+            .with_context(|| format!("Parsing PR {}", number))?;
         Ok(pr)
     }
 
@@ -438,13 +443,7 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub fn create_pr(
-        &self,
-        title: &str,
-        base: &str,
-        head: &str,
-        body: &str,
-    ) -> Result<GitHubPR> {
+    pub fn create_pr(&self, title: &str, base: &str, head: &str, body: &str) -> Result<GitHubPR> {
         let url = self.api_url("/pulls");
         let req_body = CreatePRBody {
             title: title.to_string(),
@@ -521,8 +520,9 @@ impl GitHubClient {
                 .header("Accept", "application/vnd.github.v3+json")
                 .send()
                 .with_context(|| format!("GET {}", url))?;
-            let comments: Vec<GitHubComment> =
-                resp.json().with_context(|| format!("Parsing comments for issue {}", number))?;
+            let comments: Vec<GitHubComment> = resp
+                .json()
+                .with_context(|| format!("Parsing comments for issue {}", number))?;
             if comments.is_empty() {
                 break;
             }
@@ -543,8 +543,9 @@ impl GitHubClient {
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .with_context(|| format!("GET {}", url))?;
-        let files: Vec<GitHubFile> =
-            resp.json().with_context(|| format!("Parsing files for PR {}", number))?;
+        let files: Vec<GitHubFile> = resp
+            .json()
+            .with_context(|| format!("Parsing files for PR {}", number))?;
         Ok(files)
     }
 
@@ -697,8 +698,12 @@ mod tests {
     fn make_commit(sha: &str, parent_sha: &str, message: &str) -> GitHubCommit {
         GitHubCommit {
             sha: sha.to_string(),
-            commit: CommitDetails { message: message.to_string() },
-            parents: vec![ParentRef { sha: parent_sha.to_string() }],
+            commit: CommitDetails {
+                message: message.to_string(),
+            },
+            parents: vec![ParentRef {
+                sha: parent_sha.to_string(),
+            }],
         }
     }
 
@@ -841,7 +846,9 @@ mod tests {
     fn test_comment_serialization_roundtrip() {
         let comment = GitHubComment {
             id: 1,
-            user: GitHubUser { login: "tester".to_string() },
+            user: GitHubUser {
+                login: "tester".to_string(),
+            },
             body: "hello".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
         };
@@ -895,10 +902,16 @@ mod tests {
     fn test_sorted_commits_merge_commit_fails() {
         let merge = GitHubCommit {
             sha: "merge_sha".to_string(),
-            commit: CommitDetails { message: "Merge branch".to_string() },
+            commit: CommitDetails {
+                message: "Merge branch".to_string(),
+            },
             parents: vec![
-                ParentRef { sha: "p1".to_string() },
-                ParentRef { sha: "p2".to_string() },
+                ParentRef {
+                    sha: "p1".to_string(),
+                },
+                ParentRef {
+                    sha: "p2".to_string(),
+                },
             ],
         };
         let result = sorted_commits(vec![merge]);
@@ -912,8 +925,14 @@ mod tests {
     #[test]
     fn test_labels_colorize_no_color() {
         let labels = vec![
-            GitHubLabel { name: "ack".to_string(), color: "00ff00".to_string() },
-            GitHubLabel { name: "pushed".to_string(), color: "ff0000".to_string() },
+            GitHubLabel {
+                name: "ack".to_string(),
+                color: "00ff00".to_string(),
+            },
+            GitHubLabel {
+                name: "pushed".to_string(),
+                color: "ff0000".to_string(),
+            },
         ];
         let result = labels_colorize(&labels, false);
         assert_eq!(result, "ack,pushed");
@@ -921,9 +940,10 @@ mod tests {
 
     #[test]
     fn test_labels_colorize_with_color() {
-        let labels = vec![
-            GitHubLabel { name: "ack".to_string(), color: "00ff00".to_string() },
-        ];
+        let labels = vec![GitHubLabel {
+            name: "ack".to_string(),
+            color: "00ff00".to_string(),
+        }];
         let result = labels_colorize(&labels, true);
         assert!(result.contains("\x1b[38;2;"));
         assert!(result.contains("ack"));
@@ -938,7 +958,10 @@ mod tests {
 
     #[test]
     fn test_labels_colorize_single_no_comma() {
-        let labels = vec![GitHubLabel { name: "ack".to_string(), color: "00ff00".to_string() }];
+        let labels = vec![GitHubLabel {
+            name: "ack".to_string(),
+            color: "00ff00".to_string(),
+        }];
         let result = labels_colorize(&labels, false);
         assert!(!result.contains(','));
         assert_eq!(result, "ack");

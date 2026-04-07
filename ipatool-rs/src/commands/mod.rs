@@ -29,7 +29,10 @@ pub const GIT_REMOTE_SERVER: &str = "pagure.io";
 /// Milestone to branches mapping (regex → list of branches)
 pub fn milestone_branches(milestone: &str) -> Option<Vec<String>> {
     let mappings: &[(&str, &[&str])] = &[
-        (r"^FreeIPA 3\.3\..*", &["master", "ipa-4-1", "ipa-4-0", "ipa-3-3"]),
+        (
+            r"^FreeIPA 3\.3\..*",
+            &["master", "ipa-4-1", "ipa-4-0", "ipa-3-3"],
+        ),
         (r"^FreeIPA 4\.4.*", &["master", "ipa-4-5", "ipa-4-4"]),
         (r"^FreeIPA 4\.5.*", &["master", "ipa-4-5"]),
         (r"^FreeIPA 4\.6.*", &["master"]),
@@ -226,15 +229,14 @@ pub struct PushInfo {
 impl Ctx {
     pub fn make_ticket(&self, number: u64) -> Option<Ticket> {
         if let Some(pagure) = &self.pagure {
-            Some(Ticket::Pagure(PagureTicket::new(Arc::clone(pagure), number)))
-        } else if let Some(forgejo) = &self.forgejo {
-            Some(Ticket::Forgejo(ForgejoTicket::new(
-                Arc::clone(forgejo),
+            Some(Ticket::Pagure(PagureTicket::new(
+                Arc::clone(pagure),
                 number,
             )))
-        } else {
-            None
-        }
+        } else { self.forgejo.as_ref().map(|forgejo| Ticket::Forgejo(ForgejoTicket::new(
+                Arc::clone(forgejo),
+                number,
+            ))) }
     }
 
     pub fn has_tracker(&self) -> bool {
@@ -300,7 +302,8 @@ pub fn normalize_reviewer(ctx: &Ctx, reviewer: &str) -> Result<String> {
         0 => bail!("Reviewer '{}' not found in git shortlog", reviewer),
         1 => Ok(matches.into_iter().next().unwrap()),
         _ => {
-            ctx.out.print_red(&format!("Reviewer '{}' could be:", reviewer));
+            ctx.out
+                .print_red(&format!("Reviewer '{}' could be:", reviewer));
             for name in &matches {
                 println!("- {}", name);
             }
@@ -329,7 +332,10 @@ pub fn get_reviewers(
             }
         }
         if found.len() > 1 {
-            println!("Reviewers found: {}", found.iter().cloned().collect::<Vec<_>>().join(", "));
+            println!(
+                "Reviewers found: {}",
+                found.iter().cloned().collect::<Vec<_>>().join(", ")
+            );
             bail!("Too many reviewers found in ticket(s), specify --reviewer explicitly");
         }
         if found.is_empty() {
@@ -362,10 +368,7 @@ pub fn apply_patches_to_branch(
     crate::git::checkout_remote_branch(&ctx.config.remote, branch, &ctx.git_env, ctx.verbosity)?;
 
     for patch in patches {
-        println!(
-            "Applying to {}: {}",
-            branch, patch.subject
-        );
+        println!("Applying to {}: {}", branch, patch.subject);
         let content = patch.content();
         let result = crate::git::git_am(&content, &ctx.git_env, ctx.verbosity)?;
         if result.returncode != 0 {
@@ -443,7 +446,8 @@ pub fn close_issue(ctx: &Ctx, ticket: &Ticket, has_backport: bool) {
         match ticket.close() {
             Ok(()) => ctx.out.print_green("Issue closed"),
             Err(e) => {
-                ctx.out.print_red(&format!("Failed to close the issue: {}", e));
+                ctx.out
+                    .print_red(&format!("Failed to close the issue: {}", e));
                 ctx.out.print_yellow("Please close the issue manually");
             }
         }
@@ -453,14 +457,19 @@ pub fn close_issue(ctx: &Ctx, ticket: &Ticket, has_backport: bool) {
 /// Update Jira tickets with commit info
 pub fn update_jira_issues(ctx: &Ctx) {
     let Some(jira) = &ctx.jira else { return };
-    let Some(push_info) = &ctx.push_info else { return };
+    let Some(push_info) = &ctx.push_info else {
+        return;
+    };
     if push_info.jira_urls.is_empty() {
         return;
     }
 
     let jira_ticket_url = &ctx.config.jira_ticket_url;
     let browse_prefix = if jira_ticket_url.contains("/browse/") {
-        format!("{}/browse/", jira_ticket_url.split("/browse/").next().unwrap_or(""))
+        format!(
+            "{}/browse/",
+            jira_ticket_url.split("/browse/").next().unwrap_or("")
+        )
     } else {
         return;
     };
@@ -483,10 +492,8 @@ pub fn update_jira_issues(ctx: &Ctx) {
                     .out
                     .print_green(&format!("Comment added to Jira {}", issue_key)),
                 Err(e) => {
-                    ctx.out.print_red(&format!(
-                        "Failed to comment on Jira {}: {}",
-                        issue_key, e
-                    ));
+                    ctx.out
+                        .print_red(&format!("Failed to comment on Jira {}: {}", issue_key, e));
                     ctx.out.print_yellow("Please update Jira manually");
                 }
             }

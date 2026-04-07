@@ -184,9 +184,9 @@ impl Config {
 }
 
 pub fn expand_path(path: &str) -> PathBuf {
-    if path.starts_with("~/") {
+    if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
-            return home.join(&path[2..]);
+            return home.join(rest);
         }
     }
     PathBuf::from(path)
@@ -293,7 +293,10 @@ mod tests {
     fn test_jira_server_with_browse() {
         let mut c = Config::default();
         c.jira_ticket_url = "https://issues.redhat.com/browse/RHEL-".to_string();
-        assert_eq!(c.jira_server(), Some("https://issues.redhat.com".to_string()));
+        assert_eq!(
+            c.jira_server(),
+            Some("https://issues.redhat.com".to_string())
+        );
     }
 
     #[test]

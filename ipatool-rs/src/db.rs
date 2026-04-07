@@ -51,9 +51,18 @@ pub struct CachedPrDetails {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum QueuedAction {
-    AddLabel { pr_number: u64, label: String },
-    RemoveLabel { pr_number: u64, label: String },
-    PostComment { pr_number: u64, body: String },
+    AddLabel {
+        pr_number: u64,
+        label: String,
+    },
+    RemoveLabel {
+        pr_number: u64,
+        label: String,
+    },
+    PostComment {
+        pr_number: u64,
+        body: String,
+    },
     /// `commit_id`/`path`/`line` are GitHub-specific; Forgejo equivalents would
     /// use the same fields mapped to their API.
     PostReviewComment {
@@ -63,9 +72,19 @@ pub enum QueuedAction {
         line: u64,
         body: String,
     },
-    Ack { pr_number: u64, comment: Option<String> },
-    Reject { pr_number: u64, comment: String },
-    UpdateLabels { pr_number: u64, to_add: Vec<String>, to_remove: Vec<String> },
+    Ack {
+        pr_number: u64,
+        comment: Option<String>,
+    },
+    Reject {
+        pr_number: u64,
+        comment: String,
+    },
+    UpdateLabels {
+        pr_number: u64,
+        to_add: Vec<String>,
+        to_remove: Vec<String>,
+    },
 }
 
 /// A `QueuedAction` tagged with its origin provider so the sync loop can
@@ -94,9 +113,11 @@ impl Database {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("Creating directory {}", parent.display()))?;
         }
-        let conn = Connection::open(path)
-            .with_context(|| format!("Opening SQLite DB at {}", path))?;
-        let db = Database { conn: Mutex::new(conn) };
+        let conn =
+            Connection::open(path).with_context(|| format!("Opening SQLite DB at {}", path))?;
+        let db = Database {
+            conn: Mutex::new(conn),
+        };
         db.init_schema()?;
         Ok(db)
     }
@@ -132,12 +153,9 @@ impl Database {
 
         // Migrate existing databases that pre-date schema additions.
         // SQLite returns an error if the column already exists; ignore it.
-        let _ = conn.execute_batch(
-            "ALTER TABLE prs ADD COLUMN provider TEXT NOT NULL DEFAULT 'github';",
-        );
-        let _ = conn.execute_batch(
-            "ALTER TABLE pr_details ADD COLUMN pr_updated_at TEXT;",
-        );
+        let _ = conn
+            .execute_batch("ALTER TABLE prs ADD COLUMN provider TEXT NOT NULL DEFAULT 'github';");
+        let _ = conn.execute_batch("ALTER TABLE pr_details ADD COLUMN pr_updated_at TEXT;");
 
         Ok(())
     }
@@ -168,9 +186,8 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let provider_str = provider.as_str();
         let jsons: Vec<String> = if state_filter == "all" {
-            let mut stmt = conn.prepare(
-                "SELECT data_json FROM prs WHERE provider = ?1 ORDER BY number DESC",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT data_json FROM prs WHERE provider = ?1 ORDER BY number DESC")?;
             let collected: rusqlite::Result<Vec<String>> =
                 stmt.query_map([provider_str], |row| row.get(0))?.collect();
             collected?
@@ -180,9 +197,9 @@ impl Database {
                   WHERE provider = ?1 AND state = ?2 \
                   ORDER BY number DESC",
             )?;
-            let collected: rusqlite::Result<Vec<String>> =
-                stmt.query_map(params![provider_str, state_filter], |row| row.get(0))?
-                    .collect();
+            let collected: rusqlite::Result<Vec<String>> = stmt
+                .query_map(params![provider_str, state_filter], |row| row.get(0))?
+                .collect();
             collected?
         };
         jsons
@@ -241,11 +258,7 @@ impl Database {
 
     /// Return the `pr_updated_at` value stored when details were last cached,
     /// or `None` if no details have been cached for this PR.
-    pub fn pr_details_updated_at(
-        &self,
-        provider: Provider,
-        pr_number: u64,
-    ) -> Option<String> {
+    pub fn pr_details_updated_at(&self, provider: Provider, pr_number: u64) -> Option<String> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT pr_updated_at FROM pr_details WHERE number = ?1 AND provider = ?2",
@@ -271,24 +284,26 @@ impl Database {
 
     pub fn pending_actions(&self) -> Result<Vec<PendingAction>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT id, action_json FROM queued_actions ORDER BY id")?;
-        let collected: rusqlite::Result<Vec<(i64, String)>> =
-            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect();
+        let mut stmt = conn.prepare("SELECT id, action_json FROM queued_actions ORDER BY id")?;
+        let collected: rusqlite::Result<Vec<(i64, String)>> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect();
         let rows = collected?;
         rows.iter()
             .map(|(id, json)| {
                 // Try to deserialize as the new ProviderAction format.  Fall back
                 // to plain QueuedAction (written by older code) and assume GitHub.
-                let provider_action: ProviderAction = serde_json::from_str(json)
-                    .or_else(|_| {
-                        let action: QueuedAction = serde_json::from_str(json)?;
-                        Ok::<_, anyhow::Error>(ProviderAction {
-                            provider: Provider::GitHub,
-                            action,
-                        })
-                    })?;
-                Ok(PendingAction { id: *id, provider_action })
+                let provider_action: ProviderAction = serde_json::from_str(json).or_else(|_| {
+                    let action: QueuedAction = serde_json::from_str(json)?;
+                    Ok::<_, anyhow::Error>(ProviderAction {
+                        provider: Provider::GitHub,
+                        action,
+                    })
+                })?;
+                Ok(PendingAction {
+                    id: *id,
+                    provider_action,
+                })
             })
             .collect()
     }
@@ -323,7 +338,9 @@ mod tests {
     impl Database {
         fn open_in_memory() -> Result<Self> {
             let conn = Connection::open_in_memory()?;
-            let db = Database { conn: Mutex::new(conn) };
+            let db = Database {
+                conn: Mutex::new(conn),
+            };
             db.init_schema()?;
             Ok(db)
         }
@@ -335,9 +352,17 @@ mod tests {
             title: format!("PR #{}", number),
             state: state.to_string(),
             html_url: format!("https://github.com/test/repo/pull/{}", number),
-            head: GitHubRef { ref_name: "feature".to_string(), sha: "abc123".to_string() },
-            base: GitHubRef { ref_name: "master".to_string(), sha: "def456".to_string() },
-            user: GitHubUser { login: "tester".to_string() },
+            head: GitHubRef {
+                ref_name: "feature".to_string(),
+                sha: "abc123".to_string(),
+            },
+            base: GitHubRef {
+                ref_name: "master".to_string(),
+                sha: "def456".to_string(),
+            },
+            user: GitHubUser {
+                login: "tester".to_string(),
+            },
             mergeable: None,
             merged: None,
             labels: vec![],
@@ -359,7 +384,9 @@ mod tests {
             statuses,
             comments: vec![GitHubComment {
                 id: 1,
-                user: GitHubUser { login: "reviewer".to_string() },
+                user: GitHubUser {
+                    login: "reviewer".to_string(),
+                },
                 body: "LGTM".to_string(),
                 created_at: "2024-01-01T00:00:00Z".to_string(),
             }],
@@ -411,14 +438,20 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let mut pr = make_pr(42, "open");
         pr.title = "Special title".to_string();
-        pr.labels = vec![GitHubLabel { name: "ack".to_string(), color: "00ff00".to_string() }];
+        pr.labels = vec![GitHubLabel {
+            name: "ack".to_string(),
+            color: "00ff00".to_string(),
+        }];
         pr.updated_at = Some("2024-06-01T12:00:00Z".to_string());
         db.cache_prs(Provider::GitHub, &[pr]).unwrap();
         let loaded = db.load_prs(Provider::GitHub, "open").unwrap();
         assert_eq!(loaded[0].title, "Special title");
         assert_eq!(loaded[0].labels.len(), 1);
         assert_eq!(loaded[0].labels[0].name, "ack");
-        assert_eq!(loaded[0].updated_at.as_deref(), Some("2024-06-01T12:00:00Z"));
+        assert_eq!(
+            loaded[0].updated_at.as_deref(),
+            Some("2024-06-01T12:00:00Z")
+        );
     }
 
     #[test]
@@ -446,8 +479,10 @@ mod tests {
     #[test]
     fn test_provider_isolation_pr_list() {
         let db = Database::open_in_memory().unwrap();
-        db.cache_prs(Provider::GitHub, &[make_pr(42, "open")]).unwrap();
-        db.cache_prs(Provider::Forgejo, &[make_pr(42, "closed")]).unwrap();
+        db.cache_prs(Provider::GitHub, &[make_pr(42, "open")])
+            .unwrap();
+        db.cache_prs(Provider::Forgejo, &[make_pr(42, "closed")])
+            .unwrap();
 
         let gh = db.load_prs(Provider::GitHub, "all").unwrap();
         let fj = db.load_prs(Provider::Forgejo, "all").unwrap();
@@ -499,7 +534,8 @@ mod tests {
     fn test_pr_details_updated_at_null() {
         let db = Database::open_in_memory().unwrap();
         let details = make_details();
-        db.cache_pr_details(Provider::GitHub, 42, &details, None).unwrap();
+        db.cache_pr_details(Provider::GitHub, 42, &details, None)
+            .unwrap();
         assert!(db.pr_details_updated_at(Provider::GitHub, 42).is_none());
     }
 
@@ -507,7 +543,8 @@ mod tests {
     fn test_pr_details_provider_isolation() {
         let db = Database::open_in_memory().unwrap();
         let details = make_details();
-        db.cache_pr_details(Provider::GitHub, 42, &details, Some("2024-01-01")).unwrap();
+        db.cache_pr_details(Provider::GitHub, 42, &details, Some("2024-01-01"))
+            .unwrap();
         // Forgejo PR #42 not cached
         assert!(db.load_pr_details(Provider::Forgejo, 42).unwrap().is_none());
         assert!(db.pr_details_updated_at(Provider::Forgejo, 42).is_none());
@@ -521,7 +558,10 @@ mod tests {
         assert_eq!(db.pending_count(), 0);
         let action = ProviderAction {
             provider: Provider::GitHub,
-            action: QueuedAction::Ack { pr_number: 42, comment: Some("LGTM".to_string()) },
+            action: QueuedAction::Ack {
+                pr_number: 42,
+                comment: Some("LGTM".to_string()),
+            },
         };
         db.queue_action(&action).unwrap();
         assert_eq!(db.pending_count(), 1);
@@ -542,7 +582,10 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let action = ProviderAction {
             provider: Provider::GitHub,
-            action: QueuedAction::PostComment { pr_number: 1, body: "hello".to_string() },
+            action: QueuedAction::PostComment {
+                pr_number: 1,
+                body: "hello".to_string(),
+            },
         };
         db.queue_action(&action).unwrap();
         let pending = db.pending_actions().unwrap();
@@ -558,7 +601,10 @@ mod tests {
         for i in 0..5u64 {
             let action = ProviderAction {
                 provider: Provider::GitHub,
-                action: QueuedAction::AddLabel { pr_number: i, label: "ack".to_string() },
+                action: QueuedAction::AddLabel {
+                    pr_number: i,
+                    label: "ack".to_string(),
+                },
             };
             db.queue_action(&action).unwrap();
         }
@@ -571,7 +617,10 @@ mod tests {
         for i in 0..3u64 {
             let action = ProviderAction {
                 provider: Provider::GitHub,
-                action: QueuedAction::AddLabel { pr_number: i, label: "x".to_string() },
+                action: QueuedAction::AddLabel {
+                    pr_number: i,
+                    label: "x".to_string(),
+                },
             };
             db.queue_action(&action).unwrap();
         }
@@ -617,15 +666,24 @@ mod tests {
         let actions = vec![
             ProviderAction {
                 provider: Provider::GitHub,
-                action: QueuedAction::AddLabel { pr_number: 1, label: "ack".to_string() },
+                action: QueuedAction::AddLabel {
+                    pr_number: 1,
+                    label: "ack".to_string(),
+                },
             },
             ProviderAction {
                 provider: Provider::Forgejo,
-                action: QueuedAction::RemoveLabel { pr_number: 2, label: "rejected".to_string() },
+                action: QueuedAction::RemoveLabel {
+                    pr_number: 2,
+                    label: "rejected".to_string(),
+                },
             },
             ProviderAction {
                 provider: Provider::GitHub,
-                action: QueuedAction::PostComment { pr_number: 3, body: "nice".to_string() },
+                action: QueuedAction::PostComment {
+                    pr_number: 3,
+                    body: "nice".to_string(),
+                },
             },
             ProviderAction {
                 provider: Provider::GitHub,
@@ -639,11 +697,17 @@ mod tests {
             },
             ProviderAction {
                 provider: Provider::GitHub,
-                action: QueuedAction::Ack { pr_number: 5, comment: None },
+                action: QueuedAction::Ack {
+                    pr_number: 5,
+                    comment: None,
+                },
             },
             ProviderAction {
                 provider: Provider::GitHub,
-                action: QueuedAction::Reject { pr_number: 6, comment: "not ready".to_string() },
+                action: QueuedAction::Reject {
+                    pr_number: 6,
+                    comment: "not ready".to_string(),
+                },
             },
             ProviderAction {
                 provider: Provider::GitHub,
@@ -669,7 +733,9 @@ mod tests {
             _ => panic!("Expected PostReviewComment"),
         }
         match &pending[6].provider_action.action {
-            QueuedAction::UpdateLabels { to_add, to_remove, .. } => {
+            QueuedAction::UpdateLabels {
+                to_add, to_remove, ..
+            } => {
                 assert_eq!(to_add, &["ack".to_string()]);
                 assert_eq!(to_remove, &["rejected".to_string()]);
             }
@@ -689,7 +755,10 @@ mod tests {
     fn test_provider_serde_roundtrip() {
         let pa = ProviderAction {
             provider: Provider::Forgejo,
-            action: QueuedAction::Ack { pr_number: 1, comment: None },
+            action: QueuedAction::Ack {
+                pr_number: 1,
+                comment: None,
+            },
         };
         let json = serde_json::to_string(&pa).unwrap();
         let pa2: ProviderAction = serde_json::from_str(&json).unwrap();

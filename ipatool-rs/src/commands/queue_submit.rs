@@ -22,10 +22,22 @@ fn describe(action: &QueuedAction) -> String {
         QueuedAction::PostComment { pr_number, .. } => {
             format!("Post comment on PR #{}", pr_number)
         }
-        QueuedAction::PostReviewComment { pr_number, path, line, .. } => {
-            format!("Post review comment on PR #{} ({}:{})", pr_number, path, line)
+        QueuedAction::PostReviewComment {
+            pr_number,
+            path,
+            line,
+            ..
+        } => {
+            format!(
+                "Post review comment on PR #{} ({}:{})",
+                pr_number, path, line
+            )
         }
-        QueuedAction::UpdateLabels { pr_number, to_add, to_remove } => {
+        QueuedAction::UpdateLabels {
+            pr_number,
+            to_add,
+            to_remove,
+        } => {
             format!(
                 "Update labels on PR #{} (+[{}] -[{}])",
                 pr_number,
@@ -75,7 +87,8 @@ pub fn run_submit(ctx: &Ctx) -> Result<()> {
         return Ok(());
     }
 
-    ctx.out.print_cyan(&format!("Submitting {} queued action(s)…", pending.len()));
+    ctx.out
+        .print_cyan(&format!("Submitting {} queued action(s)…", pending.len()));
 
     let mut submitted = 0usize;
     let mut failed = 0usize;
@@ -94,16 +107,20 @@ pub fn run_submit(ctx: &Ctx) -> Result<()> {
             QueuedAction::AddLabel { pr_number, label } => {
                 gh.add_labels(*pr_number, &[label.as_str()])
             }
-            QueuedAction::RemoveLabel { pr_number, label } => {
-                gh.remove_label(*pr_number, label)
-            }
-            QueuedAction::PostComment { pr_number, body } => {
-                gh.create_comment(*pr_number, body)
-            }
-            QueuedAction::PostReviewComment { pr_number, commit_id, path, line, body } => {
-                gh.create_review_comment(*pr_number, commit_id, path, *line, body)
-            }
-            QueuedAction::UpdateLabels { pr_number, to_add, to_remove } => {
+            QueuedAction::RemoveLabel { pr_number, label } => gh.remove_label(*pr_number, label),
+            QueuedAction::PostComment { pr_number, body } => gh.create_comment(*pr_number, body),
+            QueuedAction::PostReviewComment {
+                pr_number,
+                commit_id,
+                path,
+                line,
+                body,
+            } => gh.create_review_comment(*pr_number, commit_id, path, *line, body),
+            QueuedAction::UpdateLabels {
+                pr_number,
+                to_add,
+                to_remove,
+            } => {
                 let add_refs: Vec<&str> = to_add.iter().map(|s| s.as_str()).collect();
                 let mut r = if !add_refs.is_empty() {
                     gh.add_labels(*pr_number, &add_refs)
@@ -136,8 +153,10 @@ pub fn run_submit(ctx: &Ctx) -> Result<()> {
     }
 
     if failed == 0 {
-        ctx.out
-            .print_green(&format!("All {} action(s) submitted successfully.", submitted));
+        ctx.out.print_green(&format!(
+            "All {} action(s) submitted successfully.",
+            submitted
+        ));
     } else {
         ctx.out.print_yellow(&format!(
             "{} submitted, {} failed (still in queue).",

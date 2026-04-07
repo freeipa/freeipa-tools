@@ -15,12 +15,14 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
 
     let color = ctx.out.color.enabled();
 
-    ctx.out.print_cyan(&format!("Fetching {} pull requests from GitHub…", state));
+    ctx.out
+        .print_cyan(&format!("Fetching {} pull requests from GitHub…", state));
 
     let prs = gh.list_prs(state)?;
     let total = prs.len();
     db.cache_prs(Provider::GitHub, &prs)?;
-    ctx.out.print_green(&format!("Cached {} pull request(s).", total));
+    ctx.out
+        .print_green(&format!("Cached {} pull request(s).", total));
 
     // Fetch and cache supplementary details only for PRs that changed since the
     // details were last stored.  A PR is considered unchanged when its
@@ -43,12 +45,16 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
         let line = if color {
             format!(
                 "\r\x1b[36mFetching details for PR #{} ({}/{})…\x1b[0m\x1b[K",
-                pr.number, i + 1, total
+                pr.number,
+                i + 1,
+                total
             )
         } else {
             format!(
                 "\rFetching details for PR #{} ({}/{})…\x1b[K",
-                pr.number, i + 1, total
+                pr.number,
+                i + 1,
+                total
             )
         };
         eprint!("{}", line);
@@ -56,13 +62,19 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
 
         let statuses = gh.most_recent_statuses(&pr.head.sha).unwrap_or_default();
         let comments = gh.get_all_issue_comments(pr.number).unwrap_or_default();
-        let files    = gh.get_pr_files(pr.number).unwrap_or_default();
-        let commits  = gh.get_pr_commits(pr.number)
+        let files = gh.get_pr_files(pr.number).unwrap_or_default();
+        let commits = gh
+            .get_pr_commits(pr.number)
             .ok()
             .and_then(|c| sorted_commits(c).ok())
             .unwrap_or_default();
 
-        let cached = CachedPrDetails { statuses, comments, files, commits };
+        let cached = CachedPrDetails {
+            statuses,
+            comments,
+            files,
+            commits,
+        };
         match db.cache_pr_details(Provider::GitHub, pr.number, &cached, pr_updated_at) {
             Ok(()) => fetched += 1,
             Err(e) => {

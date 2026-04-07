@@ -14,7 +14,7 @@ pub fn run_process(
     env: &HashMap<String, String>,
     stdin_data: Option<&str>,
     check_returncode: bool,
-    timeout_secs: Option<u64>,
+    _timeout_secs: Option<u64>,
     verbosity: u8,
 ) -> Result<ProcessResult> {
     if verbosity > 0 {
@@ -42,7 +42,9 @@ pub fn run_process(
         cmd.env(k, v);
     }
 
-    let mut child = cmd.spawn().with_context(|| format!("Failed to spawn: {}", argv[0]))?;
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("Failed to spawn: {}", argv[0]))?;
 
     if let Some(data) = stdin_data {
         use std::io::Write;
@@ -75,11 +77,7 @@ pub fn run_process(
     }
 
     if failed {
-        bail!(
-            "Command failed (exit {}): {}",
-            returncode,
-            argv.join(" ")
-        );
+        bail!("Command failed (exit {}): {}", returncode, argv.join(" "));
     }
 
     Ok(ProcessResult {
@@ -101,10 +99,7 @@ pub fn shell_quote(arg: &str) -> String {
 }
 
 /// Get the current branch name
-pub fn current_branch(
-    env: &HashMap<String, String>,
-    verbosity: u8,
-) -> Result<String> {
+pub fn current_branch(env: &HashMap<String, String>, verbosity: u8) -> Result<String> {
     let result = run_process(
         &["git", "rev-parse", "--abbrev-ref", "HEAD"],
         env,
@@ -195,50 +190,22 @@ pub fn rev_parse_head(env: &HashMap<String, String>, verbosity: u8) -> Result<St
 
 /// Abort any in-progress git am
 pub fn am_abort(env: &HashMap<String, String>) {
-    let _ = run_process(
-        &["git", "am", "--abort"],
-        env,
-        None,
-        false,
-        None,
-        0,
-    );
+    let _ = run_process(&["git", "am", "--abort"], env, None, false, None, 0);
 }
 
 /// Hard reset
 pub fn reset_hard(env: &HashMap<String, String>) {
-    let _ = run_process(
-        &["git", "reset", "--hard"],
-        env,
-        None,
-        false,
-        None,
-        0,
-    );
+    let _ = run_process(&["git", "reset", "--hard"], env, None, false, None, 0);
 }
 
 /// Checkout branch
 pub fn checkout_branch(branch: &str, env: &HashMap<String, String>) {
-    let _ = run_process(
-        &["git", "checkout", branch],
-        env,
-        None,
-        false,
-        None,
-        0,
-    );
+    let _ = run_process(&["git", "checkout", branch], env, None, false, None, 0);
 }
 
 /// Clean working tree
 pub fn clean_fxd(env: &HashMap<String, String>) {
-    let _ = run_process(
-        &["git", "clean", "-fxd"],
-        env,
-        None,
-        false,
-        None,
-        0,
-    );
+    let _ = run_process(&["git", "clean", "-fxd"], env, None, false, None, 0);
 }
 
 /// Get git shortlog for reviewer lookup
@@ -432,11 +399,7 @@ pub fn log_full(
 }
 
 /// Launch gitk for visual inspection
-pub fn gitk(
-    branches: &[String],
-    sha1s: &[String],
-    env: &HashMap<String, String>,
-) -> Result<()> {
+pub fn gitk(branches: &[String], sha1s: &[String], env: &HashMap<String, String>) -> Result<()> {
     let mut args = vec!["gitk"];
     let branches_refs: Vec<&str> = branches.iter().map(|s| s.as_str()).collect();
     args.extend_from_slice(&branches_refs);
