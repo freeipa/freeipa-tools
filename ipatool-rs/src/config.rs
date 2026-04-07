@@ -27,9 +27,6 @@ pub struct Config {
     pub pagure_repository: String,
     #[serde(default)]
     pub pagure_token: String,
-    #[serde(default)]
-    pub username: String,
-
     // Forgejo
     #[serde(default)]
     pub forgejo_url: String,
@@ -387,7 +384,6 @@ clean-repo-path: ~/dev/freeipa
 remote: upstream
 pagure-token: mytoken
 pagure-repository: freeipa
-username: testuser
 gh-token: ghtoken
 gh-repo: freeipa/freeipa
 update-issue: yes
@@ -398,7 +394,6 @@ close-issue: no
         assert_eq!(config.remote, "upstream");
         assert_eq!(config.pagure_token, "mytoken");
         assert_eq!(config.pagure_repository, "freeipa");
-        assert_eq!(config.username, "testuser");
         assert_eq!(config.gh_token, "ghtoken");
         assert_eq!(config.gh_repo, "freeipa/freeipa");
         assert_eq!(config.update_issue, "yes");

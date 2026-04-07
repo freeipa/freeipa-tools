@@ -18,13 +18,10 @@ pub struct CustomField {
 
 #[derive(Debug, Deserialize)]
 pub struct PagureIssue {
-    pub id: u64,
     pub title: String,
     #[serde(default)]
     pub content: String,
     pub status: String,
-    #[serde(default)]
-    pub close_status: Option<String>,
     #[serde(default)]
     pub milestone: Option<String>,
     #[serde(default)]
@@ -51,15 +48,6 @@ impl PagureIssue {
 
     pub fn is_closed(&self) -> bool {
         self.status == "Closed"
-    }
-
-    pub fn is_fixed(&self) -> bool {
-        self.is_closed()
-            && self
-                .close_status
-                .as_deref()
-                .map(|s| s == "fixed")
-                .unwrap_or(false)
     }
 }
 

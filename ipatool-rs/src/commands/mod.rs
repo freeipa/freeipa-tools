@@ -206,7 +206,6 @@ pub struct Ctx {
     pub no_reviewer: bool,
     pub no_fetch: bool,
     pub color: String,
-    pub isodate_now: String,
     pub out: Output,
     // Populated during push for post-push operations
     pub push_info: Option<PushInfo>,
@@ -241,27 +240,6 @@ impl Ctx {
 
     pub fn has_tracker(&self) -> bool {
         self.pagure.is_some() || self.forgejo.is_some()
-    }
-
-    pub fn die<S: AsRef<str>>(&self, msg: S) -> ! {
-        self.out.print_red(msg.as_ref());
-        std::process::exit(1);
-    }
-
-    pub fn run_git(
-        &self,
-        args: &[&str],
-        stdin_data: Option<&str>,
-        check_returncode: bool,
-    ) -> Result<crate::git::ProcessResult> {
-        crate::git::run_process(
-            args,
-            &self.git_env,
-            stdin_data,
-            check_returncode,
-            None,
-            self.verbosity,
-        )
     }
 
     pub fn verify_remote_url(&self) -> Result<()> {
