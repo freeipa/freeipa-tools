@@ -5,6 +5,7 @@ mod db;
 mod git;
 mod output;
 mod patch;
+mod tui_style;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -353,6 +354,9 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
             .or_insert_with(|| isodate_now.clone());
     }
 
+    let style_path = tui_style::style_config_path(&cli.config);
+    let tui_style = tui_style::TuiStyle::load_or_save_default(&style_path);
+
     Ok(Ctx {
         config,
         pagure,
@@ -370,6 +374,7 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         git_env,
         offline: cli.offline,
         db,
+        tui_style,
     })
 }
 

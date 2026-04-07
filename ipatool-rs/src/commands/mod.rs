@@ -211,6 +211,7 @@ pub struct Ctx {
     pub git_env: HashMap<String, String>,
     pub offline: bool,
     pub db: Option<Arc<crate::db::Database>>,
+    pub tui_style: crate::tui_style::TuiStyle,
 }
 
 #[derive(Debug, Default, Clone)]
