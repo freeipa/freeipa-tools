@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use super::Ctx;
 use crate::api::github::labels_colorize;
+use crate::db::Provider;
 
 pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()> {
     let Some(gh) = &ctx.github else {
@@ -41,6 +42,14 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
         .collect();
 
     let prs = gh.list_prs(&search_state)?;
+
+    // Keep the local cache current as a side-effect of the online fetch so
+    // that `cache-update` is not required for basic offline availability.
+    if let Some(ref db) = ctx.db {
+        if let Err(e) = db.cache_prs(Provider::GitHub, &prs) {
+            eprintln!("Warning: failed to update PR cache: {}", e);
+        }
+    }
 
     for pr in &prs {
         // State filtering
