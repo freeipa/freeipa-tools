@@ -311,15 +311,17 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
         .map(|t| (t.offline, t.db.as_ref().map(|d| d.pending_count()).unwrap_or(0)))
         .unwrap_or((false, 0));
 
-    let help_text = if offline_bar {
-        format!(
-            "[OFFLINE | {} queued | s:Sync]  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  j/↓:Down  k/↑:Up  Enter:Actions",
-            queued
-        )
+    let keys = "  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  j/↓:Down  k/↑:Up  Enter:Actions";
+    let help_styled: StyledString = if offline_bar {
+        let offline_tag = format!("[OFFLINE | {} queued | s:Sync]", queued);
+        let yellow = Style::from(Color::Light(BaseColor::Yellow));
+        let mut s = StyledString::styled(offline_tag, yellow);
+        s.append_plain(keys);
+        s
     } else {
-        " a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  j/↓:Down  k/↑:Up  Enter:Actions".to_string()
+        StyledString::plain(format!(" {}", keys.trim_start()))
     };
-    let help = TextView::new(help_text);
+    let help = TextView::new(help_styled);
 
     let layout = LinearLayout::vertical()
         .child(help)
