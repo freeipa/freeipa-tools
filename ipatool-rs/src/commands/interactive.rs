@@ -4,6 +4,7 @@ use cursive::{
     theme::{BaseColor, Color, ColorStyle, Effect, Style},
     traits::*,
     utils::markup::StyledString,
+    view::scroll::Scroller,
     views::{Checkbox, Dialog, EditView, LinearLayout, NamedView, OnEventView, Panel, ScrollView, SelectView, TextArea, TextView},
     Cursive,
 };
@@ -293,6 +294,19 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
             {
                 cb(s);
             }
+        })
+        // d/u: scroll the right detail pane down/up without moving the PR selection.
+        .on_event('d', |s| {
+            s.call_on_name("pr_detail_scroll", |v: &mut ScrollView<NamedView<TextView>>| {
+                let cur = v.get_scroller().content_viewport().top();
+                v.set_offset(cursive::Vec2::new(0, cur + 5));
+            });
+        })
+        .on_event('u', |s| {
+            s.call_on_name("pr_detail_scroll", |v: &mut ScrollView<NamedView<TextView>>| {
+                let cur = v.get_scroller().content_viewport().top();
+                v.set_offset(cursive::Vec2::new(0, cur.saturating_sub(5)));
+            });
         });
 
     let left_panel = Panel::new(select_with_keys.full_height())
@@ -301,7 +315,9 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
 
     let initial_detail = prs.first().map(pr_summary).unwrap_or_else(StyledString::new);
     let right_panel = Panel::new(
-        ScrollView::new(TextView::new(initial_detail).with_name("pr_detail")).full_screen(),
+        ScrollView::new(TextView::new(initial_detail).with_name("pr_detail"))
+            .with_name("pr_detail_scroll")
+            .full_screen(),
     )
     .title("Details")
     .full_width();
@@ -311,7 +327,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
         .map(|t| (t.offline, t.db.as_ref().map(|d| d.pending_count()).unwrap_or(0)))
         .unwrap_or((false, 0));
 
-    let keys = "  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  j/↓:Down  k/↑:Up  Enter:Actions";
+    let keys = "  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  j/↓:Down  k/↑:Up  d/u:Scroll  Enter:Actions";
     let help_styled: StyledString = if offline_bar {
         let offline_tag = format!("[OFFLINE | {} queued | s:Sync]", queued);
         let yellow = Style::from(Color::Light(BaseColor::Yellow));
