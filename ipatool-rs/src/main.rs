@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod db;
 mod git;
+mod md_render;
 mod output;
 mod patch;
 mod tui_keys;
