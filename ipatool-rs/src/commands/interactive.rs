@@ -1,7 +1,7 @@
 use anyhow::Result;
 use cursive::{
     reexports::enumset::EnumSet,
-    theme::{BaseColor, Color, ColorStyle, Effect, PaletteColor, Style},
+    theme::{BaseColor, Color, ColorStyle, Effect, Style},
     traits::*,
     utils::markup::StyledString,
     views::{Checkbox, Dialog, EditView, LinearLayout, NamedView, OnEventView, Panel, ScrollView, SelectView, TextArea, TextView},
@@ -90,7 +90,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
     let db = ctx.db.clone();
 
     let mut siv = cursive::crossterm();
-    apply_theme(&mut siv);
+    ctx.tui_style.apply(&mut siv);
 
     // Initialise user_data so the resize callback can always read it.
     siv.set_user_data(TuiState {
@@ -1969,27 +1969,3 @@ fn truncate(s: &str, max_chars: usize) -> String {
     }
 }
 
-fn apply_theme(siv: &mut Cursive) {
-    use cursive::theme::{BorderStyle, Theme};
-    let mut theme = Theme::default();
-    theme.shadow = false;
-    theme.borders = BorderStyle::Simple;
-
-    // Inherit the terminal's own foreground/background so the TUI works
-    // correctly on both dark-background and light-background terminals.
-    let td = Color::TerminalDefault;
-    theme.palette[PaletteColor::Background] = td;
-    theme.palette[PaletteColor::View] = td;
-    theme.palette[PaletteColor::Primary] = td;
-    theme.palette[PaletteColor::Secondary] = td;
-    theme.palette[PaletteColor::TitlePrimary] = td;
-    theme.palette[PaletteColor::TitleSecondary] = td;
-
-    // Default Highlight is Dark(Red); make both focused and inactive scrollbars
-    // the same blue so they look consistent across panes.
-    let blue = Color::Dark(BaseColor::Blue);
-    theme.palette[PaletteColor::Highlight] = blue;
-    theme.palette[PaletteColor::HighlightInactive] = blue;
-
-    siv.set_theme(theme);
-}
