@@ -212,6 +212,7 @@ pub struct Ctx {
     pub offline: bool,
     pub db: Option<Arc<crate::db::Database>>,
     pub tui_style: crate::tui_style::TuiStyle,
+    pub tui_keys: crate::tui_keys::TuiKeys,
 }
 
 #[derive(Debug, Default, Clone)]
