@@ -5,6 +5,7 @@ mod db;
 mod git;
 mod output;
 mod patch;
+mod tui_keys;
 mod tui_style;
 
 use anyhow::Result;
@@ -357,6 +358,9 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
     let style_path = tui_style::style_config_path(&cli.config);
     let tui_style = tui_style::TuiStyle::load_or_save_default(&style_path);
 
+    let keys_path = tui_keys::keys_config_path(&cli.config);
+    let tui_keys = tui_keys::TuiKeys::load_or_save_default(&keys_path);
+
     Ok(Ctx {
         config,
         pagure,
@@ -375,6 +379,7 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         offline: cli.offline,
         db,
         tui_style,
+        tui_keys,
     })
 }
 

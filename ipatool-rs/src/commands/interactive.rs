@@ -11,6 +11,7 @@ use cursive::{
 use std::{collections::HashMap, sync::Arc};
 
 use crate::api::github::{GitHubClient, GitHubComment, GitHubFile, GitHubLabel, GitHubPR, GitHubReviewComment};
+use crate::tui_keys::TuiKeys;
 use super::Ctx;
 
 // ─── Persistent TUI state (survives layer pops on resize) ─────────────────────
@@ -49,6 +50,7 @@ struct TuiState {
     pending_action: Option<PendingTuiAction>,
     /// The PR state filter in use ("open", "closed", "all").
     state: String,
+    tui_keys: TuiKeys,
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -97,9 +99,10 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
     siv.set_user_data(TuiState {
         gh: None, prs: None, review: None, offline, db: db.clone(), pending_action: None,
         state: state.to_string(),
+        tui_keys: ctx.tui_keys.clone(),
     });
 
-    siv.add_global_callback('q', |s| s.quit());
+    siv.add_global_callback(ctx.tui_keys.quit, |s| s.quit());
 
     // Rebuild the pane layout whenever the terminal is resized.
     siv.add_global_callback(cursive::event::Event::WindowResize, |s| {
@@ -203,11 +206,11 @@ fn compute_left_width(screen_width: usize) -> usize {
 }
 
 fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) {
-    // Preserve offline/db/state from existing user_data (set during run()) or use defaults.
-    let (offline, db, current_state) = siv
+    // Preserve offline/db/state/keys from existing user_data (set during run()) or use defaults.
+    let (offline, db, current_state, tui_keys) = siv
         .user_data::<TuiState>()
-        .map(|t| (t.offline, t.db.clone(), t.state.clone()))
-        .unwrap_or((false, None, "open".to_string()));
+        .map(|t| (t.offline, t.db.clone(), t.state.clone(), t.tui_keys.clone()))
+        .unwrap_or_else(|| (false, None, "open".to_string(), TuiKeys::default()));
 
     // Persist the current dataset so the resize callback can rebuild.
     siv.set_user_data(TuiState {
@@ -218,6 +221,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
         db,
         pending_action: None,
         state: current_state,
+        tui_keys: tui_keys.clone(),
     });
 
     let left_width = compute_left_width(siv.screen_size().x);
@@ -249,60 +253,72 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
         show_action_dialog(s, Arc::clone(&gh_enter), pr.clone());
     });
 
+    // Extract key copies (char: Copy) for use in the closure chain below.
+    let key_ack         = tui_keys.ack;
+    let key_reject      = tui_keys.reject;
+    let key_browser     = tui_keys.browser;
+    let key_refresh     = tui_keys.refresh;
+    let key_review      = tui_keys.review;
+    let key_sync        = tui_keys.sync;
+    let key_down        = tui_keys.down;
+    let key_up          = tui_keys.up;
+    let key_scroll_down = tui_keys.scroll_down;
+    let key_scroll_up   = tui_keys.scroll_up;
+
     let select_with_keys = OnEventView::new(ScrollView::new(select.with_name("pr_list")))
-        .on_event('a', move |s| {
+        .on_event(key_ack, move |s| {
             if let Some(pr) = selected_pr(s) {
                 show_ack_dialog(s, Arc::clone(&gh_a), pr.number);
             }
         })
-        .on_event('x', move |s| {
+        .on_event(key_reject, move |s| {
             if let Some(pr) = selected_pr(s) {
                 show_reject_dialog(s, Arc::clone(&gh_x), pr.number);
             }
         })
-        .on_event('b', |s| {
+        .on_event(key_browser, |s| {
             if let Some(pr) = selected_pr(s) {
                 open_browser(&pr.html_url);
             }
         })
-        .on_event('r', move |s| {
+        .on_event(key_refresh, move |s| {
             refresh_list(s, Arc::clone(&gh_r));
         })
-        .on_event('c', move |s| {
+        .on_event(key_review, move |s| {
             if let Some(pr) = selected_pr(s) {
                 show_review_view(s, Arc::clone(&gh_c), pr);
             }
         })
-        .on_event('s', move |s| {
+        .on_event(key_sync, move |s| {
             let _ = &gh_s; // keep Arc alive
             sync_queued_actions(s);
         })
-        // j/k: call select_down/up and then invoke the returned EventResult
+        // down/up: call select_down/up and then invoke the returned EventResult
         // callback.  That callback is the same one the arrow-key path fires,
         // which triggers both the internal scroll update and on_select (keeping
         // the selected row visible and refreshing the right pane).
-        .on_event('j', |s| {
+        .on_event(key_down, |s| {
             if let Some(cb) = s
                 .call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.select_down(1))
             {
                 cb(s);
             }
         })
-        .on_event('k', |s| {
+        .on_event(key_up, |s| {
             if let Some(cb) = s
                 .call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.select_up(1))
             {
                 cb(s);
             }
         })
-        // d/u: scroll the right detail pane down/up without moving the PR selection.
-        .on_event('d', |s| {
+        // scroll_down/scroll_up: scroll the right detail pane without moving the PR selection.
+        .on_event(key_scroll_down, |s| {
             s.call_on_name("pr_detail_scroll", |v: &mut ScrollView<NamedView<TextView>>| {
                 let cur = v.get_scroller().content_viewport().top();
                 v.set_offset(cursive::Vec2::new(0, cur + 5));
             });
         })
-        .on_event('u', |s| {
+        .on_event(key_scroll_up, |s| {
             s.call_on_name("pr_detail_scroll", |v: &mut ScrollView<NamedView<TextView>>| {
                 let cur = v.get_scroller().content_viewport().top();
                 v.set_offset(cursive::Vec2::new(0, cur.saturating_sub(5)));
@@ -327,12 +343,19 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
         .map(|t| (t.offline, t.db.as_ref().map(|d| d.pending_count()).unwrap_or(0)))
         .unwrap_or((false, 0));
 
-    let keys = "  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  j/↓:Down  k/↑:Up  d/u:Scroll  Enter:Actions";
+    let keys = format!(
+        "  {}:ACK  {}:Reject  {}:Review  {}:Browser  {}:Refresh  {}:Quit  \
+         {}/↓:Down  {}/↑:Up  {}/{}:Scroll  Enter:Actions",
+        tui_keys.ack, tui_keys.reject, tui_keys.review, tui_keys.browser,
+        tui_keys.refresh, tui_keys.quit,
+        tui_keys.down, tui_keys.up,
+        tui_keys.scroll_down, tui_keys.scroll_up,
+    );
     let help_styled: StyledString = if offline_bar {
-        let offline_tag = format!("[OFFLINE | {} queued | s:Sync]", queued);
+        let offline_tag = format!("[OFFLINE | {} queued | {}:Sync]", queued, tui_keys.sync);
         let yellow = Style::from(Color::Light(BaseColor::Yellow));
         let mut s = StyledString::styled(offline_tag, yellow);
-        s.append_plain(keys);
+        s.append_plain(&keys);
         s
     } else {
         StyledString::plain(format!(" {}", keys.trim_start()))
@@ -1022,6 +1045,15 @@ fn assemble_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, focus_idx: us
         None => return,
     };
 
+    let tui_keys = siv
+        .user_data::<TuiState>()
+        .map(|s| s.tui_keys.clone())
+        .unwrap_or_default();
+    let key_comment = tui_keys.review_comment;
+    let key_down    = tui_keys.review_down;
+    let key_up      = tui_keys.review_up;
+    let key_close   = tui_keys.review_close;
+
     let pr = session.pr.clone();
     let items = session.items.clone();
     let pr_number = pr.number;
@@ -1045,7 +1077,7 @@ fn assemble_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, focus_idx: us
         ScrollView::new(select.with_name("review_list")).with_name("review_scroll");
 
     let view = OnEventView::new(review_scroll)
-        .on_event('c', move |s| {
+        .on_event(key_comment, move |s| {
             let result = s
                 .call_on_name("review_list", |v: &mut SelectView<ReviewItem>| {
                     let idx = v.selected_id().unwrap_or(0);
@@ -1081,28 +1113,31 @@ fn assemble_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, focus_idx: us
                 result.1,
             );
         })
-        .on_event('j', |s| {
+        .on_event(key_down, |s| {
             if let Some(cb) =
                 s.call_on_name("review_list", |v: &mut SelectView<ReviewItem>| v.select_down(1))
             {
                 cb(s);
             }
         })
-        .on_event('k', |s| {
+        .on_event(key_up, |s| {
             if let Some(cb) =
                 s.call_on_name("review_list", |v: &mut SelectView<ReviewItem>| v.select_up(1))
             {
                 cb(s);
             }
         })
-        .on_event('q', |s| {
+        .on_event(key_close, |s| {
             s.pop_layer();
         })
         .on_event(cursive::event::Key::Esc, |s| {
             s.pop_layer();
         });
 
-    let help = TextView::new(" c/Enter:Comment on line  j/↓:Down  k/↑:Up  q/Esc:Close");
+    let help = TextView::new(format!(
+        " {}/Enter:Comment on line  {}/↓:Down  {}/↑:Up  {}/Esc:Close",
+        tui_keys.review_comment, tui_keys.review_down, tui_keys.review_up, tui_keys.review_close,
+    ));
 
     let layout = LinearLayout::vertical()
         .child(help)
@@ -1304,6 +1339,15 @@ fn open_review_comment_form(
 // ─── Action dialog (Enter key) ────────────────────────────────────────────────
 
 fn show_action_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
+    let tui_keys = siv
+        .user_data::<TuiState>()
+        .map(|s| s.tui_keys.clone())
+        .unwrap_or_default();
+    let key_review   = tui_keys.action_review;
+    let key_labels   = tui_keys.action_labels;
+    let key_push     = tui_keys.action_push;
+    let key_backport = tui_keys.action_backport;
+
     let pr_number = pr.number;
     let pr_title = truncate(&pr.title, 50);
     let pr_url = pr.html_url.clone();
@@ -1318,47 +1362,47 @@ fn show_action_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
     // Review is always first so it gets default focus when the dialog opens.
     let gh_v = Arc::clone(&gh);
     let pr_v = pr.clone();
-    dlg = dlg.button("Review (v)", move |s| {
+    dlg = dlg.button(&format!("Review ({})", key_review), move |s| {
         s.pop_layer();
         show_review_view(s, Arc::clone(&gh_v), pr_v.clone());
     });
 
     let gh_l = Arc::clone(&gh);
     let pr_l = pr.clone();
-    dlg = dlg.button("Labels (l)", move |s| {
+    dlg = dlg.button(&format!("Labels ({})", key_labels), move |s| {
         s.pop_layer();
         show_label_editor(s, Arc::clone(&gh_l), pr_l.clone());
     });
 
     if !is_closed && !is_rejected && !is_acked {
         let gh_a = Arc::clone(&gh);
-        dlg = dlg.button("ACK (a)", move |s| {
+        dlg = dlg.button(&format!("ACK ({})", tui_keys.ack), move |s| {
             s.pop_layer();
             show_ack_dialog(s, Arc::clone(&gh_a), pr_number);
         });
     }
     if !is_closed && !is_rejected {
         let gh_x = Arc::clone(&gh);
-        dlg = dlg.button("Reject (x)", move |s| {
+        dlg = dlg.button(&format!("Reject ({})", tui_keys.reject), move |s| {
             s.pop_layer();
             show_reject_dialog(s, Arc::clone(&gh_x), pr_number);
         });
     }
     if !is_closed && is_acked && !is_rejected && !is_pushed {
-        dlg = dlg.button("Push (p)", move |s| {
+        dlg = dlg.button(&format!("Push ({})", key_push), move |s| {
             s.pop_layer();
             show_push_dialog(s, pr_number);
         });
     }
     if is_acked && !is_rejected {
-        dlg = dlg.button("Backport (B)", move |s| {
+        dlg = dlg.button(&format!("Backport ({})", key_backport), move |s| {
             s.pop_layer();
             show_backport_dialog(s, pr_number);
         });
     }
 
     let dlg = dlg
-        .button("Browser (b)", move |_s| open_browser(&pr_url))
+        .button(&format!("Browser ({})", tui_keys.browser), move |_s| open_browser(&pr_url))
         .button("Close (Esc)", |s| {
             s.pop_layer();
         });
@@ -1371,21 +1415,21 @@ fn show_action_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
         .on_event(cursive::event::Key::Esc, |s| {
             s.pop_layer();
         })
-        .on_event('v', move |s| {
+        .on_event(key_review, move |s| {
             s.pop_layer();
             show_review_view(s, Arc::clone(&gh_v2), pr_v2.clone());
         })
-        .on_event('l', move |s| {
+        .on_event(key_labels, move |s| {
             s.pop_layer();
             show_label_editor(s, Arc::clone(&gh_l2), pr_l2.clone());
         })
-        .on_event('p', move |s| {
+        .on_event(key_push, move |s| {
             if !is_closed && is_acked && !is_rejected && !is_pushed {
                 s.pop_layer();
                 show_push_dialog(s, pr_number);
             }
         })
-        .on_event('B', move |s| {
+        .on_event(key_backport, move |s| {
             if is_acked && !is_rejected {
                 s.pop_layer();
                 show_backport_dialog(s, pr_number);
@@ -1420,6 +1464,11 @@ fn build_label_editor_layer(
     pr: GitHubPR,
     repo_labels: Vec<GitHubLabel>,
 ) {
+    let key_quit = siv
+        .user_data::<TuiState>()
+        .map(|s| s.tui_keys.quit)
+        .unwrap_or('q');
+
     let left_width = compute_left_width(siv.screen_size().x);
     let pr_current: Vec<String> = pr.labels.iter().map(|l| l.name.clone()).collect();
     let pr_number = pr.number;
@@ -1539,7 +1588,7 @@ fn build_label_editor_layer(
         })
         .fixed_width(left_width);
 
-    let help = TextView::new(" Space:Toggle  Tab:Next  q/Esc:Cancel");
+    let help = TextView::new(format!(" Space:Toggle  Tab:Next  {}/Esc:Cancel", key_quit));
 
     let layout = LinearLayout::vertical()
         .child(help)
@@ -1554,7 +1603,7 @@ fn build_label_editor_layer(
         .on_event(cursive::event::Key::Esc, |s| {
             s.pop_layer();
         })
-        .on_event('q', |s| {
+        .on_event(key_quit, |s| {
             s.pop_layer();
         });
 
