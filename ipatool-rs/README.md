@@ -60,8 +60,6 @@ pagure-repository: freeipa
 # Required permissions: assign/change status/comment/create/subscribe/update
 # issues; update custom fields; update milestone.
 pagure-token: "0123456789abcdef0123456789abcdef01234567"
-# Pagure does not expose user info via token, so set it explicitly.
-username: your-pagure-login
 
 # ── Forgejo (alternative issue tracker) ──────────────────────────────────────
 
@@ -371,7 +369,7 @@ ipatool --offline tui        # use cached data (no network)
 #### Layout
 
 ```
-  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  j/↓:Down  k/↑:Up  d/u:Scroll  Enter:Actions
+  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  Tab:Focus  j/↓:Down  k/↑:Up  d/u:Scroll
 ┌── 47 PRs ────────────────────┐┌── Details ──────────────────────────────────┐
 │ #8309 ○ Fix LDAP timeout  …  ││ PR #8309: Fix LDAP connection timeout        │
 │ #8308 ○ Add KDC support   …  ││                                              │
@@ -391,9 +389,20 @@ ipatool --offline tui        # use cached data (no network)
 │                              ││   Fix the LDAP connection timeout by …       │
 │                              ││                                              │
 │                              ││ Comments (2):                                │
-│                              ││   @reviewer [2024-03-01]:                    │
+│                              ││ @reviewer [2024-03-01]:                      │
 │                              ││   LGTM, one nit below                        │
+│                              ││ ────────────────────────────────────────     │
+│                              ││ @author [2024-03-02]:                        │
+│                              ││   Thanks, fixed in the next revision         │
 └──────────────────────────────┘└─────────────────────────────────────────────┘
+```
+
+When the detail pane has focus (`Tab` to toggle), the help bar shows `[Detail]`
+in cyan and `j`/`↓`/`k`/`↑` scroll the detail pane instead of moving the PR
+selection:
+
+```
+  [Detail]  a:ACK  x:Reject  …  Tab:Focus  j/↓:Scroll  k/↑:Scroll  d/u:Scroll
 ```
 
 In offline mode the help bar shows instead:
@@ -405,8 +414,10 @@ The offline tag is shown in yellow.
 The left pane colour-codes PRs: green = acked, red = rejected/closed,
 default = pending.  The right pane refreshes in the background as you move
 between PRs.  The right pane shows the full PR description and all issue
-comments, both rendered as Markdown.  Use `d`/`u` to scroll the detail pane
-without changing the selected PR.
+comments, both rendered as Markdown (blockquotes, code blocks, bold/italic,
+links, lists).  Comments are separated by a horizontal rule; the author/date
+header is flush-left and the body is indented by two spaces.  Use `d`/`u` or
+`Tab` then `j`/`k` to scroll the detail pane without changing the selected PR.
 
 #### Default keyboard shortcuts
 
@@ -417,10 +428,11 @@ All keys listed below are the defaults.  Every key can be remapped in
 
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Move selection down |
-| `k` / `↑` | Move selection up |
-| `d` | Scroll detail pane down (5 lines) |
-| `u` | Scroll detail pane up (5 lines) |
+| `Tab` | Toggle keyboard focus between the PR list (left) and detail pane (right) |
+| `j` / `↓` | Move PR selection down (left focus) or scroll detail pane down (right focus) |
+| `k` / `↑` | Move PR selection up (left focus) or scroll detail pane up (right focus) |
+| `d` | Scroll detail pane down 5 lines (works from either focus) |
+| `u` | Scroll detail pane up 5 lines (works from either focus) |
 | `Enter` | Open action menu for selected PR |
 | `a` | ACK selected PR |
 | `x` | Reject selected PR |
