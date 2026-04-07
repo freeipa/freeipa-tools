@@ -1,0 +1,108 @@
+use anyhow::{bail, Result};
+use regex::Regex;
+
+use super::Ctx;
+use crate::patch::delete_patches;
+
+pub fn run(
+    ctx: &mut Ctx,
+    pr_id: u64,
+    reviewer_args: &[String],
+    backport_branches: &[String],
+    autobackport: bool,
+) -> Result<()> {
+    let Some(gh) = ctx.github.clone() else {
+        bail!("GitHub is not configured (gh-token / gh-repo missing)");
+    };
+
+    let patchdir = ctx.config.patchdir_expanded();
+    let pr = gh.get_pr(pr_id)?;
+    let issue = gh.get_issue(pr_id)?;
+    let labels = issue.label_names();
+
+    if issue.is_closed() {
+        bail!("Pull request is already closed");
+    }
+    if !labels.contains(&"ack".to_string()) {
+        bail!("Pull request is not ACKed");
+    }
+    if labels.contains(&"rejected".to_string()) {
+        bail!("Pull request is rejected");
+    }
+    if labels.contains(&"pushed".to_string()) {
+        bail!("Pull request was already pushed");
+    }
+    if !pr.mergeable.unwrap_or(true) {
+        bail!("Pull request is not mergeable");
+    }
+
+    // Check CI statuses
+    let statuses = gh.most_recent_statuses(&pr.head.sha)?;
+    let states: Vec<&String> = statuses.values().collect();
+    if states.iter().any(|s| *s == "error" || *s == "failure") {
+        bail!("Pull request failed CI test(s)");
+    }
+    if states.iter().any(|s| *s == "pending") {
+        bail!("CI has not completed testing the pull request yet");
+    }
+
+    // Download patches from PR
+    super::backport::download_pr_patches(ctx, &gh, &pr, &patchdir)?;
+
+    // Set target branch from PR base
+    let base_branch = pr.base.ref_name.clone();
+
+    // Run the push command
+    let push_result = super::push::run(
+        ctx,
+        &[],
+        &[base_branch],
+        reviewer_args,
+        autobackport,
+        backport_branches,
+    );
+
+    // Post-push actions
+    let pushed = ctx
+        .push_info
+        .as_ref()
+        .map(|i| i.pushed)
+        .unwrap_or(false);
+
+    if !ctx.dry_run && pushed {
+        let push_info = ctx.push_info.clone().unwrap_or_default();
+
+        println!("Adding label 'pushed'");
+        if let Err(e) = gh.add_labels(pr_id, &["pushed"]) {
+            eprintln!("Warning: failed to add 'pushed' label: {}", e);
+        }
+
+        if let Err(e) = gh.create_comment(pr_id, &push_info.pagure_comment) {
+            eprintln!("Warning: failed to create push comment: {}", e);
+        }
+
+        println!("Closing pull request {}", pr_id);
+        if let Err(e) = gh.close_issue(pr_id) {
+            eprintln!("Warning: failed to close PR: {}", e);
+        }
+
+        // Handle backports
+        let mut bp_branches: Vec<String> = backport_branches.to_vec();
+        if autobackport {
+            let pat = Regex::new(r"^ipa-\d+-\d+$").unwrap();
+            for label in &labels {
+                if pat.is_match(label) && !bp_branches.contains(label) {
+                    bp_branches.push(label.clone());
+                }
+            }
+        }
+
+        if !bp_branches.is_empty() {
+            super::backport::run_backport(ctx, &bp_branches, &gh, &pr)?;
+        }
+    }
+
+    delete_patches(&patchdir);
+
+    push_result
+}
