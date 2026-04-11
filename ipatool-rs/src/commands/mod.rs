@@ -232,10 +232,11 @@ impl Ctx {
                 Arc::clone(pagure),
                 number,
             )))
-        } else { self.forgejo.as_ref().map(|forgejo| Ticket::Forgejo(ForgejoTicket::new(
-                Arc::clone(forgejo),
-                number,
-            ))) }
+        } else {
+            self.forgejo
+                .as_ref()
+                .map(|forgejo| Ticket::Forgejo(ForgejoTicket::new(Arc::clone(forgejo), number)))
+        }
     }
 
     pub fn has_tracker(&self) -> bool {

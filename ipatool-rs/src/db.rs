@@ -41,6 +41,10 @@ pub struct CachedPrDetails {
     /// deserialize without error.
     #[serde(default)]
     pub commits: Vec<GitHubCommit>,
+    /// Job result URLs keyed by CI context name (same keys as `statuses`).
+    /// Added later; empty on old cache entries.
+    #[serde(default)]
+    pub status_urls: HashMap<String, String>,
 }
 
 // ── Queued mutations ──────────────────────────────────────────────────────────
@@ -400,6 +404,7 @@ mod tests {
                 patch: Some("@@ -1 +1 @@\n-old\n+new".to_string()),
             }],
             commits: vec![],
+            status_urls: HashMap::new(),
         }
     }
 

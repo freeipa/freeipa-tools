@@ -20,6 +20,7 @@ browser:     b
 refresh:     r
 review:      c
 sync:        s
+inspect:     i
 down:        j
 up:          k
 scroll-down: d
@@ -51,6 +52,7 @@ pub struct TuiKeys {
     pub refresh: char,
     pub review: char,
     pub sync: char,
+    pub inspect: char,
     pub down: char,
     pub up: char,
     pub scroll_down: char,
@@ -77,6 +79,7 @@ impl Default for TuiKeys {
             refresh: 'r',
             review: 'c',
             sync: 's',
+            inspect: 'i',
             down: 'j',
             up: 'k',
             scroll_down: 'd',
@@ -188,6 +191,7 @@ mod tests {
         assert_eq!(parsed.refresh, defaults.refresh);
         assert_eq!(parsed.review, defaults.review);
         assert_eq!(parsed.sync, defaults.sync);
+        assert_eq!(parsed.inspect, defaults.inspect);
         assert_eq!(parsed.down, defaults.down);
         assert_eq!(parsed.up, defaults.up);
         assert_eq!(parsed.scroll_down, defaults.scroll_down);

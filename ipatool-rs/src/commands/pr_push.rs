@@ -38,11 +38,13 @@ pub fn run(
 
     // Check CI statuses
     let statuses = gh.most_recent_statuses(&pr.head.sha)?;
-    let states: Vec<&String> = statuses.values().collect();
-    if states.iter().any(|s| *s == "error" || *s == "failure") {
+    if statuses
+        .values()
+        .any(|j| j.state == "error" || j.state == "failure")
+    {
         bail!("Pull request failed CI test(s)");
     }
-    if states.iter().any(|s| *s == "pending") {
+    if statuses.values().any(|j| j.state == "pending") {
         bail!("CI has not completed testing the pull request yet");
     }
 

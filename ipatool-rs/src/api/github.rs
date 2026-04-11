@@ -101,7 +101,6 @@ impl GitHubPR {
     pub fn is_merged(&self) -> bool {
         self.merged.unwrap_or(false)
     }
-
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -137,10 +136,22 @@ pub struct GitHubCommit {
     pub parents: Vec<ParentRef>,
 }
 
+/// Per-context CI job status, provider-agnostic.
+/// GitHub populates `url` from `target_url`; other providers map their
+/// equivalent field here so the rest of the code stays provider-independent.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct CiJobStatus {
+    pub state: String,
+    pub url: Option<String>,
+}
+
+/// Raw GitHub commit-status entry (one of potentially many per context).
 #[derive(Debug, Deserialize, Clone)]
 pub struct CommitStatus {
     pub state: String,
     pub context: String,
+    #[serde(default)]
+    pub target_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -331,12 +342,15 @@ impl GitHubClient {
         Ok(statuses)
     }
 
-    /// Get the most recent status per context
-    pub fn most_recent_statuses(&self, sha: &str) -> Result<HashMap<String, String>> {
+    /// Get the most recent status per context, including the job result URL.
+    pub fn most_recent_statuses(&self, sha: &str) -> Result<HashMap<String, CiJobStatus>> {
         let statuses = self.get_commit_statuses(sha)?;
-        let mut result = HashMap::new();
+        let mut result: HashMap<String, CiJobStatus> = HashMap::new();
         for s in statuses {
-            result.entry(s.context).or_insert(s.state);
+            result.entry(s.context).or_insert(CiJobStatus {
+                state: s.state,
+                url: s.target_url,
+            });
         }
         Ok(result)
     }

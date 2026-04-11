@@ -29,11 +29,13 @@ pub fn run_backport_cmd(ctx: &mut Ctx, pr_id: u64, branches: &[String]) -> Resul
 
     // Check CI
     let statuses = gh.most_recent_statuses(&pr.head.sha)?;
-    let states: Vec<&String> = statuses.values().collect();
-    if states.iter().any(|s| *s == "error" || *s == "failure") {
+    if statuses
+        .values()
+        .any(|j| j.state == "error" || j.state == "failure")
+    {
         bail!("Pull request failed CI test(s)");
     }
-    if states.iter().any(|s| *s == "pending") {
+    if statuses.values().any(|j| j.state == "pending") {
         bail!("CI has not completed testing the pull request yet");
     }
 
