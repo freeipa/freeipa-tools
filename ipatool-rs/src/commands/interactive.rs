@@ -17,10 +17,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use super::pr_client::PrClient;
 use super::Ctx;
 use crate::api::github::{
-    CiJobStatus, GitHubClient, GitHubComment, GitHubFile, GitHubLabel, GitHubPR,
-    GitHubReviewComment,
+    CiJobStatus, GitHubComment, GitHubFile, GitHubLabel, GitHubPR, GitHubReviewComment,
 };
 use crate::api::pagure::PagureClient;
 use crate::tui_keys::TuiKeys;
@@ -53,7 +53,7 @@ enum PendingTuiAction {
 
 #[derive(Clone)]
 struct TuiState {
-    gh: Option<Arc<GitHubClient>>,
+    pr_client: Option<Arc<PrClient>>,
     prs: Option<Vec<GitHubPR>>,
     review: Option<ReviewSession>,
     offline: bool,
@@ -61,6 +61,9 @@ struct TuiState {
     pending_action: Option<PendingTuiAction>,
     /// The PR state filter in use ("open", "closed", "all").
     state: String,
+    /// Active profile name (empty string for the default profile).
+    /// Used as the cache namespace so different profiles don't share cached PR data.
+    profile: String,
     tui_keys: TuiKeys,
     /// Whether keyboard focus is on the right (detail) pane.
     focus_right: bool,
@@ -109,10 +112,7 @@ pub fn run(ctx: &mut Ctx, state: &str) -> Result<()> {
 /// Single TUI session.  Returns `None` on normal quit, or the pending action
 /// the user triggered so the caller can execute it in the terminal.
 fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
-    let gh = ctx
-        .github
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("GitHub is not configured (gh-token / gh-repo missing)"))?;
+    let gh = ctx.pr_client_or_err()?.clone();
 
     let offline = ctx.offline;
     let db = ctx.db.clone();
@@ -122,13 +122,14 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
 
     // Initialise user_data so the resize callback can always read it.
     siv.set_user_data(TuiState {
-        gh: None,
+        pr_client: None,
         prs: None,
         review: None,
         offline,
         db: db.clone(),
         pending_action: None,
         state: state.to_string(),
+        profile: ctx.profile.clone(),
         tui_keys: ctx.tui_keys.clone(),
         focus_right: false,
         ci_statuses: HashMap::new(),
@@ -141,7 +142,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
     siv.add_global_callback(cursive::event::Event::WindowResize, |s| {
         let state = s.user_data::<TuiState>().cloned();
         if let Some(TuiState {
-            gh: Some(gh),
+            pr_client: Some(gh),
             prs: Some(prs),
             ..
         }) = state
@@ -155,6 +156,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
     });
 
     let state = state.to_string();
+    let profile = ctx.profile.clone();
     let gh2 = Arc::clone(&gh);
 
     // In online mode, if the cache already holds PRs for the requested state,
@@ -163,7 +165,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
     // arrives.  On network error the cached view remains untouched.
     let cached_prs = if !offline {
         db.as_ref()
-            .and_then(|d| d.load_prs(crate::db::Provider::GitHub, &state).ok())
+            .and_then(|d| d.load_prs(&profile, &state).ok())
             .filter(|v| !v.is_empty())
     } else {
         None
@@ -173,10 +175,11 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
         build_two_pane(&mut siv, Arc::clone(&gh), initial_prs);
         let cb = siv.cb_sink().clone();
         let db2 = db.clone();
+        let profile2 = profile.clone();
         std::thread::spawn(move || {
             if let Ok(prs) = gh2.list_prs(&state) {
                 if let Some(ref d) = db2 {
-                    if let Err(e) = d.cache_prs(crate::db::Provider::GitHub, &prs) {
+                    if let Err(e) = d.cache_prs(&profile2, &prs) {
                         eprintln!("Warning: failed to update PR cache: {}", e);
                     }
                 }
@@ -199,7 +202,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
                 if offline {
                     match &db {
                         Some(db) => {
-                            let prs = db.load_prs(crate::db::Provider::GitHub, &state)?;
+                            let prs = db.load_prs(&profile, &state)?;
                             if prs.is_empty() {
                                 Err(anyhow::anyhow!("No cached data available in offline mode."))
                             } else {
@@ -211,7 +214,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
                 } else {
                     let prs = gh2.list_prs(&state)?;
                     if let Some(ref db) = db {
-                        if let Err(e) = db.cache_prs(crate::db::Provider::GitHub, &prs) {
+                        if let Err(e) = db.cache_prs(&profile, &prs) {
                             eprintln!("Warning: failed to cache PRs: {}", e);
                         }
                     }
@@ -245,33 +248,43 @@ fn compute_left_width(screen_width: usize) -> usize {
     (screen_width * 2 / 5).clamp(35, 60)
 }
 
-fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) {
-    // Preserve offline/db/state/keys/focus/pagure from existing user_data (set during run()) or use defaults.
-    let (offline, db, current_state, tui_keys, focus_right, pagure) = siv
+fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<GitHubPR>) {
+    // Preserve offline/db/state/profile/keys/focus/pagure from existing user_data (set during run()) or use defaults.
+    let (offline, db, current_state, profile, tui_keys, focus_right, pagure) = siv
         .user_data::<TuiState>()
         .map(|t| {
             (
                 t.offline,
                 t.db.clone(),
                 t.state.clone(),
+                t.profile.clone(),
                 t.tui_keys.clone(),
                 t.focus_right,
                 t.pagure.clone(),
             )
         })
         .unwrap_or_else(|| {
-            (false, None, "open".to_string(), TuiKeys::default(), false, None)
+            (
+                false,
+                None,
+                "open".to_string(),
+                String::new(),
+                TuiKeys::default(),
+                false,
+                None,
+            )
         });
 
     // Persist the current dataset so the resize callback can rebuild.
     siv.set_user_data(TuiState {
-        gh: Some(Arc::clone(&gh)),
+        pr_client: Some(Arc::clone(&gh)),
         prs: Some(prs.clone()),
         review: None,
         offline,
         db,
         pending_action: None,
         state: current_state,
+        profile,
         tui_keys: tui_keys.clone(),
         focus_right,
         ci_statuses: HashMap::new(),
@@ -549,11 +562,11 @@ fn selected_pr(siv: &mut Cursive) -> Option<GitHubPR> {
 
 // ─── Refresh ─────────────────────────────────────────────────────────────────
 
-fn refresh_list(siv: &mut Cursive, gh: Arc<GitHubClient>) {
-    let (offline, db, state) = siv
+fn refresh_list(siv: &mut Cursive, gh: Arc<PrClient>) {
+    let (offline, db, state, profile) = siv
         .user_data::<TuiState>()
-        .map(|t| (t.offline, t.db.clone(), t.state.clone()))
-        .unwrap_or((false, None, "open".to_string()));
+        .map(|t| (t.offline, t.db.clone(), t.state.clone(), t.profile.clone()))
+        .unwrap_or((false, None, "open".to_string(), String::new()));
 
     siv.pop_layer();
     siv.add_layer(loading_dialog("Refreshing pull requests…"));
@@ -564,7 +577,7 @@ fn refresh_list(siv: &mut Cursive, gh: Arc<GitHubClient>) {
             if offline {
                 match &db {
                     Some(db) => {
-                        let prs = db.load_prs(crate::db::Provider::GitHub, &state)?;
+                        let prs = db.load_prs(&profile, &state)?;
                         if prs.is_empty() {
                             Err(anyhow::anyhow!("No cached data available in offline mode."))
                         } else {
@@ -576,7 +589,7 @@ fn refresh_list(siv: &mut Cursive, gh: Arc<GitHubClient>) {
             } else {
                 let prs = gh.list_prs(&state)?;
                 if let Some(ref db) = db {
-                    if let Err(e) = db.cache_prs(crate::db::Provider::GitHub, &prs) {
+                    if let Err(e) = db.cache_prs(&profile, &prs) {
                         eprintln!("Warning: failed to cache PRs: {}", e);
                     }
                 }
@@ -839,17 +852,17 @@ fn update_detail_full(siv: &mut Cursive, pr: &GitHubPR, details: PrDetails) {
     });
 }
 
-fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
-    let offline = siv
+fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
+    let (offline, profile) = siv
         .user_data::<TuiState>()
-        .map(|t| t.offline)
-        .unwrap_or(false);
+        .map(|t| (t.offline, t.profile.clone()))
+        .unwrap_or((false, String::new()));
     let db = siv.user_data::<TuiState>().and_then(|t| t.db.clone());
 
     if offline {
         // Serve from cache — no network call.
         if let Some(ref db) = db {
-            if let Ok(Some(cached)) = db.load_pr_details(crate::db::Provider::GitHub, pr.number) {
+            if let Ok(Some(cached)) = db.load_pr_details(&profile, pr.number) {
                 // Reassemble CiJobStatus from statuses + status_urls.
                 let statuses: HashMap<String, CiJobStatus> = cached
                     .statuses
@@ -910,8 +923,7 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: 
                 status_urls: cached_urls,
             };
             let updated_at = pr.updated_at.as_deref();
-            let _ =
-                db.cache_pr_details(crate::db::Provider::GitHub, pr_number, &cached, updated_at);
+            let _ = db.cache_pr_details(&profile, pr_number, &cached, updated_at);
         }
 
         let ci_statuses = statuses.clone();
@@ -1239,7 +1251,7 @@ fn review_item_label(item: &ReviewItem) -> StyledString {
     }
 }
 
-fn show_review_view(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
+fn show_review_view(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
     let offline = siv
         .user_data::<TuiState>()
         .map(|t| t.offline)
@@ -1275,7 +1287,7 @@ fn show_review_view(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
     });
 }
 
-fn build_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR, data: ReviewData) {
+fn build_review_layer(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR, data: ReviewData) {
     // Panel border = 2 chars; comment indent prefix "    " = 4 chars.
     let body_width = siv.screen_size().x.saturating_sub(6);
     let items = build_review_items(&data, body_width);
@@ -1294,7 +1306,7 @@ fn build_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR, da
 
 /// Build (or rebuild) the fullscreen review layer, optionally pre-scrolled to
 /// `focus_idx` (the SelectView row to show near the top).
-fn assemble_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, focus_idx: usize) {
+fn assemble_review_layer(siv: &mut Cursive, gh: Arc<PrClient>, focus_idx: usize) {
     let session = match siv.user_data::<TuiState>().and_then(|s| s.review.clone()) {
         Some(s) => s,
         None => return,
@@ -1423,7 +1435,10 @@ fn assemble_review_layer(siv: &mut Cursive, gh: Arc<GitHubClient>, focus_idx: us
 
 /// Rebuild the review layer (called after the comment form is dismissed).
 fn restore_review_layer(siv: &mut Cursive, focus_idx: usize) {
-    let gh = match siv.user_data::<TuiState>().and_then(|s| s.gh.clone()) {
+    let gh = match siv
+        .user_data::<TuiState>()
+        .and_then(|s| s.pr_client.clone())
+    {
         Some(g) => g,
         None => return,
     };
@@ -1434,7 +1449,7 @@ fn restore_review_layer(siv: &mut Cursive, focus_idx: usize) {
 /// context), comment form on the bottom.
 fn open_review_comment_form(
     siv: &mut Cursive,
-    gh: Arc<GitHubClient>,
+    gh: Arc<PrClient>,
     pr_number: u64,
     commit_id: String,
     focus_idx: usize,
@@ -1520,17 +1535,17 @@ fn open_review_comment_form(
                     );
                     return;
                 }
-                let offline = s
+                let (offline, provider) = s
                     .user_data::<TuiState>()
-                    .map(|t| t.offline)
-                    .unwrap_or(false);
+                    .map(|t| (t.offline, t.pr_client.as_ref().map(|p| p.provider()).unwrap_or(crate::db::Provider::GitHub)))
+                    .unwrap_or((false, crate::db::Provider::GitHub));
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 if offline {
                     s.pop_layer();
                     restore_review_layer(s, focus_post);
                     if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
-                            provider: crate::db::Provider::GitHub,
+                            provider,
                             action: crate::db::QueuedAction::PostReviewComment {
                                 pr_number,
                                 commit_id: commit_post.clone(),
@@ -1595,7 +1610,7 @@ fn open_review_comment_form(
 
 // ─── Action dialog (Enter key) ────────────────────────────────────────────────
 
-fn show_action_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
+fn show_action_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
     let tui_keys = siv
         .user_data::<TuiState>()
         .map(|s| s.tui_keys.clone())
@@ -1700,7 +1715,7 @@ fn show_action_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
 
 // ─── Label editor ────────────────────────────────────────────────────────────
 
-fn show_label_editor(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
+fn show_label_editor(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
     siv.add_layer(loading_dialog("Fetching labels…"));
     let cb = siv.cb_sink().clone();
     let gh2 = Arc::clone(&gh);
@@ -1719,7 +1734,7 @@ fn show_label_editor(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: GitHubPR) {
 
 fn build_label_editor_layer(
     siv: &mut Cursive,
-    gh: Arc<GitHubClient>,
+    gh: Arc<PrClient>,
     pr: GitHubPR,
     repo_labels: Vec<GitHubLabel>,
 ) {
@@ -1793,16 +1808,16 @@ fn build_label_editor_layer(
                 s.pop_layer();
                 return;
             }
-            let offline = s
+            let (offline, provider) = s
                 .user_data::<TuiState>()
-                .map(|t| t.offline)
-                .unwrap_or(false);
+                .map(|t| (t.offline, t.pr_client.as_ref().map(|p| p.provider()).unwrap_or(crate::db::Provider::GitHub)))
+                .unwrap_or((false, crate::db::Provider::GitHub));
             let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
             s.pop_layer();
             if offline {
                 if let Some(db) = db {
                     match db.queue_action(&crate::db::ProviderAction {
-                        provider: crate::db::Provider::GitHub,
+                        provider,
                         action: crate::db::QueuedAction::UpdateLabels {
                             pr_number,
                             to_add,
@@ -1872,7 +1887,7 @@ fn build_label_editor_layer(
 
 // ─── ACK dialog ──────────────────────────────────────────────────────────────
 
-fn show_ack_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) {
+fn show_ack_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
     let gh2 = Arc::clone(&gh);
     siv.add_layer(
         Dialog::new()
@@ -1888,16 +1903,16 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) {
                         v.get_content().to_string()
                     })
                     .unwrap_or_default();
-                let offline = s
+                let (offline, provider) = s
                     .user_data::<TuiState>()
-                    .map(|t| t.offline)
-                    .unwrap_or(false);
+                    .map(|t| (t.offline, t.pr_client.as_ref().map(|p| p.provider()).unwrap_or(crate::db::Provider::GitHub)))
+                    .unwrap_or((false, crate::db::Provider::GitHub));
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
                     if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
-                            provider: crate::db::Provider::GitHub,
+                            provider,
                             action: crate::db::QueuedAction::Ack {
                                 pr_number,
                                 comment: Some(comment).filter(|c| !c.is_empty()),
@@ -1942,7 +1957,7 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) {
 
 // ─── Reject dialog ───────────────────────────────────────────────────────────
 
-fn show_reject_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) {
+fn show_reject_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
     let gh2 = Arc::clone(&gh);
     siv.add_layer(
         Dialog::new()
@@ -1962,16 +1977,16 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<GitHubClient>, pr_number: u64) 
                     show_error(s, "A reason is required.");
                     return;
                 }
-                let offline = s
+                let (offline, provider) = s
                     .user_data::<TuiState>()
-                    .map(|t| t.offline)
-                    .unwrap_or(false);
+                    .map(|t| (t.offline, t.pr_client.as_ref().map(|p| p.provider()).unwrap_or(crate::db::Provider::GitHub)))
+                    .unwrap_or((false, crate::db::Provider::GitHub));
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
                     if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
-                            provider: crate::db::Provider::GitHub,
+                            provider,
                             action: crate::db::QueuedAction::Reject {
                                 pr_number,
                                 comment: reason,
@@ -2120,7 +2135,10 @@ fn show_backport_dialog(siv: &mut Cursive, pr_number: u64) {
 // ─── Offline sync ─────────────────────────────────────────────────────────────
 
 fn sync_queued_actions(siv: &mut Cursive) {
-    let gh = match siv.user_data::<TuiState>().and_then(|t| t.gh.clone()) {
+    let gh = match siv
+        .user_data::<TuiState>()
+        .and_then(|t| t.pr_client.clone())
+    {
         Some(g) => g,
         None => {
             show_error(siv, "No GitHub client available.");
@@ -2180,7 +2198,7 @@ fn sync_queued_actions(siv: &mut Cursive) {
                 );
             }
             // Refresh PR list after sync
-            let gh2 = s.user_data::<TuiState>().and_then(|t| t.gh.clone());
+            let gh2 = s.user_data::<TuiState>().and_then(|t| t.pr_client.clone());
             if let Some(gh2) = gh2 {
                 refresh_list(s, gh2);
             }
@@ -2189,10 +2207,7 @@ fn sync_queued_actions(siv: &mut Cursive) {
     });
 }
 
-fn apply_github_action(
-    gh: &Arc<GitHubClient>,
-    action: &crate::db::QueuedAction,
-) -> anyhow::Result<()> {
+fn apply_github_action(gh: &Arc<PrClient>, action: &crate::db::QueuedAction) -> anyhow::Result<()> {
     use crate::db::QueuedAction::*;
     match action {
         AddLabel { pr_number, label } => gh.add_labels(*pr_number, &[label.as_str()]),
@@ -2446,8 +2461,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     // Plain-text mirror of whatever is currently shown in the right pane.
     // Updated whenever ci_content is set so the 'b' handler can read it without
     // re-fetching anything.
-    let current_content: Arc<Mutex<StyledString>> =
-        Arc::new(Mutex::new(StyledString::plain("")));
+    let current_content: Arc<Mutex<StyledString>> = Arc::new(Mutex::new(StyledString::plain("")));
 
     // ── Artifact list (left pane) ─────────────────────────────────────────────
     let viewer_select = Arc::clone(&viewer);
@@ -3021,10 +3035,7 @@ fn populate_ci_files(
 /// in the `"ci_files"` SelectView.  A "Files" separator is placed between the
 /// test list and the remaining file entries.  Called after a pytest report is
 /// parsed; entries are already pre-loaded in the content cache.
-fn append_sub_entries_to_list(
-    siv: &mut Cursive,
-    sub_artifacts: Vec<crate::ci::ArtifactEntry>,
-) {
+fn append_sub_entries_to_list(siv: &mut Cursive, sub_artifacts: Vec<crate::ci::ArtifactEntry>) {
     siv.call_on_name(
         "ci_files",
         |v: &mut SelectView<crate::ci::ArtifactEntry>| {
@@ -3088,9 +3099,12 @@ fn show_file_bug_dialog(
 
     // Pre-fill the title from the currently selected artifact entry name.
     let selected_name = siv
-        .call_on_name("ci_files", |v: &mut SelectView<crate::ci::ArtifactEntry>| {
-            v.selection().map(|e| e.name.trim().to_string())
-        })
+        .call_on_name(
+            "ci_files",
+            |v: &mut SelectView<crate::ci::ArtifactEntry>| {
+                v.selection().map(|e| e.name.trim().to_string())
+            },
+        )
         .flatten()
         .unwrap_or_default();
 

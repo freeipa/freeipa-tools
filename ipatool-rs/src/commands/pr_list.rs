@@ -1,14 +1,11 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::collections::HashSet;
 
 use super::Ctx;
 use crate::api::github::labels_colorize;
-use crate::db::Provider;
 
 pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()> {
-    let Some(gh) = &ctx.github else {
-        bail!("GitHub is not configured (gh-token / gh-repo missing)");
-    };
+    let prc = ctx.pr_client_or_err()?;
     let color_enabled = ctx.out.color.enabled();
 
     // Parse +/- prefixed state and label filters
@@ -38,12 +35,12 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
     // Discard "all" as a real state filter
     let states_pos: HashSet<String> = states_pos.into_iter().filter(|s| s != "all").collect();
 
-    let prs = gh.list_prs(&search_state)?;
+    let prs = prc.list_prs(&search_state)?;
 
     // Keep the local cache current as a side-effect of the online fetch so
     // that `cache-update` is not required for basic offline availability.
     if let Some(ref db) = ctx.db {
-        if let Err(e) = db.cache_prs(Provider::GitHub, &prs) {
+        if let Err(e) = db.cache_prs(&ctx.profile, &prs) {
             eprintln!("Warning: failed to update PR cache: {}", e);
         }
     }
@@ -57,8 +54,8 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
             continue;
         }
 
-        let issue = gh.get_issue(pr.number)?;
-        let label_names: HashSet<String> = issue.label_names().into_iter().collect();
+        let labels = prc.get_pr_labels(pr.number)?;
+        let label_names: HashSet<String> = labels.iter().map(|l| l.name.clone()).collect();
 
         // Label filtering
         if !labels_pos.is_empty() && labels_pos.is_disjoint(&label_names) {
@@ -69,7 +66,7 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
         }
 
         // Get CI statuses
-        let statuses = gh.most_recent_statuses(&pr.head.sha)?;
+        let statuses = prc.most_recent_statuses(&pr.head.sha)?;
         let statuses_display = if statuses.is_empty() {
             String::new()
         } else {
@@ -81,7 +78,7 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
             format!("{{{}}}", parts.join(", "))
         };
 
-        let labels_str = labels_colorize(&issue.labels, color_enabled);
+        let labels_str = labels_colorize(&labels, color_enabled);
         println!(
             "{:5}\t{:.50}\t{}\t{}\t{}",
             pr.number, pr.title, labels_str, pr.html_url, statuses_display
@@ -95,7 +92,7 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
     );
 
     // Phase 1: fetch PR list, showing page progress so the user sees activity.
-    let checked = gh.list_prs_limited("all", 100, |page, collected| {
+    let checked = prc.list_prs_limited("all", 100, |page, collected| {
         fetch_progress(page, collected, color_enabled);
     })?;
     fetch_progress_clear();
@@ -106,16 +103,16 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
     for (i, pr) in checked.iter().enumerate() {
         bar.render(i + 1, pr.number);
 
-        let issue = gh.get_issue(pr.number)?;
-        let label_names: HashSet<String> = issue.label_names().into_iter().collect();
-        let is_merged = gh.is_pr_merged(pr.number).unwrap_or(false);
+        let labels = prc.get_pr_labels(pr.number)?;
+        let label_names: HashSet<String> = labels.iter().map(|l| l.name.clone()).collect();
+        let is_merged = prc.is_pr_merged(pr.number).unwrap_or(false);
 
         bar.clear();
 
         if is_merged && !label_names.contains("pushed") {
             ctx.out
                 .print_red("Pull request was merged but not labeled 'pushed'!");
-            let labels_str = labels_colorize(&issue.labels, color_enabled);
+            let labels_str = labels_colorize(&labels, color_enabled);
             println!(
                 "{:5}\t{:.50}\t{}\t{}",
                 pr.number, pr.title, labels_str, pr.html_url
@@ -123,7 +120,7 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
         }
         if label_names.contains("pushed") && !label_names.contains("ack") {
             ctx.out.print_red("Pull request was pushed without 'ack'!");
-            let labels_str = labels_colorize(&issue.labels, color_enabled);
+            let labels_str = labels_colorize(&labels, color_enabled);
             println!(
                 "{:5}\t{:.50}\t{}\t{}",
                 pr.number, pr.title, labels_str, pr.html_url

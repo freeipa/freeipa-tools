@@ -3,13 +3,11 @@ use std::io::Write;
 
 use super::Ctx;
 use crate::api::github::sorted_commits;
-use crate::db::{CachedPrDetails, Provider};
+use crate::db::CachedPrDetails;
 use std::collections::HashMap;
 
 pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
-    let Some(gh) = &ctx.github else {
-        bail!("GitHub is not configured (gh-token / gh-repo missing)");
-    };
+    let prc = ctx.pr_client_or_err()?;
     let Some(db) = &ctx.db else {
         bail!("No local database configured (db-path missing from config)");
     };
@@ -17,11 +15,11 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
     let color = ctx.out.color.enabled();
 
     ctx.out
-        .print_cyan(&format!("Fetching {} pull requests from GitHub…", state));
+        .print_cyan(&format!("Fetching {} pull requests…", state));
 
-    let prs = gh.list_prs(state)?;
+    let prs = prc.list_prs(state)?;
     let total = prs.len();
-    db.cache_prs(Provider::GitHub, &prs)?;
+    db.cache_prs(&ctx.profile, &prs)?;
     ctx.out
         .print_green(&format!("Cached {} pull request(s).", total));
 
@@ -33,7 +31,7 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
     let mut skipped = 0usize;
 
     for (i, pr) in prs.iter().enumerate() {
-        let cached_updated_at = db.pr_details_updated_at(Provider::GitHub, pr.number);
+        let cached_updated_at = db.pr_details_updated_at(&ctx.profile, pr.number);
         let pr_updated_at = pr.updated_at.as_deref();
 
         if let (Some(cached), Some(current)) = (cached_updated_at.as_deref(), pr_updated_at) {
@@ -62,10 +60,10 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
         let _ = std::io::stderr().flush();
 
         // most_recent_statuses() returns HashMap<String, CiJobStatus>.
-        let statuses = gh.most_recent_statuses(&pr.head.sha).unwrap_or_default();
-        let comments = gh.get_all_issue_comments(pr.number).unwrap_or_default();
-        let files = gh.get_pr_files(pr.number).unwrap_or_default();
-        let commits = gh
+        let statuses = prc.most_recent_statuses(&pr.head.sha).unwrap_or_default();
+        let comments = prc.get_all_issue_comments(pr.number).unwrap_or_default();
+        let files = prc.get_pr_files(pr.number).unwrap_or_default();
+        let commits = prc
             .get_pr_commits(pr.number)
             .ok()
             .and_then(|c| sorted_commits(c).ok())
@@ -88,7 +86,7 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
             commits,
             status_urls: cached_urls,
         };
-        match db.cache_pr_details(Provider::GitHub, pr.number, &cached, pr_updated_at) {
+        match db.cache_pr_details(&ctx.profile, pr.number, &cached, pr_updated_at) {
             Ok(()) => fetched += 1,
             Err(e) => {
                 eprint!("\r\x1b[K");
