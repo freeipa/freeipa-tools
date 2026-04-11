@@ -76,6 +76,12 @@ impl CiJobViewer for PrciViewer {
             if let Some(s) = try_parse_pytest_report(&text) {
                 return Ok(s);
             }
+            // Couldn't extract the JSON blob — raw HTML is unreadable in a terminal.
+            return Ok(StyledString::plain(
+                "[Could not parse as a pytest HTML report.\n\
+                 The file may use an unsupported format.\n\
+                 Open it in a browser for the full view.]\n",
+            ));
         }
 
         Ok(StyledString::plain(text))
