@@ -58,7 +58,7 @@ jira-ticket-url: https://issues.redhat.com/browse/RHEL-
 pagure-repository: freeipa
 # Create at https://pagure.io/<repo>/settings#apikeys
 # Required permissions: assign/change status/comment/create/subscribe/update
-# issues; update custom fields; update milestone.
+# issues; create issues; update custom fields; update milestone.
 pagure-token: "0123456789abcdef0123456789abcdef01234567"
 
 # ── Forgejo (alternative issue tracker) ──────────────────────────────────────
@@ -369,7 +369,7 @@ ipatool --offline tui        # use cached data (no network)
 #### Layout
 
 ```
-  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  Tab:Focus  j/↓:Down  k/↑:Up  d/u:Scroll
+  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  Tab:Focus  j/↓:Down  k/↑:Up  d/u:Scroll  i:Inspect  Enter:Actions
 ┌── 47 PRs ────────────────────┐┌── Details ──────────────────────────────────┐
 │ #8309 ○ Fix LDAP timeout  …  ││ PR #8309: Fix LDAP connection timeout        │
 │ #8308 ○ Add KDC support   …  ││                                              │
@@ -379,8 +379,8 @@ ipatool --offline tui        # use cached data (no network)
 │                              ││ Base:   master                               │
 │                              ││                                              │
 │                              ││ CI Status:                                   │
-│                              ││   ✓ ci/freeipa                               │
-│                              ││   ✗ ci/lint                                  │
+│                              ││   ✓ ci/freeipa  [i:inspect]                  │
+│                              ││   ✗ ci/lint     [i:inspect]                  │
 │                              ││                                              │
 │                              ││ Changed files (3 files, +42 / -7):           │
 │                              ││   M  ipaserver/plugins/ldap2.py  (+38 / -5)  │
@@ -397,9 +397,11 @@ ipatool --offline tui        # use cached data (no network)
 └──────────────────────────────┘└─────────────────────────────────────────────┘
 ```
 
-When the detail pane has focus (`Tab` to toggle), the help bar shows `[Detail]`
-in cyan and `j`/`↓`/`k`/`↑` scroll the detail pane instead of moving the PR
-selection:
+The active pane's title is highlighted in **cyan**; the inactive pane's title
+is plain.  Press `Tab` to toggle focus between the two panes.
+
+When the detail pane has focus, the help bar shows `[Detail]` in cyan and
+`j`/`↓`/`k`/`↑` scroll the detail pane instead of moving the PR selection:
 
 ```
   [Detail]  a:ACK  x:Reject  …  Tab:Focus  j/↓:Scroll  k/↑:Scroll  d/u:Scroll
@@ -418,6 +420,10 @@ comments, both rendered as Markdown (blockquotes, code blocks, bold/italic,
 links, lists).  Comments are separated by a horizontal rule; the author/date
 header is flush-left and the body is indented by two spaces.  Use `d`/`u` or
 `Tab` then `j`/`k` to scroll the detail pane without changing the selected PR.
+
+Completed CI jobs that have a stored result URL show a dim `[i:inspect]` hint
+next to their status line.  Press `i` from either pane to open the
+[CI job results viewer](#ci-job-results-viewer-i).
 
 #### Default keyboard shortcuts
 
@@ -438,6 +444,7 @@ All keys listed below are the defaults.  Every key can be remapped in
 | `x` | Reject selected PR |
 | `c` | Open diff review for selected PR |
 | `b` | Open PR in browser |
+| `i` | Open CI job results viewer (only available for PRs with completed CI jobs) |
 | `r` | Refresh PR list from GitHub |
 | `s` | Sync queued offline actions to GitHub |
 | `q` | Quit |
@@ -501,6 +508,81 @@ returns you to the TUI afterwards.
 
 Collects target branches (comma-separated), then quits the TUI, runs the
 backport pipeline in the terminal, and returns.
+
+#### CI job results viewer (`i`)
+
+Press `i` from any PR list focus to drill into the CI artifacts for the
+selected PR.  The key is only active when at least one CI job has a stored
+result URL (i.e. its status is not `pending`).
+
+If the PR has more than one such job a **job selector** dialog appears first.
+Select a job and press Enter to open its artifact browser.
+
+The viewer opens as a two-pane fullscreen layer:
+
+```
+ ↓/↑:Navigate  PgUp/PgDn:Page  Home/End:Jump  Tab:Switch Pane  Enter:Open  Backspace:Parent  b:Bug  q/Esc:Close
+┌── Artifacts ───────────────────────────────────┐┌── Content (ci/freeipa) ────────────────────────┐
+│  Test results report                            ││ ✗ 3 Failed  ✓ 142 Passed  – 1 Skipped         │
+│ ─── Tests ─────────────────────────────────────││ ──────────────────────────────────────────     │
+│ ✗ test_ldap::test_connection_timeout            ││ Failed                                         │
+│ ✓ test_ldap::test_search                        ││   ✗ test_ldap::test_connection_timeout  1.23s  │
+│ – test_ldap::test_skip                          ││   ✗ test_api::test_permission             0.9s  │
+│ …                                               ││   ✗ test_dns::test_forward               0.5s  │
+│ ─── Files ──────────────────────────────────────││ ──────────────────────────────────────────     │
+│ ▶ runner/                                       ││ Passed  (142)                                  │
+│   runner.log.gz                                 ││   ✓ test_ldap::test_search               0.1s  │
+│   report.html                                   ││   …                                            │
+└─────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
+```
+
+**Left pane — artifact list:**
+
+- `report.html` (if present) is pinned at the top under the label
+  **Test results report**.
+- If `report.html` is a pytest HTML report, its individual test cases are
+  inserted below a `─── Tests ───` separator; each entry is prefixed with
+  `✓`, `✗`, or `–` matching its result.  Selecting a test entry shows that
+  test's log in the right pane.
+- All other files and directories follow under a `─── Files ───` separator.
+  Directories are prefixed with `▶`.
+
+**Right pane — content:**
+
+- `report.html`: parsed and rendered as a summary — total counts by result
+  (Failed / Passed / Skipped / Error), then individual test rows with ID and
+  duration.  Failed tests are highlighted in red, passed in green, skipped in
+  yellow.
+- `.gz` files: decompressed transparently and shown as plain text.
+- Other files: raw text as-is.
+- Directories: placeholder text; press Enter to navigate in.
+
+Artifact content and directory listings are cached in memory for the session
+so navigating back to a previously viewed file is instant.
+
+**Keyboard shortcuts in the CI viewer:**
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Toggle keyboard focus between artifact list (left) and content (right); active pane title turns cyan |
+| `↓` / `↑` | Move artifact selection (left focus) or scroll content (right focus) |
+| `PgDn` / `PgUp` | Jump 10 items / lines |
+| `End` / `Home` | Jump to last / first item (left) or bottom / top of content (right) |
+| `Enter` | Navigate into directory (left focus, directory selected) |
+| `Backspace` | Navigate to parent directory |
+| `b` | Open "File Bug" dialog using the current right-pane content as the bug body (requires Pagure configured) |
+| `q` / `Esc` | Close the viewer and return to the PR list |
+
+**Filing a bug (`b`):**
+
+Pressing `b` opens a small dialog pre-filled with a title derived from the
+job name and the currently selected artifact entry.  On confirmation the
+plain text of the right pane is submitted as the bug body via the Pagure API.
+The dialog dismisses immediately; success or failure is reported in a
+follow-up info/error dialog.
+
+Requires `pagure-token` and `pagure-repository` to be set in the
+configuration; the token needs **Create issues** permission.
 
 ---
 
