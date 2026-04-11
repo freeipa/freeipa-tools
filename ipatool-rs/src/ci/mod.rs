@@ -22,6 +22,21 @@ pub struct ArtifactEntry {
     pub is_dir: bool,
 }
 
+/// Result of fetching a single artifact's content.
+///
+/// For most files `sub_entries` is empty.  For structured reports (e.g.
+/// `report.html`) it carries one pre-rendered entry per test case so the TUI
+/// can add them directly to the file-list pane without additional network
+/// requests.
+#[derive(Clone)]
+pub struct ContentResult {
+    /// Rendered content for the right-hand pane (summary view).
+    pub content: StyledString,
+    /// Optional per-test sub-entries: `(artifact_entry, rendered_log)`.
+    /// The artifact entry's `url` is a synthetic key used as a cache key.
+    pub sub_entries: Vec<(ArtifactEntry, StyledString)>,
+}
+
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
 /// Abstraction over a CI job result storage system.
@@ -37,10 +52,10 @@ pub trait CiJobViewer: Send + Sync {
     /// The caller is responsible for background-threading this call.
     fn list_artifacts(&self, url: &str) -> Result<Vec<ArtifactEntry>>;
 
-    /// Fetch and render `entry` as a styled string for display in the TUI.
-    /// For HTML reports this parses the content; for log files it returns plain
-    /// text (decompressing gzip as needed).
-    fn fetch_content(&self, entry: &ArtifactEntry) -> Result<StyledString>;
+    /// Fetch and render `entry` as a `ContentResult`.
+    /// For HTML reports this parses the content and returns per-test sub-entries;
+    /// for log files it returns plain text (decompressing gzip as needed).
+    fn fetch_content(&self, entry: &ArtifactEntry) -> Result<ContentResult>;
 
     /// Return the entry that should be selected by default when a directory is
     /// first opened (e.g. `report.html`).  Returns `None` if no preference.
