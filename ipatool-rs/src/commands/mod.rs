@@ -9,7 +9,7 @@ use crate::api::{
     jira::JiraClient,
     pagure::{PagureClient, PagureTicket},
 };
-use crate::config::Config;
+use crate::config::{Config, IssueTracker};
 use crate::output::{ask_yn, prompt, Output};
 
 pub mod am;
@@ -17,6 +17,7 @@ pub mod backport;
 pub mod cache_update;
 pub mod interactive;
 pub mod pr_ack;
+pub mod pr_client;
 pub mod pr_list;
 pub mod pr_push;
 pub mod pr_reject;
@@ -130,10 +131,59 @@ mod milestone_tests {
     }
 }
 
-/// Ticket abstraction that works with either Pagure or Forgejo
+// ── GitHub Issues as a ticket backend ────────────────────────────────────────
+
+pub struct GitHubTicket {
+    pub client: Arc<GitHubClient>,
+    pub number: u64,
+    data: std::sync::OnceLock<crate::api::github::GitHubIssue>,
+}
+
+impl GitHubTicket {
+    pub fn new(client: Arc<GitHubClient>, number: u64) -> Self {
+        GitHubTicket {
+            client,
+            number,
+            data: std::sync::OnceLock::new(),
+        }
+    }
+
+    pub fn data(&self) -> Result<&crate::api::github::GitHubIssue> {
+        if let Some(d) = self.data.get() {
+            return Ok(d);
+        }
+        println!("Retrieving GitHub issue #{}", self.number);
+        let issue = self.client.get_issue(self.number)?;
+        let _ = self.data.set(issue);
+        Ok(self.data.get().unwrap())
+    }
+
+    pub fn title(&self) -> Result<String> {
+        Ok(self.data()?.title.clone())
+    }
+
+    pub fn is_closed(&self) -> Result<bool> {
+        Ok(self.data()?.is_closed())
+    }
+
+    pub fn comment(&self, text: &str) -> Result<()> {
+        self.client.create_comment(self.number, text)
+    }
+
+    pub fn close(&self) -> Result<()> {
+        self.client.close_issue(self.number)
+    }
+
+    pub fn milestone(&self) -> Result<Option<String>> {
+        Ok(self.data()?.milestone.as_ref().map(|m| m.title.clone()))
+    }
+}
+
+/// Ticket abstraction that works with Pagure, Forgejo, or GitHub Issues
 pub enum Ticket {
     Pagure(PagureTicket),
     Forgejo(ForgejoTicket),
+    GitHub(GitHubTicket),
 }
 
 impl Ticket {
@@ -141,6 +191,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.number,
             Ticket::Forgejo(t) => t.number,
+            Ticket::GitHub(t) => t.number,
         }
     }
 
@@ -148,6 +199,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.reviewer(),
             Ticket::Forgejo(t) => Ok(t.reviewer()),
+            Ticket::GitHub(_) => Ok(None), // GitHub Issues have no reviewer custom field
         }
     }
 
@@ -155,6 +207,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.rhbz(),
             Ticket::Forgejo(t) => Ok(t.rhbz()),
+            Ticket::GitHub(_) => Ok(None), // GitHub Issues have no rhbz custom field
         }
     }
 
@@ -162,6 +215,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.milestone(),
             Ticket::Forgejo(t) => t.milestone(),
+            Ticket::GitHub(t) => t.milestone(),
         }
     }
 
@@ -169,6 +223,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.title(),
             Ticket::Forgejo(t) => t.title(),
+            Ticket::GitHub(t) => t.title(),
         }
     }
 
@@ -176,6 +231,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.is_closed(),
             Ticket::Forgejo(t) => t.is_closed(),
+            Ticket::GitHub(t) => t.is_closed(),
         }
     }
 
@@ -183,6 +239,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.comment(text),
             Ticket::Forgejo(t) => t.comment(text),
+            Ticket::GitHub(t) => t.comment(text),
         }
     }
 
@@ -190,6 +247,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.close(),
             Ticket::Forgejo(t) => t.close(),
+            Ticket::GitHub(t) => t.close(),
         }
     }
 }
@@ -215,6 +273,8 @@ pub struct Ctx {
     pub db: Option<Arc<crate::db::Database>>,
     pub tui_style: crate::tui_style::TuiStyle,
     pub tui_keys: crate::tui_keys::TuiKeys,
+    /// Which issue tracker holds the linked tickets (set by --profile or default)
+    pub issue_tracker: IssueTracker,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -227,20 +287,28 @@ pub struct PushInfo {
 
 impl Ctx {
     pub fn make_ticket(&self, number: u64) -> Option<Ticket> {
-        if let Some(pagure) = &self.pagure {
-            Some(Ticket::Pagure(PagureTicket::new(
-                Arc::clone(pagure),
-                number,
-            )))
-        } else {
-            self.forgejo
+        match self.issue_tracker {
+            IssueTracker::Pagure => self
+                .pagure
                 .as_ref()
-                .map(|forgejo| Ticket::Forgejo(ForgejoTicket::new(Arc::clone(forgejo), number)))
+                .map(|p| Ticket::Pagure(PagureTicket::new(Arc::clone(p), number))),
+            IssueTracker::Forgejo => self
+                .forgejo
+                .as_ref()
+                .map(|f| Ticket::Forgejo(ForgejoTicket::new(Arc::clone(f), number))),
+            IssueTracker::GitHub => self
+                .github
+                .as_ref()
+                .map(|gh| Ticket::GitHub(GitHubTicket::new(Arc::clone(gh), number))),
         }
     }
 
     pub fn has_tracker(&self) -> bool {
-        self.pagure.is_some() || self.forgejo.is_some()
+        match self.issue_tracker {
+            IssueTracker::Pagure => self.pagure.is_some(),
+            IssueTracker::Forgejo => self.forgejo.is_some(),
+            IssueTracker::GitHub => self.github.is_some(),
+        }
     }
 
     pub fn verify_remote_url(&self) -> Result<()> {
