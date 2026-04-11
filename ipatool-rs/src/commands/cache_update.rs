@@ -4,6 +4,7 @@ use std::io::Write;
 use super::Ctx;
 use crate::api::github::sorted_commits;
 use crate::db::{CachedPrDetails, Provider};
+use std::collections::HashMap;
 
 pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
     let Some(gh) = &ctx.github else {
@@ -60,6 +61,7 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
         eprint!("{}", line);
         let _ = std::io::stderr().flush();
 
+        // most_recent_statuses() returns HashMap<String, CiJobStatus>.
         let statuses = gh.most_recent_statuses(&pr.head.sha).unwrap_or_default();
         let comments = gh.get_all_issue_comments(pr.number).unwrap_or_default();
         let files = gh.get_pr_files(pr.number).unwrap_or_default();
@@ -69,11 +71,22 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
             .and_then(|c| sorted_commits(c).ok())
             .unwrap_or_default();
 
+        // Split CiJobStatus into separate state and URL maps for storage.
+        let cached_states: HashMap<String, String> = statuses
+            .iter()
+            .map(|(ctx, job)| (ctx.clone(), job.state.clone()))
+            .collect();
+        let cached_urls: HashMap<String, String> = statuses
+            .iter()
+            .filter_map(|(ctx, job)| job.url.as_ref().map(|u| (ctx.clone(), u.clone())))
+            .collect();
+
         let cached = CachedPrDetails {
-            statuses,
+            statuses: cached_states,
             comments,
             files,
             commits,
+            status_urls: cached_urls,
         };
         match db.cache_pr_details(Provider::GitHub, pr.number, &cached, pr_updated_at) {
             Ok(()) => fetched += 1,

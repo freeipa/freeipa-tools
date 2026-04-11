@@ -75,7 +75,7 @@ pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()
         } else {
             let mut parts: Vec<String> = statuses
                 .iter()
-                .map(|(k, v)| format!("{}:{}", k, v))
+                .map(|(k, v)| format!("{}:{}", k, v.state))
                 .collect();
             parts.sort();
             format!("{{{}}}", parts.join(", "))

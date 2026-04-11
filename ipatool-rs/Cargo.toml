@@ -23,3 +23,4 @@ dirs = "5"
 cursive = { version = "0.21", default-features = false, features = ["crossterm-backend", "markdown"] }
 pulldown-cmark = { version = "0.11", default-features = false }
 rusqlite = { version = "0.31", features = ["bundled"] }
+flate2 = "1"

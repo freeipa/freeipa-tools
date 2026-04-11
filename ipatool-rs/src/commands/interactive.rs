@@ -12,11 +12,15 @@ use cursive::{
     },
     Cursive,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use super::Ctx;
 use crate::api::github::{
-    GitHubClient, GitHubComment, GitHubFile, GitHubLabel, GitHubPR, GitHubReviewComment,
+    CiJobStatus, GitHubClient, GitHubComment, GitHubFile, GitHubLabel, GitHubPR,
+    GitHubReviewComment,
 };
 use crate::tui_keys::TuiKeys;
 
@@ -59,6 +63,9 @@ struct TuiState {
     tui_keys: TuiKeys,
     /// Whether keyboard focus is on the right (detail) pane.
     focus_right: bool,
+    /// CI job statuses for the currently selected PR (populated by background fetch).
+    /// Stored here so the 'i' key handler can open the job selector without re-fetching.
+    ci_statuses: HashMap<String, CiJobStatus>,
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -121,6 +128,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
         state: state.to_string(),
         tui_keys: ctx.tui_keys.clone(),
         focus_right: false,
+        ci_statuses: HashMap::new(),
     });
 
     siv.add_global_callback(ctx.tui_keys.quit, |s| s.quit());
@@ -259,6 +267,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
         state: current_state,
         tui_keys: tui_keys.clone(),
         focus_right,
+        ci_statuses: HashMap::new(),
     });
 
     let left_width = compute_left_width(siv.screen_size().x);
@@ -301,6 +310,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
     let key_up = tui_keys.up;
     let key_scroll_down = tui_keys.scroll_down;
     let key_scroll_up = tui_keys.scroll_up;
+    let key_inspect = tui_keys.inspect;
 
     let select_with_keys = OnEventView::new(ScrollView::new(select.with_name("pr_list")))
         .on_event(key_ack, move |s| {
@@ -357,16 +367,19 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
                 t.focus_right = !t.focus_right;
             }
             update_help_bar(s);
+        })
+        // i: open CI job results viewer for the selected PR.
+        .on_event(key_inspect, |s| {
+            if let Some(pr) = selected_pr(s) {
+                show_ci_job_selector(s, pr);
+            }
         });
 
     let left_panel = Panel::new(select_with_keys.full_height())
         .title(format!("{} PRs", prs.len()))
         .fixed_width(left_width);
 
-    let initial_detail = prs
-        .first()
-        .map(pr_summary)
-        .unwrap_or_default();
+    let initial_detail = prs.first().map(pr_summary).unwrap_or_default();
     let right_panel = Panel::new(
         ScrollView::new(TextView::new(initial_detail).with_name("pr_detail"))
             .with_name("pr_detail_scroll")
@@ -414,7 +427,7 @@ fn build_help_content(
 ) -> StyledString {
     let keys = format!(
         "  {}:ACK  {}:Reject  {}:Review  {}:Browser  {}:Refresh  {}:Quit  \
-         {}/↓:Down  {}/↑:Up  {}/{}:Scroll  Tab:Pane  Enter:Actions",
+         {}/↓:Down  {}/↑:Up  {}/{}:Scroll  Tab:Pane  {}:Inspect  Enter:Actions",
         tui_keys.ack,
         tui_keys.reject,
         tui_keys.review,
@@ -425,6 +438,7 @@ fn build_help_content(
         tui_keys.up,
         tui_keys.scroll_down,
         tui_keys.scroll_up,
+        tui_keys.inspect,
     );
     let mut s = StyledString::new();
     if offline {
@@ -618,7 +632,7 @@ fn detail_header(pr: &GitHubPR) -> StyledString {
 
 /// Data fetched in the background for the full detail view.
 struct PrDetails {
-    statuses: HashMap<String, String>,
+    statuses: HashMap<String, CiJobStatus>,
     comments: Vec<GitHubComment>,
     files: Vec<GitHubFile>,
 }
@@ -686,19 +700,25 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
     // ── CI status ────────────────────────────────────────────────────────────
     s.append_plain("\n");
     s.append_styled("CI Status:\n", bold());
-    let mut ci_entries: Vec<(String, String)> = statuses.into_iter().collect();
+    let mut ci_entries: Vec<(String, CiJobStatus)> = statuses.into_iter().collect();
     ci_entries.sort_by_key(|(k, _)| k.clone());
     if ci_entries.is_empty() {
         s.append_plain("  (no CI status reported)\n");
     } else {
-        for (ctx_name, state) in &ci_entries {
-            let icon = match state.as_str() {
+        for (ctx_name, job) in &ci_entries {
+            let icon = match job.state.as_str() {
                 "success" => "✓",
                 "failure" | "error" => "✗",
                 "pending" => "⏳",
                 _ => "?",
             };
-            s.append_plain(format!("  {} {}\n", icon, ctx_name));
+            let has_url = job.url.is_some() && job.state != "pending";
+            s.append_plain(format!("  {} {}", icon, ctx_name));
+            if has_url {
+                s.append_plain("  ");
+                s.append_styled("[i:Inspect]", Style::from(Color::Dark(BaseColor::Cyan)));
+            }
+            s.append_plain("\n");
         }
     }
 
@@ -802,8 +822,27 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: 
         // Serve from cache — no network call.
         if let Some(ref db) = db {
             if let Ok(Some(cached)) = db.load_pr_details(crate::db::Provider::GitHub, pr.number) {
+                // Reassemble CiJobStatus from statuses + status_urls.
+                let statuses: HashMap<String, CiJobStatus> = cached
+                    .statuses
+                    .iter()
+                    .map(|(ctx, state)| {
+                        let url = cached.status_urls.get(ctx).cloned();
+                        (
+                            ctx.clone(),
+                            CiJobStatus {
+                                state: state.clone(),
+                                url,
+                            },
+                        )
+                    })
+                    .collect();
+                let ci_statuses = statuses.clone();
+                if let Some(t) = siv.user_data::<TuiState>() {
+                    t.ci_statuses = ci_statuses;
+                }
                 let details = PrDetails {
-                    statuses: cached.statuses,
+                    statuses,
                     comments: cached.comments,
                     files: cached.files,
                 };
@@ -818,23 +857,36 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: 
     let cb = siv.cb_sink().clone();
     std::thread::spawn(move || {
         // All fetches run sequentially in the background thread.
+        // most_recent_statuses() returns HashMap<String, CiJobStatus>.
         let statuses = gh.most_recent_statuses(&sha).unwrap_or_default();
         let comments = gh.get_all_issue_comments(pr_number).unwrap_or_default();
         let files = gh.get_pr_files(pr_number).unwrap_or_default();
 
+        // Split CiJobStatus map into (state strings, url strings) for cache storage.
+        let cached_states: HashMap<String, String> = statuses
+            .iter()
+            .map(|(ctx, job)| (ctx.clone(), job.state.clone()))
+            .collect();
+        let cached_urls: HashMap<String, String> = statuses
+            .iter()
+            .filter_map(|(ctx, job)| job.url.as_ref().map(|u| (ctx.clone(), u.clone())))
+            .collect();
+
         // Persist so the next offline session can show these details.
         if let Some(ref db) = db {
             let cached = crate::db::CachedPrDetails {
-                statuses: statuses.clone(),
+                statuses: cached_states,
                 comments: comments.clone(),
                 files: files.clone(),
                 commits: vec![],
+                status_urls: cached_urls,
             };
             let updated_at = pr.updated_at.as_deref();
             let _ =
                 db.cache_pr_details(crate::db::Provider::GitHub, pr_number, &cached, updated_at);
         }
 
+        let ci_statuses = statuses.clone();
         let details = PrDetails {
             statuses,
             comments,
@@ -843,6 +895,10 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<GitHubClient>, pr: 
         cb.send(Box::new(move |s: &mut Cursive| {
             let current = selected_pr(s).map(|p| p.number);
             if current == Some(pr_number) {
+                // Store statuses in TuiState so the 'i' key handler can open the job selector.
+                if let Some(t) = s.user_data::<TuiState>() {
+                    t.ci_statuses = ci_statuses;
+                }
                 update_detail_full(s, &pr, details);
             }
         }))
@@ -2252,5 +2308,318 @@ fn truncate(s: &str, max_chars: usize) -> String {
         format!("{}…", &collected[..collected.len().saturating_sub(1)])
     } else {
         collected
+    }
+}
+
+// ─── CI job results viewer ────────────────────────────────────────────────────
+
+/// Show a dialog listing completed CI jobs with result URLs for the selected PR.
+/// If there is exactly one such job, jump directly into the file browser.
+fn show_ci_job_selector(siv: &mut Cursive, pr: GitHubPR) {
+    let ci_statuses = siv
+        .user_data::<TuiState>()
+        .map(|t| t.ci_statuses.clone())
+        .unwrap_or_default();
+
+    // Collect completed jobs (not pending) that have an artifact URL.
+    let mut jobs: Vec<(String, String, String)> = ci_statuses
+        .iter()
+        .filter(|(_, job)| job.url.is_some() && job.state != "pending")
+        .map(|(ctx, job)| (ctx.clone(), job.url.clone().unwrap(), job.state.clone()))
+        .collect();
+    jobs.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if jobs.is_empty() {
+        show_info(
+            siv,
+            &format!("PR #{}: no completed CI jobs with result URLs.", pr.number),
+        );
+        return;
+    }
+
+    if jobs.len() == 1 {
+        let (name, url, _) = jobs.remove(0);
+        show_job_results_view(siv, name, url);
+        return;
+    }
+
+    let mut select = SelectView::<(String, String)>::new();
+    for (name, url, state) in &jobs {
+        let icon = match state.as_str() {
+            "success" => "✓",
+            "failure" | "error" => "✗",
+            _ => "?",
+        };
+        select.add_item(format!("{} {}", icon, name), (name.clone(), url.clone()));
+    }
+
+    select.set_on_submit(|s, item: &(String, String)| {
+        s.pop_layer();
+        show_job_results_view(s, item.0.clone(), item.1.clone());
+    });
+
+    let dlg = Dialog::around(select)
+        .title(format!("CI Jobs — PR #{}", pr.number))
+        .button("Cancel", |s| {
+            s.pop_layer();
+        });
+
+    let dlg = OnEventView::new(dlg).on_event(cursive::event::Key::Esc, |s| {
+        s.pop_layer();
+    });
+
+    siv.add_layer(dlg);
+}
+
+/// Open a full-screen two-pane file browser for a CI job's artifacts.
+///
+/// Left pane: artifact listing (`SelectView<ArtifactEntry>` named `"ci_files"`).
+/// Right pane: rendered content (`ScrollView<TextView>` named `"ci_content"`).
+/// Backspace navigates to the parent directory; `q`/`Esc` closes the view.
+fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) {
+    let viewer_box = match crate::ci::get_viewer(&base_url) {
+        Some(v) => v,
+        None => {
+            show_info(
+                siv,
+                &format!("No CI viewer available for URL:\n{}", base_url),
+            );
+            return;
+        }
+    };
+    let viewer: Arc<dyn crate::ci::CiJobViewer> = Arc::from(viewer_box);
+
+    // URL navigation stack: the last entry is the currently displayed directory.
+    let url_stack: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![base_url.clone()]));
+
+    // ── Artifact list (left pane) ─────────────────────────────────────────────
+    let viewer_select = Arc::clone(&viewer);
+    let viewer_submit = Arc::clone(&viewer);
+    let url_stack_submit = Arc::clone(&url_stack);
+
+    let mut file_select = SelectView::<crate::ci::ArtifactEntry>::new();
+
+    // on_select: fetch and render the selected file's content.
+    file_select.set_on_select(move |s, entry: &crate::ci::ArtifactEntry| {
+        if entry.is_dir {
+            s.call_on_name("ci_content", |v: &mut TextView| {
+                v.set_content("(directory — press Enter to navigate in)");
+            });
+            return;
+        }
+        let entry = entry.clone();
+        let viewer2 = Arc::clone(&viewer_select);
+        let cb = s.cb_sink().clone();
+        std::thread::spawn(move || match viewer2.fetch_content(&entry) {
+            Ok(content) => {
+                cb.send(Box::new(move |s: &mut Cursive| {
+                    s.call_on_name("ci_content", |v: &mut TextView| {
+                        v.set_content(content);
+                    });
+                    s.call_on_name(
+                        "ci_content_scroll",
+                        |v: &mut ScrollView<NamedView<TextView>>| {
+                            v.set_offset(cursive::Vec2::new(0, 0));
+                        },
+                    );
+                }))
+                .ok();
+            }
+            Err(e) => {
+                cb.send(Box::new(move |s: &mut Cursive| {
+                    s.call_on_name("ci_content", |v: &mut TextView| {
+                        v.set_content(format!("Error loading content:\n{}", e));
+                    });
+                }))
+                .ok();
+            }
+        });
+    });
+
+    // on_submit (Enter): navigate into a directory.
+    file_select.set_on_submit(move |s, entry: &crate::ci::ArtifactEntry| {
+        if !entry.is_dir {
+            return; // file content already shown by on_select
+        }
+        let entry_url = entry.url.clone();
+        {
+            url_stack_submit.lock().unwrap().push(entry_url.clone());
+        }
+        let viewer2 = Arc::clone(&viewer_submit);
+        let url_stack2 = Arc::clone(&url_stack_submit);
+        let cb = s.cb_sink().clone();
+        std::thread::spawn(move || {
+            match viewer2.list_artifacts(&entry_url) {
+                Ok(entries) => {
+                    let viewer3 = Arc::clone(&viewer2);
+                    cb.send(Box::new(move |s: &mut Cursive| {
+                        populate_ci_files(s, entries, viewer3);
+                    }))
+                    .ok();
+                }
+                Err(e) => {
+                    // Undo the push since navigation failed.
+                    url_stack2.lock().unwrap().pop();
+                    cb.send(Box::new(move |s: &mut Cursive| {
+                        show_error(s, &format!("Failed to load directory:\n{}", e));
+                    }))
+                    .ok();
+                }
+            }
+        });
+    });
+
+    // ── Layout ────────────────────────────────────────────────────────────────
+    let left_panel = Panel::new(ScrollView::new(file_select.with_name("ci_files")).full_height())
+        .title("Artifacts")
+        .fixed_width(35);
+
+    let right_panel = Panel::new(
+        ScrollView::new(TextView::new("Loading…").with_name("ci_content"))
+            .with_name("ci_content_scroll")
+            .full_screen(),
+    )
+    .title(truncate(&job_name, 60))
+    .full_width();
+
+    let help = TextView::new(" ↓/↑:Navigate  Enter:Open  Backspace:Parent  q/Esc:Close");
+
+    let body = LinearLayout::horizontal()
+        .child(left_panel)
+        .child(right_panel)
+        .full_screen();
+
+    let layout = LinearLayout::vertical().child(help).child(body);
+
+    // ── Key handling (outer wrapper) ──────────────────────────────────────────
+    let viewer_back = Arc::clone(&viewer);
+    let url_stack_back = Arc::clone(&url_stack);
+
+    let layout = OnEventView::new(layout)
+        .on_event('q', |s| {
+            s.pop_layer();
+        })
+        .on_event(cursive::event::Key::Esc, |s| {
+            s.pop_layer();
+        })
+        .on_event(cursive::event::Key::Backspace, move |s| {
+            // Pop the current directory and re-fetch the parent.
+            let parent_url = {
+                let mut stack = url_stack_back.lock().unwrap();
+                if stack.len() <= 1 {
+                    return;
+                }
+                stack.pop();
+                stack.last().cloned()
+            };
+            if let Some(url) = parent_url {
+                let viewer2 = Arc::clone(&viewer_back);
+                let url_stack2 = Arc::clone(&url_stack_back);
+                let cb = s.cb_sink().clone();
+                std::thread::spawn(move || {
+                    match viewer2.list_artifacts(&url) {
+                        Ok(entries) => {
+                            let viewer3 = Arc::clone(&viewer2);
+                            cb.send(Box::new(move |s: &mut Cursive| {
+                                populate_ci_files(s, entries, viewer3);
+                            }))
+                            .ok();
+                        }
+                        Err(e) => {
+                            // Restore the URL we popped since re-fetch failed.
+                            url_stack2.lock().unwrap().push(url);
+                            cb.send(Box::new(move |s: &mut Cursive| {
+                                show_error(s, &format!("Failed to load parent listing:\n{}", e));
+                            }))
+                            .ok();
+                        }
+                    }
+                });
+            }
+        });
+
+    siv.add_fullscreen_layer(layout);
+
+    // ── Background: fetch initial artifact listing ────────────────────────────
+    let viewer_init = Arc::clone(&viewer);
+    let cb = siv.cb_sink().clone();
+    std::thread::spawn(move || match viewer_init.list_artifacts(&base_url) {
+        Ok(entries) => {
+            let viewer2 = Arc::clone(&viewer_init);
+            cb.send(Box::new(move |s: &mut Cursive| {
+                populate_ci_files(s, entries, viewer2);
+            }))
+            .ok();
+        }
+        Err(e) => {
+            cb.send(Box::new(move |s: &mut Cursive| {
+                s.call_on_name("ci_content", |v: &mut TextView| {
+                    v.set_content(format!("Error loading artifact listing:\n{}", e));
+                });
+            }))
+            .ok();
+        }
+    });
+}
+
+/// Populate `"ci_files"` SelectView with `entries`, auto-select the default
+/// entry (e.g. `report.html`), and immediately fetch its content.
+fn populate_ci_files(
+    siv: &mut Cursive,
+    entries: Vec<crate::ci::ArtifactEntry>,
+    viewer: Arc<dyn crate::ci::CiJobViewer>,
+) {
+    let default_idx = viewer
+        .default_entry(&entries)
+        .and_then(|de| entries.iter().position(|e| e.name == de.name));
+
+    siv.call_on_name(
+        "ci_files",
+        |v: &mut SelectView<crate::ci::ArtifactEntry>| {
+            v.clear();
+            for entry in &entries {
+                let icon = if entry.is_dir { "▶" } else { " " };
+                v.add_item(format!("{} {}", icon, entry.name), entry.clone());
+            }
+            if let Some(idx) = default_idx {
+                let _ = v.set_selection(idx);
+            }
+        },
+    );
+
+    // Manually fetch content for the auto-selected entry since set_selection
+    // does not trigger on_select.
+    if let Some(idx) = default_idx {
+        if let Some(entry) = entries.get(idx) {
+            if !entry.is_dir {
+                let entry = entry.clone();
+                let viewer2 = Arc::clone(&viewer);
+                let cb = siv.cb_sink().clone();
+                std::thread::spawn(move || match viewer2.fetch_content(&entry) {
+                    Ok(content) => {
+                        cb.send(Box::new(move |s: &mut Cursive| {
+                            s.call_on_name("ci_content", |v: &mut TextView| {
+                                v.set_content(content);
+                            });
+                            s.call_on_name(
+                                "ci_content_scroll",
+                                |v: &mut ScrollView<NamedView<TextView>>| {
+                                    v.set_offset(cursive::Vec2::new(0, 0));
+                                },
+                            );
+                        }))
+                        .ok();
+                    }
+                    Err(e) => {
+                        cb.send(Box::new(move |s: &mut Cursive| {
+                            s.call_on_name("ci_content", |v: &mut TextView| {
+                                v.set_content(format!("Error loading {}:\n{}", entry.name, e));
+                            });
+                        }))
+                        .ok();
+                    }
+                });
+            }
+        }
     }
 }

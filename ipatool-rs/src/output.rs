@@ -94,7 +94,6 @@ impl Color {
             Color::Rgb(r, g, b) => format!("\x1b[38;2;{};{};{}m", r, g, b),
         }
     }
-
 }
 
 pub fn prompt(msg: &str) -> String {
