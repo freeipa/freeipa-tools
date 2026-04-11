@@ -11,16 +11,13 @@ pub fn run(
     backport_branches: &[String],
     autobackport: bool,
 ) -> Result<()> {
-    let Some(gh) = ctx.github.clone() else {
-        bail!("GitHub is not configured (gh-token / gh-repo missing)");
-    };
+    let prc = ctx.pr_client_or_err()?.clone();
 
     let patchdir = ctx.config.patchdir_expanded();
-    let pr = gh.get_pr(pr_id)?;
-    let issue = gh.get_issue(pr_id)?;
-    let labels = issue.label_names();
+    let pr = prc.get_pr(pr_id)?;
+    let labels = prc.pr_label_names(pr_id)?;
 
-    if issue.is_closed() {
+    if prc.pr_is_closed(pr_id)? {
         bail!("Pull request is already closed");
     }
     if !labels.contains(&"ack".to_string()) {
@@ -37,7 +34,7 @@ pub fn run(
     }
 
     // Check CI statuses
-    let statuses = gh.most_recent_statuses(&pr.head.sha)?;
+    let statuses = prc.most_recent_statuses(&pr.head.sha)?;
     if statuses
         .values()
         .any(|j| j.state == "error" || j.state == "failure")
@@ -49,7 +46,7 @@ pub fn run(
     }
 
     // Download patches from PR
-    super::backport::download_pr_patches(ctx, &gh, &pr, &patchdir)?;
+    super::backport::download_pr_patches(&prc, &pr, &patchdir)?;
 
     // Set target branch from PR base
     let base_branch = pr.base.ref_name.clone();
@@ -71,16 +68,16 @@ pub fn run(
         let push_info = ctx.push_info.clone().unwrap_or_default();
 
         println!("Adding label 'pushed'");
-        if let Err(e) = gh.add_labels(pr_id, &["pushed"]) {
+        if let Err(e) = prc.add_labels(pr_id, &["pushed"]) {
             eprintln!("Warning: failed to add 'pushed' label: {}", e);
         }
 
-        if let Err(e) = gh.create_comment(pr_id, &push_info.pagure_comment) {
+        if let Err(e) = prc.create_comment(pr_id, &push_info.pagure_comment) {
             eprintln!("Warning: failed to create push comment: {}", e);
         }
 
         println!("Closing pull request {}", pr_id);
-        if let Err(e) = gh.close_issue(pr_id) {
+        if let Err(e) = prc.close_pr(pr_id) {
             eprintln!("Warning: failed to close PR: {}", e);
         }
 
@@ -96,7 +93,7 @@ pub fn run(
         }
 
         if !bp_branches.is_empty() {
-            super::backport::run_backport(ctx, &bp_branches, &gh, &pr)?;
+            super::backport::run_backport(ctx, &bp_branches, &prc, &pr)?;
         }
     }
 
@@ -104,3 +101,4 @@ pub fn run(
 
     push_result
 }
+

@@ -1,17 +1,18 @@
 use anyhow::{bail, Result};
 use std::sync::Arc;
 
+use super::pr_client::PrClient;
 use super::Ctx;
-use crate::api::github::GitHubClient;
-use crate::db::{Provider, ProviderAction, QueuedAction};
+use crate::db::{ProviderAction, QueuedAction};
 
 pub fn run(ctx: &Ctx, pr_id: u64, comment: Option<&str>) -> Result<()> {
     if ctx.offline {
         let Some(db) = &ctx.db else {
             bail!("--offline requires a configured database (db-path in config)");
         };
+        let prc = ctx.pr_client_or_err()?;
         let action = ProviderAction {
-            provider: Provider::GitHub,
+            provider: prc.provider(),
             action: QueuedAction::Ack {
                 pr_number: pr_id,
                 comment: comment.map(|s| s.to_string()),
@@ -24,30 +25,27 @@ pub fn run(ctx: &Ctx, pr_id: u64, comment: Option<&str>) -> Result<()> {
         ));
         return Ok(());
     }
-    let Some(gh) = &ctx.github else {
-        bail!("GitHub is not configured (gh-token / gh-repo missing)");
-    };
-    run_api(gh, pr_id, comment)
+    let prc = ctx.pr_client_or_err()?;
+    run_api(prc, pr_id, comment)
 }
 
 /// Core ACK logic, usable without a full Ctx (e.g. from the TUI).
-pub fn run_api(gh: &Arc<GitHubClient>, pr_id: u64, comment: Option<&str>) -> Result<()> {
-    let issue = gh.get_issue(pr_id)?;
+pub fn run_api(prc: &Arc<PrClient>, pr_id: u64, comment: Option<&str>) -> Result<()> {
+    let labels = prc.pr_label_names(pr_id)?;
 
-    if issue.is_closed() {
+    if prc.pr_is_closed(pr_id)? {
         bail!("Pull request was already closed");
     }
 
-    let labels = issue.label_names();
     if labels.contains(&"rejected".to_string()) {
         bail!("Pull request was rejected");
     }
 
-    gh.add_labels(pr_id, &["ack"])?;
+    prc.add_labels(pr_id, &["ack"])?;
 
     if let Some(text) = comment {
         if !text.is_empty() {
-            gh.create_comment(pr_id, text)?;
+            prc.create_comment(pr_id, text)?;
         }
     }
 

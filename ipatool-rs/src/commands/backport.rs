@@ -1,21 +1,17 @@
 use anyhow::{bail, Result};
 use std::sync::Arc;
 
+use super::pr_client::PrClient;
 use super::Ctx;
-use crate::api::github::{sorted_commits, GitHubClient, GitHubPR};
+use crate::api::github::{sorted_commits, GitHubPR};
 use crate::patch::{delete_patches, patch_filename};
 
 pub fn run_backport_cmd(ctx: &mut Ctx, pr_id: u64, branches: &[String]) -> Result<()> {
-    // No patches allowed as positional args for backport command
-    let gh = ctx
-        .github
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("GitHub is not configured (gh-token / gh-repo missing)"))?;
+    let prc = ctx.pr_client_or_err()?.clone();
 
     let patchdir = ctx.config.patchdir_expanded();
-    let pr = gh.get_pr(pr_id)?;
-    let issue = gh.get_issue(pr_id)?;
-    let labels = issue.label_names();
+    let pr = prc.get_pr(pr_id)?;
+    let labels = prc.pr_label_names(pr_id)?;
 
     if !labels.contains(&"ack".to_string()) {
         bail!("Pull request is not ACKed");
@@ -28,7 +24,7 @@ pub fn run_backport_cmd(ctx: &mut Ctx, pr_id: u64, branches: &[String]) -> Resul
     }
 
     // Check CI
-    let statuses = gh.most_recent_statuses(&pr.head.sha)?;
+    let statuses = prc.most_recent_statuses(&pr.head.sha)?;
     if statuses
         .values()
         .any(|j| j.state == "error" || j.state == "failure")
@@ -40,10 +36,10 @@ pub fn run_backport_cmd(ctx: &mut Ctx, pr_id: u64, branches: &[String]) -> Resul
     }
 
     // Download commits as patches
-    download_pr_patches(ctx, &gh, &pr, &patchdir)?;
+    download_pr_patches(&prc, &pr, &patchdir)?;
 
     let backport_branches: Vec<String> = branches.to_vec();
-    let result = run_backport(ctx, &backport_branches, &gh, &pr);
+    let result = run_backport(ctx, &backport_branches, &prc, &pr);
 
     delete_patches(&patchdir);
     result
@@ -52,7 +48,7 @@ pub fn run_backport_cmd(ctx: &mut Ctx, pr_id: u64, branches: &[String]) -> Resul
 pub fn run_backport(
     ctx: &mut Ctx,
     backport_branches: &[String],
-    gh: &Arc<GitHubClient>,
+    prc: &Arc<PrClient>,
     pr: &GitHubPR,
 ) -> Result<()> {
     let fork_remote = ctx.config.gh_fork_remote.clone();
@@ -68,7 +64,7 @@ pub fn run_backport(
     std::env::set_current_dir(&repo_path)
         .map_err(|e| anyhow::anyhow!("Cannot cd to {}: {}", repo_path.display(), e))?;
 
-    let github_login = gh.get_authenticated_user_login()?;
+    let user_login = prc.get_authenticated_user_login()?;
     let old_branch = crate::git::current_branch(&ctx.git_env, ctx.verbosity)?;
 
     for bb in backport_branches {
@@ -125,10 +121,10 @@ pub fn run_backport(
 
             println!("Pushed {} to {}/{}", sha, fork_remote, backport_name);
 
-            let backport_pr = gh.create_pr(
+            let backport_pr = prc.create_pr(
                 &format!("[Backport][{}] {}", bb, pr.title),
                 bb,
-                &format!("{}:{}", github_login, backport_name),
+                &format!("{}:{}", user_login, backport_name),
                 &format!(
                     "This PR was opened automatically because PR #{} was pushed to {} \
                      and backport to {} is required.",
@@ -136,8 +132,8 @@ pub fn run_backport(
                 ),
             )?;
 
-            gh.add_labels(backport_pr.number, &["ack"])?;
-            gh.create_comment(
+            prc.add_labels(backport_pr.number, &["ack"])?;
+            prc.create_comment(
                 backport_pr.number,
                 &format!(
                     "PR was ACKed automatically because this is a backport of PR #{}. \
@@ -166,18 +162,17 @@ pub fn run_backport(
 }
 
 pub fn download_pr_patches(
-    _ctx: &Ctx,
-    gh: &Arc<GitHubClient>,
+    prc: &Arc<PrClient>,
     pr: &GitHubPR,
     patchdir: &std::path::Path,
 ) -> Result<()> {
-    let commits_raw = gh.get_pr_commits(pr.number)?;
+    let commits_raw = prc.get_pr_commits(pr.number)?;
     let commits = sorted_commits(commits_raw)?;
 
     for (num, commit) in commits.iter().enumerate() {
         let filename = patch_filename(&commit.commit.message, num + 1);
         let path = patchdir.join(&filename);
-        let patch_bytes = gh.get_commit_patch(&commit.sha)?;
+        let patch_bytes = prc.get_commit_patch(&commit.sha)?;
         std::fs::write(&path, &patch_bytes)
             .map_err(|e| anyhow::anyhow!("Cannot write patch {}: {}", path.display(), e))?;
     }

@@ -273,8 +273,13 @@ pub struct Ctx {
     pub db: Option<Arc<crate::db::Database>>,
     pub tui_style: crate::tui_style::TuiStyle,
     pub tui_keys: crate::tui_keys::TuiKeys,
+    /// Active profile name from --profile (empty string for the default profile).
+    /// Used as the cache namespace so different profiles don't share cached PR data.
+    pub profile: String,
     /// Which issue tracker holds the linked tickets (set by --profile or default)
     pub issue_tracker: IssueTracker,
+    /// Unified PR client for the active pr_source (None if no PR client is configured)
+    pub pr_client: Option<Arc<pr_client::PrClient>>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -309,6 +314,17 @@ impl Ctx {
             IssueTracker::Forgejo => self.forgejo.is_some(),
             IssueTracker::GitHub => self.github.is_some(),
         }
+    }
+
+    /// Return the active PR client or a helpful error.
+    pub fn pr_client_or_err(&self) -> Result<&Arc<pr_client::PrClient>> {
+        self.pr_client.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "No PR client configured — check gh-token/gh-repo (GitHub) \
+                 or forgejo-url/forgejo-repo/forgejo-token (Forgejo) in the config, \
+                 and ensure the selected --profile has a matching pr-source"
+            )
+        })
     }
 
     pub fn verify_remote_url(&self) -> Result<()> {
