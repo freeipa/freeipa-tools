@@ -32,7 +32,7 @@ commit-url: https://pagure.io/freeipa/c/
 bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 jira-ticket-url: https://issues.redhat.com/browse/RHEL-
 
-# Pagure login details (use either Pagure or Forgejo, not both)
+# Pagure login details (used as default issue tracker)
 pagure-repository: freeipa
 # Create the token in https://pagure.io/freeipa/settings
 # For token you need:
@@ -87,6 +87,28 @@ browser: firefox
 gh-token: "YOUR_GITHUB_TOKEN_HERE"
 gh-repo: "freeipa/freeipa"
 gh-fork-remote: "mygh"
+
+# Named profiles — select with --profile <name>
+# Each profile can override the pr-source, issue-tracker, and/or any
+# connection settings.  Unset fields fall back to the top-level values.
+#
+# pr-source:     github | forgejo | pagure   (default: github)
+# issue-tracker: pagure | forgejo | github   (default: pagure)
+#
+# profiles:
+#   # Explicit default — same as omitting --profile
+#   default:
+#     pr-source: github
+#     issue-tracker: pagure
+#
+#   # Codeberg mirror: PRs on Codeberg, issues on Codeberg
+#   codeberg:
+#     pr-source: forgejo
+#     issue-tracker: forgejo
+#     forgejo-url: https://codeberg.org
+#     forgejo-repo: myuser/freeipa
+#     forgejo-token: "YOUR_CODEBERG_TOKEN_HERE"
+#     ticket-url: https://codeberg.org/myuser/freeipa/issues/
 "#;
 
 #[derive(Parser)]
@@ -127,6 +149,10 @@ struct Cli {
     /// Do not synchronize before pushing
     #[arg(long, global = true)]
     no_fetch: bool,
+
+    /// Named profile from the 'profiles:' section of the config file
+    #[arg(long, global = true)]
+    profile: Option<String>,
 
     /// Colorize output: auto, always, never
     #[arg(long, global = true, default_value = "auto")]
@@ -267,7 +293,7 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
     let color = ColorMode::from_str(&cli.color);
     let out = Output::new(color);
 
-    let config = match Config::load(&cli.config) {
+    let mut config = match Config::load(&cli.config) {
         Ok(c) => c,
         Err(e) => {
             // File-not-found is fine (user may not have created a config yet).
@@ -286,9 +312,21 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         }
     };
 
+    // Apply profile overrides before building any clients.
+    let pr_source = config.pr_source_for(cli.profile.as_deref());
+    let issue_tracker = config.issue_tracker_for(cli.profile.as_deref());
+    if let Some(name) = cli.profile.as_deref() {
+        config.apply_profile(name)?;
+    }
+
     if cli.verbose > 0 {
         println!("Config:");
         println!("{}", config.sanitized_display());
+        if let Some(p) = cli.profile.as_deref() {
+            println!("Profile: {}", p);
+        }
+        println!("PR source: {:?}", pr_source);
+        println!("Issue tracker: {:?}", issue_tracker);
     }
 
     // Build API clients
@@ -363,6 +401,17 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
     let keys_path = tui_keys::keys_config_path(&cli.config);
     let tui_keys = tui_keys::TuiKeys::load_or_save_default(&keys_path);
 
+    // Build the unified PR client based on pr_source.
+    let pr_client = match pr_source {
+        config::PrSource::GitHub => github
+            .as_ref()
+            .map(|gh| Arc::new(commands::pr_client::PrClient::GitHub(Arc::clone(gh)))),
+        config::PrSource::Forgejo => forgejo
+            .as_ref()
+            .map(|fj| Arc::new(commands::pr_client::PrClient::Forgejo(Arc::clone(fj)))),
+        config::PrSource::Pagure => None, // Pagure PR source not yet implemented
+    };
+
     Ok(Ctx {
         config,
         pagure,
@@ -381,6 +430,9 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         db,
         tui_style,
         tui_keys,
+        profile: cli.profile.clone().unwrap_or_default(),
+        issue_tracker,
+        pr_client,
     })
 }
 

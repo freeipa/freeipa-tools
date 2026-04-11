@@ -77,9 +77,7 @@ pub fn run_submit(ctx: &Ctx) -> Result<()> {
     let Some(db) = &ctx.db else {
         bail!("No local database configured (db-path missing from config)");
     };
-    let Some(gh) = &ctx.github else {
-        bail!("GitHub is not configured (gh-token / gh-repo missing)");
-    };
+    let prc = ctx.pr_client_or_err()?;
 
     let pending = db.pending_actions()?;
     if pending.is_empty() {
@@ -99,23 +97,23 @@ pub fn run_submit(ctx: &Ctx) -> Result<()> {
 
         let result: anyhow::Result<()> = match &p.provider_action.action {
             QueuedAction::Ack { pr_number, comment } => {
-                super::pr_ack::run_api(gh, *pr_number, comment.as_deref())
+                super::pr_ack::run_api(prc, *pr_number, comment.as_deref())
             }
             QueuedAction::Reject { pr_number, comment } => {
-                super::pr_reject::run_api(gh, *pr_number, comment)
+                super::pr_reject::run_api(prc, *pr_number, comment)
             }
             QueuedAction::AddLabel { pr_number, label } => {
-                gh.add_labels(*pr_number, &[label.as_str()])
+                prc.add_labels(*pr_number, &[label.as_str()])
             }
-            QueuedAction::RemoveLabel { pr_number, label } => gh.remove_label(*pr_number, label),
-            QueuedAction::PostComment { pr_number, body } => gh.create_comment(*pr_number, body),
+            QueuedAction::RemoveLabel { pr_number, label } => prc.remove_label(*pr_number, label),
+            QueuedAction::PostComment { pr_number, body } => prc.create_comment(*pr_number, body),
             QueuedAction::PostReviewComment {
                 pr_number,
                 commit_id,
                 path,
                 line,
                 body,
-            } => gh.create_review_comment(*pr_number, commit_id, path, *line, body),
+            } => prc.create_review_comment(*pr_number, commit_id, path, *line, body),
             QueuedAction::UpdateLabels {
                 pr_number,
                 to_add,
@@ -123,13 +121,13 @@ pub fn run_submit(ctx: &Ctx) -> Result<()> {
             } => {
                 let add_refs: Vec<&str> = to_add.iter().map(|s| s.as_str()).collect();
                 let mut r = if !add_refs.is_empty() {
-                    gh.add_labels(*pr_number, &add_refs)
+                    prc.add_labels(*pr_number, &add_refs)
                 } else {
                     Ok(())
                 };
                 if r.is_ok() {
                     for label in to_remove {
-                        r = gh.remove_label(*pr_number, label);
+                        r = prc.remove_label(*pr_number, label);
                         if r.is_err() {
                             break;
                         }
