@@ -107,13 +107,20 @@ impl GitHubPR {
 pub struct GitHubIssue {
     pub state: String,
     pub labels: Vec<GitHubLabel>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub milestone: Option<GitHubMilestone>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct GitHubMilestone {
+    pub title: String,
 }
 
 impl GitHubIssue {
-    pub fn label_names(&self) -> Vec<String> {
-        self.labels.iter().map(|l| l.name.clone()).collect()
-    }
-
     pub fn is_closed(&self) -> bool {
         self.state == "closed"
     }

@@ -57,6 +57,10 @@ pub fn run(
                 .data()
                 .map(|d| d.body.clone().unwrap_or_default())
                 .unwrap_or_default(),
+            super::Ticket::GitHub(t) => t
+                .data()
+                .map(|d| d.body.clone().unwrap_or_default())
+                .unwrap_or_default(),
         };
         println!("- summary: {}", summary);
         let reviewer = ticket.reviewer().unwrap_or(None);
