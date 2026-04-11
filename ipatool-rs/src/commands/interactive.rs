@@ -2628,19 +2628,145 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     // exit, rather than waiting for background threads to drop their Arc clones.
     let cache_q = Arc::clone(&content_cache);
     let listing_q = Arc::clone(&listing_cache);
+    let sub_q = Arc::clone(&sub_entries_cache);
     let cache_esc = Arc::clone(&content_cache);
     let listing_esc = Arc::clone(&listing_cache);
+    let sub_esc = Arc::clone(&sub_entries_cache);
+    // Arcs shared into the on_pre_event_inner closures.
+    // Each closure is FnMut; it clones the Arc/String on every keypress into
+    // the EventResult::with_cb callback that cursive schedules.
+    let fr_tab = Arc::clone(&focus_right);
+    let fr_up = Arc::clone(&focus_right);
+    let fr_down = Arc::clone(&focus_right);
+    let fr_pgup = Arc::clone(&focus_right);
+    let fr_pgdn = Arc::clone(&focus_right);
+    let fr_home = Arc::clone(&focus_right);
+    let fr_end = Arc::clone(&focus_right);
+    let job_name_tab = job_name_short;
 
     let layout = OnEventView::new(layout)
         .on_event('q', move |s| {
             cache_q.lock().unwrap().clear();
             listing_q.lock().unwrap().clear();
+            sub_q.lock().unwrap().clear();
             s.pop_layer();
         })
         .on_event(cursive::event::Key::Esc, move |s| {
             cache_esc.lock().unwrap().clear();
             listing_esc.lock().unwrap().clear();
+            sub_esc.lock().unwrap().clear();
             s.pop_layer();
+        })
+        // Tab: intercepted before LinearLayout moves cursive focus between children.
+        // Uses simulated focus (Arc flag) so behaviour is independent of whether
+        // the inner views accept real cursive focus.
+        .on_pre_event_inner(cursive::event::Key::Tab, move |_, _| {
+            let fr = Arc::clone(&fr_tab);
+            let jn = job_name_tab.clone();
+            Some(EventResult::with_cb(move |s: &mut Cursive| {
+                let is_right = {
+                    let mut f = fr.lock().unwrap();
+                    *f = !*f;
+                    *f
+                };
+                s.call_on_name("ci_left_panel", |p: &mut Panel<BoxedView>| {
+                    p.set_title(panel_title("Artifacts", !is_right));
+                });
+                s.call_on_name("ci_right_panel", |p: &mut Panel<BoxedView>| {
+                    p.set_title(panel_title(&jn, is_right));
+                });
+            }))
+        })
+        // Up / Down: when right pane is "focused" intercept and scroll it;
+        // otherwise return None so SelectView receives the event through the
+        // normal cursive dispatch path and its make_important_visible keeps the
+        // highlighted item in the visible portion of the left pane.
+        .on_pre_event_inner(cursive::event::Key::Up, move |_, _| {
+            let fr = Arc::clone(&fr_up);
+            if *fr.lock().unwrap() {
+                Some(EventResult::with_cb(|s: &mut Cursive| {
+                    scroll_ci_content(s, -1);
+                }))
+            } else {
+                None
+            }
+        })
+        .on_pre_event_inner(cursive::event::Key::Down, move |_, _| {
+            let fr = Arc::clone(&fr_down);
+            if *fr.lock().unwrap() {
+                Some(EventResult::with_cb(|s: &mut Cursive| {
+                    scroll_ci_content(s, 1);
+                }))
+            } else {
+                None
+            }
+        })
+        // PageUp / PageDown: 10-line jumps.
+        .on_pre_event_inner(cursive::event::Key::PageUp, move |_, _| {
+            let fr = Arc::clone(&fr_pgup);
+            Some(EventResult::with_cb(move |s: &mut Cursive| {
+                if *fr.lock().unwrap() {
+                    scroll_ci_content(s, -10);
+                } else if let Some(cb) = s.call_on_name(
+                    "ci_files",
+                    |v: &mut SelectView<crate::ci::ArtifactEntry>| v.select_up(10),
+                ) {
+                    cb(s);
+                }
+            }))
+        })
+        .on_pre_event_inner(cursive::event::Key::PageDown, move |_, _| {
+            let fr = Arc::clone(&fr_pgdn);
+            Some(EventResult::with_cb(move |s: &mut Cursive| {
+                if *fr.lock().unwrap() {
+                    scroll_ci_content(s, 10);
+                } else if let Some(cb) = s.call_on_name(
+                    "ci_files",
+                    |v: &mut SelectView<crate::ci::ArtifactEntry>| v.select_down(10),
+                ) {
+                    cb(s);
+                }
+            }))
+        })
+        // Home / End: jump to first / last item (left pane) or top / bottom (right).
+        .on_pre_event_inner(cursive::event::Key::Home, move |_, _| {
+            let fr = Arc::clone(&fr_home);
+            Some(EventResult::with_cb(move |s: &mut Cursive| {
+                if *fr.lock().unwrap() {
+                    s.call_on_name(
+                        "ci_content_scroll",
+                        |v: &mut ScrollView<NamedView<TextView>>| {
+                            v.set_offset(cursive::Vec2::new(0, 0));
+                        },
+                    );
+                } else if let Some(cb) = s.call_on_name(
+                    "ci_files",
+                    // 10_000 saturates at item 0 without integer overflow.
+                    |v: &mut SelectView<crate::ci::ArtifactEntry>| v.select_up(10_000),
+                ) {
+                    cb(s);
+                }
+            }))
+        })
+        .on_pre_event_inner(cursive::event::Key::End, move |_, _| {
+            let fr = Arc::clone(&fr_end);
+            Some(EventResult::with_cb(move |s: &mut Cursive| {
+                if *fr.lock().unwrap() {
+                    s.call_on_name(
+                        "ci_content_scroll",
+                        |v: &mut ScrollView<NamedView<TextView>>| {
+                            // Offset is clamped to valid range during the next layout pass.
+                            v.set_offset(cursive::Vec2::new(0, usize::MAX / 2));
+                        },
+                    );
+                } else if let Some(cb) = s.call_on_name(
+                    "ci_files",
+                    // 10_000 saturates at the last item without integer overflow.
+                    |v: &mut SelectView<crate::ci::ArtifactEntry>| v.select_down(10_000),
+                ) {
+                    cb(s);
+                }
+            }))
         })
         .on_event(cursive::event::Key::Backspace, move |s| {
             // Pop the current directory and show the parent listing.
