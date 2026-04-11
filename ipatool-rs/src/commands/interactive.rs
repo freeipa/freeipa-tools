@@ -2549,12 +2549,22 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     // ── Key handling (outer wrapper) ──────────────────────────────────────────
     let viewer_back = Arc::clone(&viewer);
     let url_stack_back = Arc::clone(&url_stack);
+    // Extra clones so the close handlers can clear both caches immediately on
+    // exit, rather than waiting for background threads to drop their Arc clones.
+    let cache_q = Arc::clone(&content_cache);
+    let listing_q = Arc::clone(&listing_cache);
+    let cache_esc = Arc::clone(&content_cache);
+    let listing_esc = Arc::clone(&listing_cache);
 
     let layout = OnEventView::new(layout)
-        .on_event('q', |s| {
+        .on_event('q', move |s| {
+            cache_q.lock().unwrap().clear();
+            listing_q.lock().unwrap().clear();
             s.pop_layer();
         })
-        .on_event(cursive::event::Key::Esc, |s| {
+        .on_event(cursive::event::Key::Esc, move |s| {
+            cache_esc.lock().unwrap().clear();
+            listing_esc.lock().unwrap().clear();
             s.pop_layer();
         })
         .on_event(cursive::event::Key::Backspace, move |s| {
