@@ -128,81 +128,98 @@ impl Database {
 
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        // Primary key is (number, provider) so GitHub and Forgejo PR #42 can
-        // coexist in the same cache table.
+
+        // The action queue is never dropped — it holds persistent offline work.
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS prs (
-                 number     INTEGER NOT NULL,
-                 provider   TEXT    NOT NULL DEFAULT 'github',
-                 state      TEXT    NOT NULL,
-                 data_json  TEXT    NOT NULL,
-                 cached_at  INTEGER NOT NULL,
-                 PRIMARY KEY (number, provider)
-             );
-             CREATE TABLE IF NOT EXISTS pr_details (
-                 number       INTEGER NOT NULL,
-                 provider     TEXT    NOT NULL DEFAULT 'github',
-                 details_json TEXT    NOT NULL,
-                 pr_updated_at TEXT,
-                 cached_at    INTEGER NOT NULL,
-                 PRIMARY KEY (number, provider)
-             );
-             CREATE TABLE IF NOT EXISTS queued_actions (
+            "CREATE TABLE IF NOT EXISTS queued_actions (
                  id          INTEGER PRIMARY KEY AUTOINCREMENT,
                  action_json TEXT    NOT NULL,
                  created_at  INTEGER NOT NULL
              );",
         )
-        .context("Creating DB schema")?;
+        .context("Creating queued_actions table")?;
 
-        // Migrate existing databases that pre-date schema additions.
-        // SQLite returns an error if the column already exists; ignore it.
-        let _ = conn
-            .execute_batch("ALTER TABLE prs ADD COLUMN provider TEXT NOT NULL DEFAULT 'github';");
-        let _ = conn.execute_batch("ALTER TABLE pr_details ADD COLUMN pr_updated_at TEXT;");
+        // Cache tables are keyed by (number, profile) so that different
+        // --profile values (which may point to different forges or repos) keep
+        // completely separate namespaces.  The default profile is ''.
+        //
+        // Migration: old databases used (number, provider) as the primary key.
+        // Detect this by checking whether the 'profile' column exists.  If it
+        // does not, the cache tables are stale; drop and recreate them (cache
+        // loss is acceptable — run `cache-update` to repopulate).
+        let has_profile: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('prs') WHERE name='profile'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+
+        if !has_profile {
+            conn.execute_batch("DROP TABLE IF EXISTS prs; DROP TABLE IF EXISTS pr_details;")
+                .context("Dropping old-schema cache tables")?;
+        }
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS prs (
+                 number     INTEGER NOT NULL,
+                 profile    TEXT    NOT NULL DEFAULT '',
+                 state      TEXT    NOT NULL,
+                 data_json  TEXT    NOT NULL,
+                 cached_at  INTEGER NOT NULL,
+                 PRIMARY KEY (number, profile)
+             );
+             CREATE TABLE IF NOT EXISTS pr_details (
+                 number        INTEGER NOT NULL,
+                 profile       TEXT    NOT NULL DEFAULT '',
+                 details_json  TEXT    NOT NULL,
+                 pr_updated_at TEXT,
+                 cached_at     INTEGER NOT NULL,
+                 PRIMARY KEY (number, profile)
+             );",
+        )
+        .context("Creating cache tables")?;
 
         Ok(())
     }
 
     // ── PR cache ──────────────────────────────────────────────────────────────
 
-    /// Cache a slice of GitHub PRs, tagging each row with `provider` so that
-    /// rows from different forges don't collide.
-    pub fn cache_prs(&self, provider: Provider, prs: &[GitHubPR]) -> Result<()> {
+    /// Cache a slice of PRs under the given profile namespace.
+    /// The profile is the active `--profile` name (empty string for the default
+    /// profile), so that different profile configurations keep separate caches.
+    pub fn cache_prs(&self, profile: &str, prs: &[GitHubPR]) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = now_secs();
-        let provider_str = provider.as_str();
         for pr in prs {
             let json = serde_json::to_string(pr)?;
             conn.execute(
-                "INSERT OR REPLACE INTO prs (number, provider, state, data_json, cached_at)
+                "INSERT OR REPLACE INTO prs (number, profile, state, data_json, cached_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![pr.number as i64, provider_str, pr.state, json, now],
+                params![pr.number as i64, profile, pr.state, json, now],
             )?;
         }
         Ok(())
     }
 
-    /// Load cached PRs for the given provider, optionally filtered by state.
-    /// Returns `Vec<GitHubPR>`; a future `load_forgejo_prs` would return the
-    /// Forgejo equivalent type using the same underlying JSON blob.
-    pub fn load_prs(&self, provider: Provider, state_filter: &str) -> Result<Vec<GitHubPR>> {
+    /// Load cached PRs for the given profile, optionally filtered by state.
+    pub fn load_prs(&self, profile: &str, state_filter: &str) -> Result<Vec<GitHubPR>> {
         let conn = self.conn.lock().unwrap();
-        let provider_str = provider.as_str();
         let jsons: Vec<String> = if state_filter == "all" {
-            let mut stmt =
-                conn.prepare("SELECT data_json FROM prs WHERE provider = ?1 ORDER BY number DESC")?;
+            let mut stmt = conn
+                .prepare("SELECT data_json FROM prs WHERE profile = ?1 ORDER BY number DESC")?;
             let collected: rusqlite::Result<Vec<String>> =
-                stmt.query_map([provider_str], |row| row.get(0))?.collect();
+                stmt.query_map([profile], |row| row.get(0))?.collect();
             collected?
         } else {
             let mut stmt = conn.prepare(
                 "SELECT data_json FROM prs \
-                  WHERE provider = ?1 AND state = ?2 \
+                  WHERE profile = ?1 AND state = ?2 \
                   ORDER BY number DESC",
             )?;
             let collected: rusqlite::Result<Vec<String>> = stmt
-                .query_map(params![provider_str, state_filter], |row| row.get(0))?
+                .query_map(params![profile, state_filter], |row| row.get(0))?
                 .collect();
             collected?
         };
@@ -214,12 +231,13 @@ impl Database {
 
     // ── PR details cache ──────────────────────────────────────────────────────
 
-    /// Store supplementary PR details (CI statuses, comments, files).
+    /// Store supplementary PR details (CI statuses, comments, files) under
+    /// the given profile namespace.
     /// `pr_updated_at` is the `updated_at` timestamp from the forge API; it is
     /// stored so callers can detect unchanged PRs without re-fetching.
     pub fn cache_pr_details(
         &self,
-        provider: Provider,
+        profile: &str,
         pr_number: u64,
         details: &CachedPrDetails,
         pr_updated_at: Option<&str>,
@@ -228,29 +246,19 @@ impl Database {
         let json = serde_json::to_string(details)?;
         conn.execute(
             "INSERT OR REPLACE INTO pr_details
-                 (number, provider, details_json, pr_updated_at, cached_at)
+                 (number, profile, details_json, pr_updated_at, cached_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                pr_number as i64,
-                provider.as_str(),
-                json,
-                pr_updated_at,
-                now_secs()
-            ],
+            params![pr_number as i64, profile, json, pr_updated_at, now_secs()],
         )?;
         Ok(())
     }
 
     /// Load cached supplementary details for a PR, or `None` if not cached.
-    pub fn load_pr_details(
-        &self,
-        provider: Provider,
-        pr_number: u64,
-    ) -> Result<Option<CachedPrDetails>> {
+    pub fn load_pr_details(&self, profile: &str, pr_number: u64) -> Result<Option<CachedPrDetails>> {
         let conn = self.conn.lock().unwrap();
         let result = conn.query_row(
-            "SELECT details_json FROM pr_details WHERE number = ?1 AND provider = ?2",
-            params![pr_number as i64, provider.as_str()],
+            "SELECT details_json FROM pr_details WHERE number = ?1 AND profile = ?2",
+            params![pr_number as i64, profile],
             |row| row.get::<_, String>(0),
         );
         match result {
@@ -262,11 +270,11 @@ impl Database {
 
     /// Return the `pr_updated_at` value stored when details were last cached,
     /// or `None` if no details have been cached for this PR.
-    pub fn pr_details_updated_at(&self, provider: Provider, pr_number: u64) -> Option<String> {
+    pub fn pr_details_updated_at(&self, profile: &str, pr_number: u64) -> Option<String> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT pr_updated_at FROM pr_details WHERE number = ?1 AND provider = ?2",
-            params![pr_number as i64, provider.as_str()],
+            "SELECT pr_updated_at FROM pr_details WHERE number = ?1 AND profile = ?2",
+            params![pr_number as i64, profile],
             |row| row.get::<_, Option<String>>(0),
         )
         .ok()
@@ -414,8 +422,8 @@ mod tests {
     fn test_cache_and_load_prs_all() {
         let db = Database::open_in_memory().unwrap();
         let prs = vec![make_pr(1, "open"), make_pr(2, "open"), make_pr(3, "closed")];
-        db.cache_prs(Provider::GitHub, &prs).unwrap();
-        let loaded = db.load_prs(Provider::GitHub, "all").unwrap();
+        db.cache_prs("", &prs).unwrap();
+        let loaded = db.load_prs("", "all").unwrap();
         assert_eq!(loaded.len(), 3);
     }
 
@@ -423,8 +431,8 @@ mod tests {
     fn test_load_prs_filter_open() {
         let db = Database::open_in_memory().unwrap();
         let prs = vec![make_pr(1, "open"), make_pr(2, "open"), make_pr(3, "closed")];
-        db.cache_prs(Provider::GitHub, &prs).unwrap();
-        let open = db.load_prs(Provider::GitHub, "open").unwrap();
+        db.cache_prs("", &prs).unwrap();
+        let open = db.load_prs("", "open").unwrap();
         assert_eq!(open.len(), 2);
     }
 
@@ -432,8 +440,8 @@ mod tests {
     fn test_load_prs_filter_closed() {
         let db = Database::open_in_memory().unwrap();
         let prs = vec![make_pr(1, "open"), make_pr(2, "closed")];
-        db.cache_prs(Provider::GitHub, &prs).unwrap();
-        let closed = db.load_prs(Provider::GitHub, "closed").unwrap();
+        db.cache_prs("", &prs).unwrap();
+        let closed = db.load_prs("", "closed").unwrap();
         assert_eq!(closed.len(), 1);
         assert_eq!(closed[0].number, 2);
     }
@@ -448,8 +456,8 @@ mod tests {
             color: "00ff00".to_string(),
         }];
         pr.updated_at = Some("2024-06-01T12:00:00Z".to_string());
-        db.cache_prs(Provider::GitHub, &[pr]).unwrap();
-        let loaded = db.load_prs(Provider::GitHub, "open").unwrap();
+        db.cache_prs("", &[pr]).unwrap();
+        let loaded = db.load_prs("", "open").unwrap();
         assert_eq!(loaded[0].title, "Special title");
         assert_eq!(loaded[0].labels.len(), 1);
         assert_eq!(loaded[0].labels[0].name, "ack");
@@ -462,7 +470,7 @@ mod tests {
     #[test]
     fn test_load_prs_empty() {
         let db = Database::open_in_memory().unwrap();
-        let prs = db.load_prs(Provider::GitHub, "open").unwrap();
+        let prs = db.load_prs("", "open").unwrap();
         assert!(prs.is_empty());
     }
 
@@ -470,29 +478,27 @@ mod tests {
     fn test_cache_prs_replace_on_conflict() {
         let db = Database::open_in_memory().unwrap();
         let mut pr = make_pr(1, "open");
-        db.cache_prs(Provider::GitHub, &[pr.clone()]).unwrap();
+        db.cache_prs("", &[pr.clone()]).unwrap();
         // Update and re-cache; INSERT OR REPLACE should update
         pr.title = "Updated title".to_string();
-        db.cache_prs(Provider::GitHub, &[pr]).unwrap();
-        let loaded = db.load_prs(Provider::GitHub, "all").unwrap();
+        db.cache_prs("", &[pr]).unwrap();
+        let loaded = db.load_prs("", "all").unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].title, "Updated title");
     }
 
-    // ── Provider isolation ────────────────────────────────────────────────────
+    // ── Profile isolation ─────────────────────────────────────────────────────
 
     #[test]
-    fn test_provider_isolation_pr_list() {
+    fn test_profile_isolation_pr_list() {
         let db = Database::open_in_memory().unwrap();
-        db.cache_prs(Provider::GitHub, &[make_pr(42, "open")])
-            .unwrap();
-        db.cache_prs(Provider::Forgejo, &[make_pr(42, "closed")])
-            .unwrap();
+        db.cache_prs("", &[make_pr(42, "open")]).unwrap();
+        db.cache_prs("codeberg", &[make_pr(42, "closed")]).unwrap();
 
-        let gh = db.load_prs(Provider::GitHub, "all").unwrap();
-        let fj = db.load_prs(Provider::Forgejo, "all").unwrap();
-        assert_eq!(gh[0].state, "open");
-        assert_eq!(fj[0].state, "closed");
+        let default = db.load_prs("", "all").unwrap();
+        let cb = db.load_prs("codeberg", "all").unwrap();
+        assert_eq!(default[0].state, "open");
+        assert_eq!(cb[0].state, "closed");
     }
 
     // ── PR details cache ──────────────────────────────────────────────────────
@@ -501,9 +507,9 @@ mod tests {
     fn test_cache_and_load_pr_details() {
         let db = Database::open_in_memory().unwrap();
         let details = make_details();
-        db.cache_pr_details(Provider::GitHub, 42, &details, Some("2024-01-01T00:00:00Z"))
+        db.cache_pr_details("", 42, &details, Some("2024-01-01T00:00:00Z"))
             .unwrap();
-        let loaded = db.load_pr_details(Provider::GitHub, 42).unwrap().unwrap();
+        let loaded = db.load_pr_details("", 42).unwrap().unwrap();
         assert_eq!(loaded.statuses.get("ci/test"), Some(&"success".to_string()));
         assert_eq!(loaded.comments.len(), 1);
         assert_eq!(loaded.comments[0].body, "LGTM");
@@ -515,7 +521,7 @@ mod tests {
     #[test]
     fn test_load_pr_details_missing() {
         let db = Database::open_in_memory().unwrap();
-        let result = db.load_pr_details(Provider::GitHub, 999).unwrap();
+        let result = db.load_pr_details("", 999).unwrap();
         assert!(result.is_none());
     }
 
@@ -523,36 +529,35 @@ mod tests {
     fn test_pr_details_updated_at_present() {
         let db = Database::open_in_memory().unwrap();
         let details = make_details();
-        db.cache_pr_details(Provider::GitHub, 42, &details, Some("2024-06-15T10:30:00Z"))
+        db.cache_pr_details("", 42, &details, Some("2024-06-15T10:30:00Z"))
             .unwrap();
-        let ts = db.pr_details_updated_at(Provider::GitHub, 42).unwrap();
+        let ts = db.pr_details_updated_at("", 42).unwrap();
         assert_eq!(ts, "2024-06-15T10:30:00Z");
     }
 
     #[test]
     fn test_pr_details_updated_at_missing() {
         let db = Database::open_in_memory().unwrap();
-        assert!(db.pr_details_updated_at(Provider::GitHub, 42).is_none());
+        assert!(db.pr_details_updated_at("", 42).is_none());
     }
 
     #[test]
     fn test_pr_details_updated_at_null() {
         let db = Database::open_in_memory().unwrap();
         let details = make_details();
-        db.cache_pr_details(Provider::GitHub, 42, &details, None)
-            .unwrap();
-        assert!(db.pr_details_updated_at(Provider::GitHub, 42).is_none());
+        db.cache_pr_details("", 42, &details, None).unwrap();
+        assert!(db.pr_details_updated_at("", 42).is_none());
     }
 
     #[test]
-    fn test_pr_details_provider_isolation() {
+    fn test_pr_details_profile_isolation() {
         let db = Database::open_in_memory().unwrap();
         let details = make_details();
-        db.cache_pr_details(Provider::GitHub, 42, &details, Some("2024-01-01"))
+        db.cache_pr_details("", 42, &details, Some("2024-01-01"))
             .unwrap();
-        // Forgejo PR #42 not cached
-        assert!(db.load_pr_details(Provider::Forgejo, 42).unwrap().is_none());
-        assert!(db.pr_details_updated_at(Provider::Forgejo, 42).is_none());
+        // "codeberg" profile PR #42 not cached
+        assert!(db.load_pr_details("codeberg", 42).unwrap().is_none());
+        assert!(db.pr_details_updated_at("codeberg", 42).is_none());
     }
 
     // ── Queued actions ────────────────────────────────────────────────────────
