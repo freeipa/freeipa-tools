@@ -88,6 +88,36 @@ impl PagureClient {
         Ok(issue)
     }
 
+    pub fn create_issue(&self, title: &str, body: &str) -> Result<u64> {
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            issue: RespIssue,
+        }
+        #[derive(serde::Deserialize)]
+        struct RespIssue {
+            id: u64,
+        }
+
+        let url = format!("{}/{}/new_issue", self.base_url, self.repository);
+        let mut form = HashMap::new();
+        form.insert("title", title);
+        form.insert("issue_content", body);
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .form(&form)
+            .send()
+            .with_context(|| format!("POST {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            bail!("Pagure create_issue failed ({}): {}", status, body);
+        }
+        let r: Resp = resp.json().context("Parsing create_issue response")?;
+        Ok(r.issue.id)
+    }
+
     pub fn comment_issue(&self, number: u64, text: &str) -> Result<()> {
         let url = format!(
             "{}/{}/issue/{}/comment",
