@@ -190,11 +190,7 @@ fn try_parse_pytest_report(
     let summary = render_pytest_report(&data);
 
     // Build sub-entries: one per test case, sorted by test ID.
-    let mut entries: Vec<&TestEntry> = data
-        .tests
-        .values()
-        .filter_map(|runs| runs.last())
-        .collect();
+    let mut entries: Vec<&TestEntry> = data.tests.values().filter_map(|runs| runs.last()).collect();
     entries.sort_by(|a, b| a.test_id.cmp(&b.test_id));
 
     let sub_entries: Vec<(ArtifactEntry, StyledString)> = entries
@@ -333,11 +329,7 @@ fn render_pytest_report(data: &ReportData) -> StyledString {
     let mut passed: Vec<&TestEntry> = Vec::new();
 
     // Each key maps to a list; take the last (most recent) run per test.
-    let mut entries: Vec<&TestEntry> = data
-        .tests
-        .values()
-        .filter_map(|runs| runs.last())
-        .collect();
+    let mut entries: Vec<&TestEntry> = data.tests.values().filter_map(|runs| runs.last()).collect();
     entries.sort_by(|a, b| a.test_id.cmp(&b.test_id));
 
     for e in &entries {
