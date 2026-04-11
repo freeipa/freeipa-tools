@@ -2395,9 +2395,14 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     // URL navigation stack: the last entry is the currently displayed directory.
     let url_stack: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![base_url.clone()]));
 
-    // In-session content cache: URL → rendered StyledString.
+    // In-session file content cache: URL → rendered StyledString.
     // Avoids re-downloading a file the user already viewed.
     let content_cache: Arc<Mutex<HashMap<String, StyledString>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
+    // In-session directory listing cache: URL → artifact entries.
+    // Once a job's report URL is live, its directory contents never change.
+    let listing_cache: Arc<Mutex<HashMap<String, Vec<crate::ci::ArtifactEntry>>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     // ── Artifact list (left pane) ─────────────────────────────────────────────
@@ -2408,6 +2413,9 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     let cache_submit = Arc::clone(&content_cache);
     let cache_back = Arc::clone(&content_cache);
     let cache_init = Arc::clone(&content_cache);
+    let listing_submit = Arc::clone(&listing_cache);
+    let listing_back = Arc::clone(&listing_cache);
+    let listing_init = Arc::clone(&listing_cache);
 
     let mut file_select = SelectView::<crate::ci::ArtifactEntry>::new();
 
@@ -2477,13 +2485,27 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
         {
             url_stack_submit.lock().unwrap().push(entry_url.clone());
         }
+
+        // Listing cache hit: no network request needed.
+        if let Some(cached) = listing_submit.lock().unwrap().get(&entry_url).cloned() {
+            let viewer2 = Arc::clone(&viewer_submit);
+            let cache2 = Arc::clone(&cache_submit);
+            populate_ci_files(s, cached, viewer2, cache2);
+            return;
+        }
+
         let viewer2 = Arc::clone(&viewer_submit);
         let url_stack2 = Arc::clone(&url_stack_submit);
+        let listing2 = Arc::clone(&listing_submit);
         let cache2 = Arc::clone(&cache_submit);
         let cb = s.cb_sink().clone();
         std::thread::spawn(move || {
             match viewer2.list_artifacts(&entry_url) {
                 Ok(entries) => {
+                    listing2
+                        .lock()
+                        .unwrap()
+                        .insert(entry_url.clone(), entries.clone());
                     let viewer3 = Arc::clone(&viewer2);
                     cb.send(Box::new(move |s: &mut Cursive| {
                         populate_ci_files(s, entries, viewer3, cache2);
@@ -2536,8 +2558,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
             s.pop_layer();
         })
         .on_event(cursive::event::Key::Backspace, move |s| {
-            // Pop the current directory and re-fetch the parent listing.
-            // Note: file content is cached so revisiting files is instant.
+            // Pop the current directory and show the parent listing.
             let parent_url = {
                 let mut stack = url_stack_back.lock().unwrap();
                 if stack.len() <= 1 {
@@ -2547,13 +2568,26 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                 stack.last().cloned()
             };
             if let Some(url) = parent_url {
+                // Listing cache hit: instant navigation, no network.
+                if let Some(cached) = listing_back.lock().unwrap().get(&url).cloned() {
+                    let viewer2 = Arc::clone(&viewer_back);
+                    let cache2 = Arc::clone(&cache_back);
+                    populate_ci_files(s, cached, viewer2, cache2);
+                    return;
+                }
+
                 let viewer2 = Arc::clone(&viewer_back);
                 let url_stack2 = Arc::clone(&url_stack_back);
+                let listing2 = Arc::clone(&listing_back);
                 let cache2 = Arc::clone(&cache_back);
                 let cb = s.cb_sink().clone();
                 std::thread::spawn(move || {
                     match viewer2.list_artifacts(&url) {
                         Ok(entries) => {
+                            listing2
+                                .lock()
+                                .unwrap()
+                                .insert(url.clone(), entries.clone());
                             let viewer3 = Arc::clone(&viewer2);
                             cb.send(Box::new(move |s: &mut Cursive| {
                                 populate_ci_files(s, entries, viewer3, cache2);
@@ -2580,6 +2614,10 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     let cb = siv.cb_sink().clone();
     std::thread::spawn(move || match viewer_init.list_artifacts(&base_url) {
         Ok(entries) => {
+            listing_init
+                .lock()
+                .unwrap()
+                .insert(base_url.clone(), entries.clone());
             let viewer2 = Arc::clone(&viewer_init);
             cb.send(Box::new(move |s: &mut Cursive| {
                 populate_ci_files(s, entries, viewer2, cache_init);
