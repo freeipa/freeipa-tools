@@ -207,8 +207,8 @@ impl Database {
     pub fn load_prs(&self, profile: &str, state_filter: &str) -> Result<Vec<GitHubPR>> {
         let conn = self.conn.lock().unwrap();
         let jsons: Vec<String> = if state_filter == "all" {
-            let mut stmt = conn
-                .prepare("SELECT data_json FROM prs WHERE profile = ?1 ORDER BY number DESC")?;
+            let mut stmt =
+                conn.prepare("SELECT data_json FROM prs WHERE profile = ?1 ORDER BY number DESC")?;
             let collected: rusqlite::Result<Vec<String>> =
                 stmt.query_map([profile], |row| row.get(0))?.collect();
             collected?
@@ -254,7 +254,11 @@ impl Database {
     }
 
     /// Load cached supplementary details for a PR, or `None` if not cached.
-    pub fn load_pr_details(&self, profile: &str, pr_number: u64) -> Result<Option<CachedPrDetails>> {
+    pub fn load_pr_details(
+        &self,
+        profile: &str,
+        pr_number: u64,
+    ) -> Result<Option<CachedPrDetails>> {
         let conn = self.conn.lock().unwrap();
         let result = conn.query_row(
             "SELECT details_json FROM pr_details WHERE number = ?1 AND profile = ?2",

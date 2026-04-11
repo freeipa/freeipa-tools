@@ -178,16 +178,8 @@ impl ProgressBar {
     /// Render the bar for item `done` (0-based) which is PR `pr_num`.
     fn render(&mut self, done: usize, pr_num: u64) {
         use std::io::Write;
-        let filled = if self.total > 0 {
-            done * self.width / self.total
-        } else {
-            0
-        };
-        let pct = if self.total > 0 {
-            done * 100 / self.total
-        } else {
-            0
-        };
+        let filled = (done * self.width).checked_div(self.total).unwrap_or(0);
+        let pct = (done * 100).checked_div(self.total).unwrap_or(0);
 
         let bar = format!(
             "[{}{}] {}/{} PR #{}",
