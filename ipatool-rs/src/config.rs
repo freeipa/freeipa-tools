@@ -3,6 +3,66 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+// ── PR source / issue tracker enums ──────────────────────────────────────────
+
+/// Which forge hosts the pull requests that ipatool should operate on.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PrSource {
+    /// GitHub (default)
+    #[default]
+    GitHub,
+    /// Any Forgejo instance (includes Codeberg)
+    Forgejo,
+    /// Pagure
+    Pagure,
+}
+
+/// Which issue tracker holds the tickets referenced by PRs.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IssueTracker {
+    /// Pagure (default)
+    #[default]
+    Pagure,
+    /// Forgejo / Codeberg
+    Forgejo,
+    /// GitHub Issues
+    GitHub,
+}
+
+// ── Per-profile overrides ─────────────────────────────────────────────────────
+
+/// A named profile that overlays a subset of top-level config fields.
+/// Only non-None fields are applied.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProfileConfig {
+    pub pr_source: Option<PrSource>,
+    pub issue_tracker: Option<IssueTracker>,
+
+    // GitHub overrides
+    pub gh_token: Option<String>,
+    pub gh_repo: Option<String>,
+    pub gh_fork_remote: Option<String>,
+
+    // Pagure overrides
+    pub pagure_repository: Option<String>,
+    pub pagure_token: Option<String>,
+
+    // Forgejo overrides
+    pub forgejo_url: Option<String>,
+    pub forgejo_repo: Option<String>,
+    pub forgejo_token: Option<String>,
+
+    // URL overrides
+    pub ticket_url: Option<String>,
+    pub commit_url: Option<String>,
+    pub db_path: Option<String>,
+}
+
+// ── Main Config ───────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
@@ -70,6 +130,10 @@ pub struct Config {
     // Username map
     #[serde(default)]
     pub trac_username_map: HashMap<String, String>,
+
+    // Named profiles (see --profile flag)
+    #[serde(default)]
+    pub profiles: HashMap<String, ProfileConfig>,
 }
 
 fn default_remote() -> String {
@@ -152,6 +216,69 @@ impl Config {
 
     pub fn patchdir_expanded(&self) -> PathBuf {
         expand_path(&self.patchdir)
+    }
+
+    /// Apply a named profile's overrides to this config in-place.
+    /// Returns an error if the profile name is not found.
+    /// Profile field values replace corresponding top-level values when not None.
+    pub fn apply_profile(&mut self, name: &str) -> Result<()> {
+        let profile = self
+            .profiles
+            .get(name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found in config", name))?;
+
+        if let Some(v) = profile.gh_token {
+            self.gh_token = v;
+        }
+        if let Some(v) = profile.gh_repo {
+            self.gh_repo = v;
+        }
+        if let Some(v) = profile.gh_fork_remote {
+            self.gh_fork_remote = v;
+        }
+        if let Some(v) = profile.pagure_repository {
+            self.pagure_repository = v;
+        }
+        if let Some(v) = profile.pagure_token {
+            self.pagure_token = v;
+        }
+        if let Some(v) = profile.forgejo_url {
+            self.forgejo_url = v;
+        }
+        if let Some(v) = profile.forgejo_repo {
+            self.forgejo_repo = v;
+        }
+        if let Some(v) = profile.forgejo_token {
+            self.forgejo_token = v;
+        }
+        if let Some(v) = profile.ticket_url {
+            self.ticket_url = v;
+        }
+        if let Some(v) = profile.commit_url {
+            self.commit_url = v;
+        }
+        if let Some(v) = profile.db_path {
+            self.db_path = v;
+        }
+
+        Ok(())
+    }
+
+    /// Return the effective PR source for a profile (if named) or the default.
+    pub fn pr_source_for(&self, profile: Option<&str>) -> PrSource {
+        profile
+            .and_then(|n| self.profiles.get(n))
+            .and_then(|p| p.pr_source.clone())
+            .unwrap_or_default()
+    }
+
+    /// Return the effective issue tracker for a profile (if named) or the default.
+    pub fn issue_tracker_for(&self, profile: Option<&str>) -> IssueTracker {
+        profile
+            .and_then(|n| self.profiles.get(n))
+            .and_then(|p| p.issue_tracker.clone())
+            .unwrap_or_default()
     }
 
     pub fn sanitized_display(&self) -> String {
@@ -408,6 +535,149 @@ close-issue: no
         assert_eq!(config.remote, "origin");
         assert_eq!(config.update_issue, "ask");
         assert_eq!(config.close_jira, "no");
+    }
+
+    // ── Profile tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_pr_source_default() {
+        assert_eq!(PrSource::default(), PrSource::GitHub);
+    }
+
+    #[test]
+    fn test_issue_tracker_default() {
+        assert_eq!(IssueTracker::default(), IssueTracker::Pagure);
+    }
+
+    #[test]
+    fn test_pr_source_for_no_profile() {
+        let config: Config = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(config.pr_source_for(None), PrSource::GitHub);
+    }
+
+    #[test]
+    fn test_issue_tracker_for_no_profile() {
+        let config: Config = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(config.issue_tracker_for(None), IssueTracker::Pagure);
+    }
+
+    #[test]
+    fn test_profiles_parsed_from_yaml() {
+        let yaml = r#"
+profiles:
+  codeberg:
+    pr-source: forgejo
+    issue-tracker: forgejo
+    forgejo-url: https://codeberg.org
+    forgejo-repo: myuser/freeipa
+    forgejo-token: "mytoken"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.profiles.contains_key("codeberg"));
+        let p = &config.profiles["codeberg"];
+        assert_eq!(p.pr_source, Some(PrSource::Forgejo));
+        assert_eq!(p.issue_tracker, Some(IssueTracker::Forgejo));
+        assert_eq!(p.forgejo_url.as_deref(), Some("https://codeberg.org"));
+        assert_eq!(p.forgejo_repo.as_deref(), Some("myuser/freeipa"));
+        assert_eq!(p.forgejo_token.as_deref(), Some("mytoken"));
+    }
+
+    #[test]
+    fn test_pr_source_for_named_profile() {
+        let yaml = r#"
+profiles:
+  codeberg:
+    pr-source: forgejo
+    issue-tracker: forgejo
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.pr_source_for(Some("codeberg")), PrSource::Forgejo);
+        assert_eq!(
+            config.issue_tracker_for(Some("codeberg")),
+            IssueTracker::Forgejo
+        );
+    }
+
+    #[test]
+    fn test_pr_source_for_unknown_profile_returns_default() {
+        let config: Config = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(config.pr_source_for(Some("nonexistent")), PrSource::GitHub);
+        assert_eq!(
+            config.issue_tracker_for(Some("nonexistent")),
+            IssueTracker::Pagure
+        );
+    }
+
+    #[test]
+    fn test_apply_profile_overlays_fields() {
+        let yaml = r#"
+pagure-repository: freeipa
+pagure-token: orig-pagure-token
+profiles:
+  alt:
+    pagure-repository: freeipa-alt
+    pagure-token: alt-pagure-token
+    ticket-url: https://alt.example.com/issue/
+"#;
+        let mut config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.pagure_repository, "freeipa");
+        config.apply_profile("alt").unwrap();
+        assert_eq!(config.pagure_repository, "freeipa-alt");
+        assert_eq!(config.pagure_token, "alt-pagure-token");
+        assert_eq!(config.ticket_url, "https://alt.example.com/issue/");
+    }
+
+    #[test]
+    fn test_apply_profile_error_on_missing() {
+        let mut config: Config = serde_yaml::from_str("{}").unwrap();
+        assert!(config.apply_profile("nonexistent").is_err());
+    }
+
+    #[test]
+    fn test_apply_profile_leaves_unset_fields_unchanged() {
+        let yaml = r#"
+pagure-repository: freeipa
+pagure-token: mytoken
+forgejo-url: https://example.com
+forgejo-repo: owner/repo
+forgejo-token: ftoken
+profiles:
+  partial:
+    pr-source: forgejo
+"#;
+        let mut config: Config = serde_yaml::from_str(yaml).unwrap();
+        config.apply_profile("partial").unwrap();
+        // Fields not in profile are unchanged
+        assert_eq!(config.pagure_repository, "freeipa");
+        assert_eq!(config.pagure_token, "mytoken");
+        assert_eq!(config.forgejo_url, "https://example.com");
+    }
+
+    #[test]
+    fn test_profile_pr_source_github_parseable() {
+        let yaml = "profiles:\n  x:\n    pr-source: github\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.profiles["x"].pr_source, Some(PrSource::GitHub));
+    }
+
+    #[test]
+    fn test_profile_issue_tracker_github_parseable() {
+        let yaml = "profiles:\n  x:\n    issue-tracker: github\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.profiles["x"].issue_tracker,
+            Some(IssueTracker::GitHub)
+        );
+    }
+
+    #[test]
+    fn test_profile_issue_tracker_pagure_parseable() {
+        let yaml = "profiles:\n  x:\n    issue-tracker: pagure\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.profiles["x"].issue_tracker,
+            Some(IssueTracker::Pagure)
+        );
     }
 
     #[test]
