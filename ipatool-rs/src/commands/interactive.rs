@@ -375,17 +375,19 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
             }
         });
 
-    let left_panel = Panel::new(select_with_keys.full_height())
-        .title(format!("{} PRs", prs.len()))
+    let left_panel = Panel::new(BoxedView::boxed(select_with_keys.full_height()))
+        .title(panel_title(&format!("{} PRs", prs.len()), !focus_right))
+        .with_name("pr_left_panel")
         .fixed_width(left_width);
 
     let initial_detail = prs.first().map(pr_summary).unwrap_or_default();
-    let right_panel = Panel::new(
+    let right_panel = Panel::new(BoxedView::boxed(
         ScrollView::new(TextView::new(initial_detail).with_name("pr_detail"))
             .with_name("pr_detail_scroll")
             .full_screen(),
-    )
-    .title("Details")
+    ))
+    .title(panel_title("Details", focus_right))
+    .with_name("pr_right_panel")
     .full_width();
 
     let (offline_bar, queued) = siv
@@ -516,6 +518,15 @@ fn update_help_bar(siv: &mut Cursive) {
     if let Some((keys, focus_right, offline, queued)) = data {
         let content = build_help_content(&keys, focus_right, offline, queued);
         siv.call_on_name("help_bar", |v: &mut TextView| v.set_content(content));
+        let pr_count = siv
+            .call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.len())
+            .unwrap_or(0);
+        siv.call_on_name("pr_left_panel", |p: &mut Panel<BoxedView>| {
+            p.set_title(panel_title(&format!("{} PRs", pr_count), !focus_right));
+        });
+        siv.call_on_name("pr_right_panel", |p: &mut Panel<BoxedView>| {
+            p.set_title(panel_title("Details", focus_right));
+        });
     }
 }
 
