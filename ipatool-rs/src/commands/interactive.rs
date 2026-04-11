@@ -22,6 +22,7 @@ use crate::api::github::{
     CiJobStatus, GitHubClient, GitHubComment, GitHubFile, GitHubLabel, GitHubPR,
     GitHubReviewComment,
 };
+use crate::api::pagure::PagureClient;
 use crate::tui_keys::TuiKeys;
 
 // ─── Persistent TUI state (survives layer pops on resize) ─────────────────────
@@ -66,6 +67,8 @@ struct TuiState {
     /// CI job statuses for the currently selected PR (populated by background fetch).
     /// Stored here so the 'i' key handler can open the job selector without re-fetching.
     ci_statuses: HashMap<String, CiJobStatus>,
+    /// Bug tracker client for filing issues from the CI viewer.
+    pagure: Option<Arc<PagureClient>>,
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -129,6 +132,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
         tui_keys: ctx.tui_keys.clone(),
         focus_right: false,
         ci_statuses: HashMap::new(),
+        pagure: ctx.pagure.clone(),
     });
 
     siv.add_global_callback(ctx.tui_keys.quit, |s| s.quit());
@@ -242,8 +246,8 @@ fn compute_left_width(screen_width: usize) -> usize {
 }
 
 fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) {
-    // Preserve offline/db/state/keys/focus from existing user_data (set during run()) or use defaults.
-    let (offline, db, current_state, tui_keys, focus_right) = siv
+    // Preserve offline/db/state/keys/focus/pagure from existing user_data (set during run()) or use defaults.
+    let (offline, db, current_state, tui_keys, focus_right, pagure) = siv
         .user_data::<TuiState>()
         .map(|t| {
             (
@@ -252,9 +256,12 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
                 t.state.clone(),
                 t.tui_keys.clone(),
                 t.focus_right,
+                t.pagure.clone(),
             )
         })
-        .unwrap_or_else(|| (false, None, "open".to_string(), TuiKeys::default(), false));
+        .unwrap_or_else(|| {
+            (false, None, "open".to_string(), TuiKeys::default(), false, None)
+        });
 
     // Persist the current dataset so the resize callback can rebuild.
     siv.set_user_data(TuiState {
@@ -268,6 +275,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<GitHubClient>, prs: Vec<GitHubPR>) 
         tui_keys: tui_keys.clone(),
         focus_right,
         ci_statuses: HashMap::new(),
+        pagure,
     });
 
     let left_width = compute_left_width(siv.screen_size().x);
@@ -2435,6 +2443,12 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     // false = left pane (ci_files SelectView); true = right pane (ci_content_scroll).
     let focus_right: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
 
+    // Plain-text mirror of whatever is currently shown in the right pane.
+    // Updated whenever ci_content is set so the 'b' handler can read it without
+    // re-fetching anything.
+    let current_content: Arc<Mutex<StyledString>> =
+        Arc::new(Mutex::new(StyledString::plain("")));
+
     // ── Artifact list (left pane) ─────────────────────────────────────────────
     let viewer_select = Arc::clone(&viewer);
     let viewer_submit = Arc::clone(&viewer);
@@ -2450,6 +2464,11 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     let sub_submit = Arc::clone(&sub_entries_cache);
     let sub_back = Arc::clone(&sub_entries_cache);
     let sub_init = Arc::clone(&sub_entries_cache);
+    let content_select = Arc::clone(&current_content);
+    let content_submit = Arc::clone(&current_content);
+    let content_back = Arc::clone(&current_content);
+    let content_init = Arc::clone(&current_content);
+    let content_bug = Arc::clone(&current_content);
 
     let mut file_select = SelectView::<crate::ci::ArtifactEntry>::new();
 
@@ -2468,6 +2487,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
 
         // Cache hit: no network request needed.
         if let Some(cached) = cache_select.lock().unwrap().get(&entry.url).cloned() {
+            *content_select.lock().unwrap() = cached.clone();
             s.call_on_name("ci_content", |v: &mut TextView| {
                 v.set_content(cached);
             });
@@ -2484,6 +2504,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
         let viewer2 = Arc::clone(&viewer_select);
         let cache2 = Arc::clone(&cache_select);
         let sub2 = Arc::clone(&sub_select);
+        let content_ref = Arc::clone(&content_select);
         let cb = s.cb_sink().clone();
         std::thread::spawn(move || {
             match viewer2.fetch_content(&entry) {
@@ -2510,6 +2531,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                             .insert(entry.url.clone(), sub_artifacts.clone());
                     }
                     cb.send(Box::new(move |s: &mut Cursive| {
+                        *content_ref.lock().unwrap() = content.clone();
                         s.call_on_name("ci_content", |v: &mut TextView| {
                             v.set_content(content);
                         });
@@ -2552,7 +2574,8 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
             let viewer2 = Arc::clone(&viewer_submit);
             let cache2 = Arc::clone(&cache_submit);
             let sub2 = Arc::clone(&sub_submit);
-            populate_ci_files(s, cached, viewer2, cache2, sub2);
+            let cc2 = Arc::clone(&content_submit);
+            populate_ci_files(s, cached, viewer2, cache2, sub2, cc2);
             return;
         }
 
@@ -2561,6 +2584,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
         let listing2 = Arc::clone(&listing_submit);
         let cache2 = Arc::clone(&cache_submit);
         let sub2 = Arc::clone(&sub_submit);
+        let cc2 = Arc::clone(&content_submit);
         let cb = s.cb_sink().clone();
         std::thread::spawn(move || {
             match viewer2.list_artifacts(&entry_url) {
@@ -2571,7 +2595,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                         .insert(entry_url.clone(), entries.clone());
                     let viewer3 = Arc::clone(&viewer2);
                     cb.send(Box::new(move |s: &mut Cursive| {
-                        populate_ci_files(s, entries, viewer3, cache2, sub2);
+                        populate_ci_files(s, entries, viewer3, cache2, sub2, cc2);
                     }))
                     .ok();
                 }
@@ -2611,7 +2635,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     .full_width();
 
     let help = TextView::new(
-        " ↓/↑:Navigate  PgUp/PgDn:Page  Home/End:Jump  Tab:Switch Pane  Enter:Open  Backspace:Parent  q/Esc:Close",
+        " ↓/↑:Navigate  PgUp/PgDn:Page  Home/End:Jump  Tab:Switch Pane  Enter:Open  Backspace:Parent  b:Bug  q/Esc:Close",
     );
 
     let body = LinearLayout::horizontal()
@@ -2642,7 +2666,8 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     let fr_pgdn = Arc::clone(&focus_right);
     let fr_home = Arc::clone(&focus_right);
     let fr_end = Arc::clone(&focus_right);
-    let job_name_tab = job_name_short;
+    let job_name_tab = job_name_short.clone();
+    let job_name_bug = job_name_short;
 
     let layout = OnEventView::new(layout)
         .on_event('q', move |s| {
@@ -2656,6 +2681,9 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
             listing_esc.lock().unwrap().clear();
             sub_esc.lock().unwrap().clear();
             s.pop_layer();
+        })
+        .on_event('b', move |s| {
+            show_file_bug_dialog(s, &job_name_bug, &content_bug);
         })
         // Tab: intercepted before LinearLayout moves cursive focus between children.
         // Uses simulated focus (Arc flag) so behaviour is independent of whether
@@ -2784,7 +2812,8 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                     let viewer2 = Arc::clone(&viewer_back);
                     let cache2 = Arc::clone(&cache_back);
                     let sub2 = Arc::clone(&sub_back);
-                    populate_ci_files(s, cached, viewer2, cache2, sub2);
+                    let cc2 = Arc::clone(&content_back);
+                    populate_ci_files(s, cached, viewer2, cache2, sub2, cc2);
                     return;
                 }
 
@@ -2793,6 +2822,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                 let listing2 = Arc::clone(&listing_back);
                 let cache2 = Arc::clone(&cache_back);
                 let sub2 = Arc::clone(&sub_back);
+                let cc2 = Arc::clone(&content_back);
                 let cb = s.cb_sink().clone();
                 std::thread::spawn(move || {
                     match viewer2.list_artifacts(&url) {
@@ -2803,7 +2833,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                                 .insert(url.clone(), entries.clone());
                             let viewer3 = Arc::clone(&viewer2);
                             cb.send(Box::new(move |s: &mut Cursive| {
-                                populate_ci_files(s, entries, viewer3, cache2, sub2);
+                                populate_ci_files(s, entries, viewer3, cache2, sub2, cc2);
                             }))
                             .ok();
                         }
@@ -2833,7 +2863,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                 .insert(base_url.clone(), entries.clone());
             let viewer2 = Arc::clone(&viewer_init);
             cb.send(Box::new(move |s: &mut Cursive| {
-                populate_ci_files(s, entries, viewer2, cache_init, sub_init);
+                populate_ci_files(s, entries, viewer2, cache_init, sub_init, content_init);
             }))
             .ok();
         }
@@ -2871,6 +2901,7 @@ fn populate_ci_files(
     viewer: Arc<dyn crate::ci::CiJobViewer>,
     cache: Arc<Mutex<HashMap<String, StyledString>>>,
     sub_cache: Arc<Mutex<HashMap<String, Vec<crate::ci::ArtifactEntry>>>>,
+    current_content: Arc<Mutex<StyledString>>,
 ) {
     let default_idx = viewer
         .default_entry(&entries)
@@ -2910,6 +2941,7 @@ fn populate_ci_files(
 
     // Cache hit: instant display.
     if let Some(cached) = cache.lock().unwrap().get(&entry.url).cloned() {
+        *current_content.lock().unwrap() = cached.clone();
         siv.call_on_name("ci_content", |v: &mut TextView| {
             v.set_content(cached);
         });
@@ -2933,6 +2965,7 @@ fn populate_ci_files(
     let viewer2 = Arc::clone(&viewer);
     let cache2 = Arc::clone(&cache);
     let sub2 = Arc::clone(&sub_cache);
+    let cc2 = Arc::clone(&current_content);
     let cb = siv.cb_sink().clone();
     std::thread::spawn(move || match viewer2.fetch_content(&entry) {
         Ok(crate::ci::ContentResult {
@@ -2957,6 +2990,7 @@ fn populate_ci_files(
                     .insert(entry.url.clone(), sub_artifacts.clone());
             }
             cb.send(Box::new(move |s: &mut Cursive| {
+                *cc2.lock().unwrap() = content.clone();
                 s.call_on_name("ci_content", |v: &mut TextView| {
                     v.set_content(content);
                 });
@@ -3030,5 +3064,99 @@ fn append_sub_entries_to_list(
                 },
             );
         },
+    );
+}
+
+/// Open a "File Bug" dialog pre-filled with the current right-pane content.
+///
+/// Requires a Pagure client in `TuiState`.  If one is not configured the
+/// dialog is replaced by an informational message.  Submission is done in a
+/// background thread so the TUI remains responsive; the dialog is dismissed
+/// immediately and the result is reported via a follow-up info/error dialog.
+fn show_file_bug_dialog(
+    siv: &mut Cursive,
+    job_name: &str,
+    current_content: &Arc<Mutex<StyledString>>,
+) {
+    let pagure = match siv.user_data::<TuiState>().and_then(|t| t.pagure.clone()) {
+        Some(p) => p,
+        None => {
+            show_info(siv, "Bug tracker (Pagure) is not configured.\nSet pagure-token and pagure-repository in your config.");
+            return;
+        }
+    };
+
+    // Pre-fill the title from the currently selected artifact entry name.
+    let selected_name = siv
+        .call_on_name("ci_files", |v: &mut SelectView<crate::ci::ArtifactEntry>| {
+            v.selection().map(|e| e.name.trim().to_string())
+        })
+        .flatten()
+        .unwrap_or_default();
+
+    let default_title = if selected_name.is_empty() || selected_name.starts_with('─') {
+        format!("CI failure: {}", job_name)
+    } else {
+        format!("CI failure: {} — {}", job_name, selected_name)
+    };
+
+    let body_arc = Arc::clone(current_content);
+
+    siv.add_layer(
+        Dialog::new()
+            .title("File Bug Report")
+            .content(
+                LinearLayout::vertical()
+                    .child(TextView::new("Title:"))
+                    .child(
+                        EditView::new()
+                            .content(default_title)
+                            .with_name("bug_title")
+                            .min_width(64),
+                    )
+                    .child(TextView::new(
+                        "\nThe content currently shown in the right pane will be\nused as the bug body.\n",
+                    )),
+            )
+            .button("Cancel", |s| {
+                s.pop_layer();
+            })
+            .button("File Bug", move |s| {
+                let title = s
+                    .call_on_name("bug_title", |v: &mut EditView| {
+                        v.get_content().to_string()
+                    })
+                    .unwrap_or_default();
+                let title = title.trim().to_string();
+                if title.is_empty() {
+                    return;
+                }
+                s.pop_layer();
+
+                // Extract plain text from the StyledString.
+                let body: String = body_arc
+                    .lock()
+                    .unwrap()
+                    .spans()
+                    .map(|sp| sp.content)
+                    .collect();
+
+                let pagure2 = Arc::clone(&pagure);
+                let cb = s.cb_sink().clone();
+                std::thread::spawn(move || match pagure2.create_issue(&title, &body) {
+                    Ok(id) => {
+                        cb.send(Box::new(move |s: &mut Cursive| {
+                            show_info(s, &format!("Bug #{} filed successfully!", id));
+                        }))
+                        .ok();
+                    }
+                    Err(e) => {
+                        cb.send(Box::new(move |s: &mut Cursive| {
+                            show_error(s, &format!("Failed to file bug:\n{:#}", e));
+                        }))
+                        .ok();
+                    }
+                });
+            }),
     );
 }
