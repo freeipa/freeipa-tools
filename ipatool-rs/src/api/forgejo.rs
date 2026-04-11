@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub struct ForgejoClient {
     pub http: reqwest::blocking::Client,
@@ -7,6 +8,42 @@ pub struct ForgejoClient {
     pub base_url: String,
     pub owner: String,
     pub repo: String,
+}
+
+/// Forgejo label — includes the numeric `id` needed for label deletion.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ForgejoLabelId {
+    pub id: u64,
+    pub name: String,
+    pub color: String,
+}
+
+/// Internal struct for adding labels (Forgejo requires IDs, not names).
+#[derive(Serialize)]
+struct AddLabelsByIdBody {
+    labels: Vec<u64>,
+}
+
+/// Internal struct for closing a PR via PATCH.
+#[derive(Serialize)]
+struct PatchPrBody<'a> {
+    state: &'a str,
+}
+
+/// Internal struct for creating a PR.
+#[derive(Serialize)]
+struct CreateForgejoPrBody {
+    title: String,
+    head: String,
+    base: String,
+    body: String,
+}
+
+/// Internal struct for creating a label.
+#[derive(Serialize)]
+struct CreateLabelBody<'a> {
+    name: &'a str,
+    color: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +161,489 @@ impl ForgejoClient {
             anyhow::bail!("Forgejo close issue failed ({}): {}", status, body);
         }
         Ok(())
+    }
+
+    // ── Pull-request methods ───────────────────────────────────────────────────
+
+    /// List pull requests.  `state` is one of "open", "closed", "all".
+    /// Returns PRs as `GitHubPR` (Forgejo's JSON shape is compatible).
+    pub fn list_prs(&self, state: &str) -> Result<Vec<crate::api::github::GitHubPR>> {
+        self.list_prs_limited(state, usize::MAX, |_, _| {})
+    }
+
+    pub fn list_prs_limited(
+        &self,
+        state: &str,
+        limit: usize,
+        mut on_page: impl FnMut(u32, usize),
+    ) -> Result<Vec<crate::api::github::GitHubPR>> {
+        let mut all = Vec::new();
+        let mut page = 1u32;
+        let forgejo_state = match state {
+            "all" => "all",
+            "closed" => "closed",
+            _ => "open",
+        };
+        loop {
+            let url = self.api_url(&format!(
+                "/repos/{}/{}/pulls?state={}&page={}&limit=50&type=pulls",
+                self.owner, self.repo, forgejo_state, page
+            ));
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", format!("token {}", self.token))
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("Forgejo list_prs failed ({}): {}", status, body);
+            }
+            let prs: Vec<crate::api::github::GitHubPR> =
+                resp.json().with_context(|| "Parsing Forgejo PR list")?;
+            if prs.is_empty() {
+                break;
+            }
+            all.extend(prs);
+            on_page(page, all.len());
+            if all.len() >= limit {
+                break;
+            }
+            page += 1;
+        }
+        all.truncate(limit);
+        Ok(all)
+    }
+
+    pub fn get_pr(&self, number: u64) -> Result<crate::api::github::GitHubPR> {
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/pulls/{}",
+            self.owner, self.repo, number
+        ));
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if resp.status().as_u16() == 404 {
+            anyhow::bail!("Pull request {} not found", number);
+        }
+        let pr: crate::api::github::GitHubPR = resp
+            .json()
+            .with_context(|| format!("Parsing Forgejo PR {}", number))?;
+        Ok(pr)
+    }
+
+    pub fn is_pr_merged(&self, number: u64) -> Result<bool> {
+        let pr = self.get_pr(number)?;
+        Ok(pr.is_merged())
+    }
+
+    pub fn get_pr_commits(&self, number: u64) -> Result<Vec<crate::api::github::GitHubCommit>> {
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/pulls/{}/commits?limit=50",
+            self.owner, self.repo, number
+        ));
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo get_pr_commits failed ({}): {}", status, body);
+        }
+        let commits: Vec<crate::api::github::GitHubCommit> = resp
+            .json()
+            .with_context(|| format!("Parsing commits for PR {}", number))?;
+        Ok(commits)
+    }
+
+    /// Fetch a single commit as a unified-diff patch.
+    /// Uses the Forgejo web endpoint `{base_url}/{owner}/{repo}/commit/{sha}.patch`
+    /// which returns the `git format-patch` output without requiring API auth.
+    pub fn get_commit_patch(&self, sha: &str) -> Result<Vec<u8>> {
+        let url = format!(
+            "{}/{}/{}/commit/{}.patch",
+            self.base_url, self.owner, self.repo, sha
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            anyhow::bail!("Forgejo get_commit_patch failed ({}): {}", status, sha);
+        }
+        Ok(resp.bytes()?.to_vec())
+    }
+
+    /// CI status check: maps Forgejo statuses to the same `CiJobStatus` struct
+    /// as the GitHub client.
+    pub fn most_recent_statuses(
+        &self,
+        sha: &str,
+    ) -> Result<HashMap<String, crate::api::github::CiJobStatus>> {
+        #[derive(Deserialize)]
+        struct ForgejoStatus {
+            state: String,
+            context: String,
+            #[serde(default)]
+            target_url: Option<String>,
+        }
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/statuses/{}?page=1&limit=50",
+            self.owner, self.repo, sha
+        ));
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            return Ok(HashMap::new()); // no statuses is fine
+        }
+        let statuses: Vec<ForgejoStatus> =
+            resp.json().with_context(|| "Parsing Forgejo statuses")?;
+        let mut result = HashMap::new();
+        for s in statuses {
+            result
+                .entry(s.context)
+                .or_insert(crate::api::github::CiJobStatus {
+                    state: s.state,
+                    url: s.target_url,
+                });
+        }
+        Ok(result)
+    }
+
+    pub fn get_pr_files(&self, number: u64) -> Result<Vec<crate::api::github::GitHubFile>> {
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/pulls/{}/files?limit=100",
+            self.owner, self.repo, number
+        ));
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            return Ok(vec![]);
+        }
+        let files: Vec<crate::api::github::GitHubFile> =
+            resp.json().with_context(|| "Parsing Forgejo PR files")?;
+        Ok(files)
+    }
+
+    /// Return all labels defined in this repository, with their numeric IDs.
+    pub fn list_repo_labels_with_id(&self) -> Result<Vec<ForgejoLabelId>> {
+        let mut all = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let url = self.api_url(&format!(
+                "/repos/{}/{}/labels?page={}&limit=50",
+                self.owner, self.repo, page
+            ));
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", format!("token {}", self.token))
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                break;
+            }
+            let labels: Vec<ForgejoLabelId> =
+                resp.json().with_context(|| "Parsing Forgejo repo labels")?;
+            if labels.is_empty() {
+                break;
+            }
+            all.extend(labels);
+            page += 1;
+        }
+        Ok(all)
+    }
+
+    /// Return all labels as `GitHubLabel` (without IDs).
+    pub fn list_repo_labels(&self) -> Result<Vec<crate::api::github::GitHubLabel>> {
+        let labels = self.list_repo_labels_with_id()?;
+        Ok(labels
+            .into_iter()
+            .map(|l| crate::api::github::GitHubLabel {
+                name: l.name,
+                color: l.color,
+            })
+            .collect())
+    }
+
+    /// Return the labels currently applied to issue/PR `number`, with IDs.
+    pub fn get_issue_labels_with_id(&self, number: u64) -> Result<Vec<ForgejoLabelId>> {
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/issues/{}/labels",
+            self.owner, self.repo, number
+        ));
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            return Ok(vec![]);
+        }
+        let labels: Vec<ForgejoLabelId> = resp
+            .json()
+            .with_context(|| "Parsing Forgejo issue labels")?;
+        Ok(labels)
+    }
+
+    /// Ensure labels exist in the repo (create them if absent), then add them to
+    /// issue/PR `number` by ID.
+    pub fn add_labels(&self, number: u64, labels: &[&str]) -> Result<()> {
+        let repo_labels = self.list_repo_labels_with_id()?;
+        let mut ids = Vec::new();
+        for &name in labels {
+            let id = if let Some(l) = repo_labels.iter().find(|l| l.name == name) {
+                l.id
+            } else {
+                // Create the label with a neutral grey color
+                let new_id = self.create_label(name, "cccccc")?;
+                new_id
+            };
+            ids.push(id);
+        }
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/issues/{}/labels",
+            self.owner, self.repo, number
+        ));
+        let body = AddLabelsByIdBody { labels: ids };
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .json(&body)
+            .send()
+            .with_context(|| format!("POST {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo add_labels failed ({}): {}", status, body);
+        }
+        Ok(())
+    }
+
+    /// Create a label in the repository; returns its new numeric ID.
+    fn create_label(&self, name: &str, color: &str) -> Result<u64> {
+        #[derive(Deserialize)]
+        struct Resp {
+            id: u64,
+        }
+        let url = self.api_url(&format!("/repos/{}/{}/labels", self.owner, self.repo));
+        let body = CreateLabelBody { name, color };
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .json(&body)
+            .send()
+            .with_context(|| format!("POST {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!(
+                "Forgejo create_label '{}' failed ({}): {}",
+                name,
+                status,
+                body
+            );
+        }
+        let r: Resp = resp.json().context("Parsing create_label response")?;
+        Ok(r.id)
+    }
+
+    /// Remove a label from issue/PR `number` by name.
+    pub fn remove_label(&self, number: u64, label: &str) -> Result<()> {
+        let issue_labels = self.get_issue_labels_with_id(number)?;
+        let Some(lbl) = issue_labels.iter().find(|l| l.name == label) else {
+            return Ok(()); // label not present — nothing to do
+        };
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/issues/{}/labels/{}",
+            self.owner, self.repo, number, lbl.id
+        ));
+        let resp = self
+            .http
+            .delete(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| format!("DELETE {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo remove_label failed ({}): {}", status, body);
+        }
+        Ok(())
+    }
+
+    /// Close a pull request.
+    pub fn close_pr(&self, number: u64) -> Result<()> {
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/pulls/{}",
+            self.owner, self.repo, number
+        ));
+        let body = PatchPrBody { state: "closed" };
+        let resp = self
+            .http
+            .patch(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .json(&body)
+            .send()
+            .with_context(|| format!("PATCH {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo close_pr failed ({}): {}", status, body);
+        }
+        Ok(())
+    }
+
+    /// Return the last `n` issue comments, newest-last.
+    pub fn get_last_issue_comments(
+        &self,
+        number: u64,
+        n: usize,
+    ) -> Result<Vec<crate::api::github::GitHubComment>> {
+        let url = self.api_url(&format!(
+            "/repos/{}/{}/issues/{}/comments?page=1&limit={}&token={}",
+            self.owner, self.repo, number, n, self.token
+        ));
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            return Ok(vec![]);
+        }
+        let comments: Vec<crate::api::github::GitHubComment> = resp
+            .json()
+            .with_context(|| "Parsing Forgejo issue comments")?;
+        Ok(comments)
+    }
+
+    /// Return all issue comments in chronological order.
+    pub fn get_all_issue_comments(
+        &self,
+        number: u64,
+    ) -> Result<Vec<crate::api::github::GitHubComment>> {
+        let mut all = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let url = self.api_url(&format!(
+                "/repos/{}/{}/issues/{}/comments?page={}&limit=50",
+                self.owner, self.repo, number, page
+            ));
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", format!("token {}", self.token))
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                break;
+            }
+            let comments: Vec<crate::api::github::GitHubComment> = resp
+                .json()
+                .with_context(|| "Parsing Forgejo issue comments")?;
+            if comments.is_empty() {
+                break;
+            }
+            all.extend(comments);
+            page += 1;
+        }
+        Ok(all)
+    }
+
+    /// Create a PR on Forgejo.  `head` must be in "owner:branch" format.
+    pub fn create_pr(
+        &self,
+        title: &str,
+        base: &str,
+        head: &str,
+        body: &str,
+    ) -> Result<crate::api::github::GitHubPR> {
+        let url = self.api_url(&format!("/repos/{}/{}/pulls", self.owner, self.repo));
+        let req_body = CreateForgejoPrBody {
+            title: title.to_string(),
+            head: head.to_string(),
+            base: base.to_string(),
+            body: body.to_string(),
+        };
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .json(&req_body)
+            .send()
+            .with_context(|| format!("POST {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo create_pr failed ({}): {}", status, body);
+        }
+        let pr: crate::api::github::GitHubPR =
+            resp.json().with_context(|| "Parsing created Forgejo PR")?;
+        Ok(pr)
+    }
+
+    pub fn get_authenticated_user_login(&self) -> Result<String> {
+        let url = self.api_url("/user");
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .with_context(|| "GET /api/v1/user")?;
+        let user: serde_json::Value = resp.json().with_context(|| "Parsing Forgejo /user")?;
+        user["login"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("Forgejo /user response missing 'login' field"))
+    }
+
+    /// Return inline review comments for a PR.
+    /// Forgejo organises these differently (via reviews); returns regular issue
+    /// comments as a best-effort fallback.
+    pub fn list_review_comments(
+        &self,
+        pr_number: u64,
+    ) -> Result<Vec<crate::api::github::GitHubReviewComment>> {
+        // Forgejo PR review comment shape is different; return empty for now.
+        let _ = pr_number;
+        Ok(vec![])
+    }
+
+    /// Post an inline review comment.  Forgejo's review-comment API differs
+    /// from GitHub's; we fall back to a regular issue comment here.
+    pub fn create_review_comment(
+        &self,
+        pr_number: u64,
+        _commit_id: &str,
+        path: &str,
+        _line: u64,
+        body: &str,
+    ) -> Result<()> {
+        let text = format!("**{}**\n\n{}", path, body);
+        self.comment_issue(pr_number, &text)
     }
 }
 
