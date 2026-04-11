@@ -1537,7 +1537,15 @@ fn open_review_comment_form(
                 }
                 let (offline, provider) = s
                     .user_data::<TuiState>()
-                    .map(|t| (t.offline, t.pr_client.as_ref().map(|p| p.provider()).unwrap_or(crate::db::Provider::GitHub)))
+                    .map(|t| {
+                        (
+                            t.offline,
+                            t.pr_client
+                                .as_ref()
+                                .map(|p| p.provider())
+                                .unwrap_or(crate::db::Provider::GitHub),
+                        )
+                    })
                     .unwrap_or((false, crate::db::Provider::GitHub));
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 if offline {
@@ -1810,7 +1818,15 @@ fn build_label_editor_layer(
             }
             let (offline, provider) = s
                 .user_data::<TuiState>()
-                .map(|t| (t.offline, t.pr_client.as_ref().map(|p| p.provider()).unwrap_or(crate::db::Provider::GitHub)))
+                .map(|t| {
+                    (
+                        t.offline,
+                        t.pr_client
+                            .as_ref()
+                            .map(|p| p.provider())
+                            .unwrap_or(crate::db::Provider::GitHub),
+                    )
+                })
                 .unwrap_or((false, crate::db::Provider::GitHub));
             let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
             s.pop_layer();
@@ -1905,7 +1921,15 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                     .unwrap_or_default();
                 let (offline, provider) = s
                     .user_data::<TuiState>()
-                    .map(|t| (t.offline, t.pr_client.as_ref().map(|p| p.provider()).unwrap_or(crate::db::Provider::GitHub)))
+                    .map(|t| {
+                        (
+                            t.offline,
+                            t.pr_client
+                                .as_ref()
+                                .map(|p| p.provider())
+                                .unwrap_or(crate::db::Provider::GitHub),
+                        )
+                    })
                     .unwrap_or((false, crate::db::Provider::GitHub));
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
@@ -1979,7 +2003,15 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                 }
                 let (offline, provider) = s
                     .user_data::<TuiState>()
-                    .map(|t| (t.offline, t.pr_client.as_ref().map(|p| p.provider()).unwrap_or(crate::db::Provider::GitHub)))
+                    .map(|t| {
+                        (
+                            t.offline,
+                            t.pr_client
+                                .as_ref()
+                                .map(|p| p.provider())
+                                .unwrap_or(crate::db::Provider::GitHub),
+                        )
+                    })
                     .unwrap_or((false, crate::db::Provider::GitHub));
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
