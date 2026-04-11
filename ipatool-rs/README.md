@@ -107,7 +107,122 @@ trac-username-map:
 # SQLite database used for offline mode (default shown).
 
 db-path: ~/.ipa/ipatool-cache.db
+
+# ── Named profiles ────────────────────────────────────────────────────────────
+# A profile overrides selected top-level fields and sets the PR source and
+# issue tracker.  Activate with --profile <name>.
+#
+# pr-source     : github | forgejo | pagure  (default: github)
+# issue-tracker : pagure | forgejo | github  (default: pagure)
+#
+# Any connection field (gh-*, pagure-*, forgejo-*, ticket-url, commit-url,
+# db-path) can be overridden per-profile; unset fields inherit the top-level
+# value.
+
+profiles:
+  # explicit default — same as omitting --profile
+  default:
+    pr-source: github
+    issue-tracker: pagure
+
+  # (1) GitHub PRs + Codeberg issues
+  gh-cb-issues:
+    pr-source: github
+    issue-tracker: forgejo
+    forgejo-url: https://codeberg.org
+    forgejo-repo: myuser/freeipa
+    forgejo-token: "YOUR_CODEBERG_TOKEN_HERE"
+    ticket-url: https://codeberg.org/myuser/freeipa/issues/
+
+  # (2) Codeberg PRs + Codeberg issues
+  codeberg:
+    pr-source: forgejo
+    issue-tracker: forgejo
+    forgejo-url: https://codeberg.org
+    forgejo-repo: myuser/freeipa
+    forgejo-token: "YOUR_CODEBERG_TOKEN_HERE"
+    ticket-url: https://codeberg.org/myuser/freeipa/issues/
+
+  # (3) Codeberg PRs + Pagure issues
+  cb-pagure:
+    pr-source: forgejo
+    issue-tracker: pagure
+    forgejo-url: https://codeberg.org
+    forgejo-repo: myuser/freeipa
+    forgejo-token: "YOUR_CODEBERG_TOKEN_HERE"
+
+  # (4) GitHub PRs + GitHub issues
+  gh-issues:
+    pr-source: github
+    issue-tracker: github
 ```
+
+### Named profiles
+
+The `profiles:` section lets you switch the PR source and issue tracker without
+maintaining separate config files.
+
+```
+ipatool --profile codeberg tui         # Codeberg PRs, Codeberg issues
+ipatool --profile cb-pagure pr-list    # Codeberg PRs, Pagure issues
+ipatool --profile gh-issues pr-list    # GitHub PRs, GitHub issues (no Pagure)
+```
+
+**Supported combinations**
+
+| Profile example | PR source | Issue tracker | Notes |
+|-----------------|-----------|---------------|-------|
+| `default` (no flag) | GitHub | Pagure | Original workflow |
+| `gh-cb-issues` | GitHub | Codeberg | PRs stay on GitHub, bugs on Codeberg |
+| `codeberg` | Codeberg | Codeberg | Full Codeberg / Forgejo workflow |
+| `cb-pagure` | Codeberg | Pagure | Codeberg PRs, Pagure issue tracker |
+| `gh-issues` | GitHub | GitHub Issues | No Pagure/Forgejo needed |
+
+**Profile fields**
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| `pr-source` | `github`, `forgejo`, `pagure` | Where pull requests are fetched from |
+| `issue-tracker` | `pagure`, `forgejo`, `github` | Which tracker holds linked tickets |
+| `gh-token`, `gh-repo`, `gh-fork-remote` | strings | Override GitHub settings |
+| `pagure-repository`, `pagure-token` | strings | Override Pagure settings |
+| `forgejo-url`, `forgejo-repo`, `forgejo-token` | strings | Override Forgejo/Codeberg settings |
+| `ticket-url`, `commit-url`, `db-path` | strings | Override URL templates and cache path |
+
+Profile field values replace their top-level counterparts when the profile is
+active; omitted fields fall through to the top-level values.
+
+When `--profile` is omitted, `pr-source` defaults to `github` and
+`issue-tracker` defaults to `pagure`.
+
+**Per-profile cache isolation**
+
+The local SQLite cache is namespaced by profile name.  Running
+`cache-update` or the TUI under `--profile codeberg` populates a completely
+separate cache from the default (no `--profile`) session, even if both
+profiles happen to use the same forge.  This means:
+
+- `ipatool cache-update` — populates the default profile's cache.
+- `ipatool --profile codeberg cache-update` — populates the `codeberg`
+  profile's cache; does not affect the default cache.
+- `ipatool --offline tui` will not see PRs cached under `--profile codeberg`,
+  and vice versa.
+
+On the first run after upgrading from a version that did not support
+per-profile caching the old cache tables are dropped and recreated
+automatically.  Run `cache-update` again to repopulate.
+
+**Notes on Forgejo/Codeberg PR support**
+
+When `pr-source: forgejo` is active:
+- PRs are listed, browsed, ACKed, and rejected using the Forgejo API.
+- Labels are managed by name; missing labels are created automatically.
+- Inline review comments fall back to regular issue comments (Forgejo's review API differs from GitHub's).
+- Patch download for `pr-push` uses the Forgejo web endpoint `{base-url}/{owner}/{repo}/commit/{sha}.patch`.
+
+When `issue-tracker: github` is active:
+- Issue operations (comment, close) use the GitHub Issues API.
+- GitHub Issues have no `reviewer` or `rhbz` custom fields; those are treated as absent.
 
 ## Global flags
 
@@ -116,6 +231,7 @@ These flags apply to every subcommand.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config <path>` | `~/.ipa/toolconf.yaml` | Configuration file |
+| `--profile <name>` | — | Named profile from the `profiles:` config section |
 | `-v` / `-vv` / `-vvv` | off | Increase verbosity |
 | `-n`, `--dry-run` | off | Skip actual git push (still applies patches locally) |
 | `--no-reviewer` | off | Omit the `Reviewed-By:` trailer |
@@ -588,15 +704,18 @@ configuration; the token needs **Create issues** permission.
 
 ### `cache-update`
 
-Fetch pull requests from GitHub and store them — together with their CI
-statuses, all issue comments, PR commits, and changed-file lists — in the
-local SQLite cache.  Subsequent calls are incremental: only PRs whose
-`updated_at` timestamp has changed since the last fetch have their details
-re-fetched.
+Fetch pull requests and store them — together with their CI statuses, all
+issue comments, PR commits, and changed-file lists — in the local SQLite
+cache.  Subsequent calls are incremental: only PRs whose `updated_at`
+timestamp has changed since the last fetch have their details re-fetched.
+
+The cache is namespaced by the active profile, so running `cache-update`
+under different `--profile` values populates independent caches.
 
 ```
-ipatool cache-update              # cache open PRs
-ipatool cache-update --state all  # cache all PRs (open + closed)
+ipatool cache-update                          # cache open PRs (default profile)
+ipatool cache-update --state all              # cache all PRs (open + closed)
+ipatool --profile codeberg cache-update       # cache Codeberg PRs separately
 ```
 
 **Flags**
@@ -608,7 +727,7 @@ ipatool cache-update --state all  # cache all PRs (open + closed)
 Typical output:
 
 ```
-Fetching open pull requests from GitHub…
+Fetching open pull requests…
 Cached 52 pull request(s).
 Fetching details for PR #8309 (1/52)…
 Details: 3 updated, 49 unchanged (skipped).
@@ -628,10 +747,14 @@ ipatool queue-list
 
 Example output:
 ```
-Pending offline actions (2):
-  [1] GitHub: ACK PR #8309
-  [2] GitHub: Reject PR #8310 — "Needs rebase"
+2 queued action(s):
+  [1] (github) ACK PR #8309
+  [2] (github) Reject PR #8310
 ```
+
+The provider shown in parentheses (`github` or `forgejo`) reflects the
+forge that was active when the action was queued, ensuring `queue-submit`
+dispatches to the correct API.
 
 ---
 
@@ -696,6 +819,10 @@ is preserved.  Successfully replayed actions are deleted from the queue.
 | CI statuses, all comments, changed files, commits | `cache-update` or when a PR is selected in the online TUI |
 | Mutations (ACK, reject, labels, comments) | Immediately, when performed in offline mode |
 
+All cache entries are scoped to the active profile.  Data cached under
+`--profile codeberg` is invisible to the default profile and vice versa.
+Each profile must be populated independently with `cache-update`.
+
 ---
 
 ## TUI customisation
@@ -749,6 +876,7 @@ browser:     b
 refresh:     r
 review:      c
 sync:        s
+inspect:     i
 down:        j
 up:          k
 scroll-down: d
@@ -836,16 +964,18 @@ All of steps 2–5 can also be done entirely inside the TUI (`ipatool tui`).
 ### Offline review workflow
 
 ```bash
-# 1. While online, populate the cache
+# 1. While online, populate the cache (repeat per profile if needed)
 ipatool cache-update
+ipatool --profile codeberg cache-update   # if using a Codeberg profile
 
 # 2. Work offline — review, ACK, and comment without network
 ipatool --offline tui
+ipatool --offline --profile codeberg tui  # Codeberg profile, separate cache
 
 # 3. When back online, inspect what was queued
 ipatool queue-list
 
-# 4. Replay actions against GitHub
+# 4. Replay actions against the correct forge
 ipatool queue-submit
 # or press 's' inside the TUI
 ```
