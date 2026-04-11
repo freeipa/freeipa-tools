@@ -2376,6 +2376,9 @@ fn show_ci_job_selector(siv: &mut Cursive, pr: GitHubPR) {
 /// Left pane: artifact listing (`SelectView<ArtifactEntry>` named `"ci_files"`).
 /// Right pane: rendered content (`ScrollView<TextView>` named `"ci_content"`).
 /// Backspace navigates to the parent directory; `q`/`Esc` closes the view.
+///
+/// Fetched artifact content is cached in memory for the lifetime of the view
+/// so that revisiting a file does not re-download it.
 fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) {
     let viewer_box = match crate::ci::get_viewer(&base_url) {
         Some(v) => v,
@@ -2392,14 +2395,23 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
     // URL navigation stack: the last entry is the currently displayed directory.
     let url_stack: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![base_url.clone()]));
 
+    // In-session content cache: URL → rendered StyledString.
+    // Avoids re-downloading a file the user already viewed.
+    let content_cache: Arc<Mutex<HashMap<String, StyledString>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     // ── Artifact list (left pane) ─────────────────────────────────────────────
     let viewer_select = Arc::clone(&viewer);
     let viewer_submit = Arc::clone(&viewer);
     let url_stack_submit = Arc::clone(&url_stack);
+    let cache_select = Arc::clone(&content_cache);
+    let cache_submit = Arc::clone(&content_cache);
+    let cache_back = Arc::clone(&content_cache);
+    let cache_init = Arc::clone(&content_cache);
 
     let mut file_select = SelectView::<crate::ci::ArtifactEntry>::new();
 
-    // on_select: fetch and render the selected file's content.
+    // on_select: serve from cache when available; otherwise fetch in background.
     file_select.set_on_select(move |s, entry: &crate::ci::ArtifactEntry| {
         if entry.is_dir {
             s.call_on_name("ci_content", |v: &mut TextView| {
@@ -2407,11 +2419,31 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
             });
             return;
         }
+
+        // Cache hit: no network request needed.
+        if let Some(cached) = cache_select.lock().unwrap().get(&entry.url).cloned() {
+            s.call_on_name("ci_content", |v: &mut TextView| {
+                v.set_content(cached);
+            });
+            s.call_on_name(
+                "ci_content_scroll",
+                |v: &mut ScrollView<NamedView<TextView>>| {
+                    v.set_offset(cursive::Vec2::new(0, 0));
+                },
+            );
+            return;
+        }
+
         let entry = entry.clone();
         let viewer2 = Arc::clone(&viewer_select);
+        let cache2 = Arc::clone(&cache_select);
         let cb = s.cb_sink().clone();
         std::thread::spawn(move || match viewer2.fetch_content(&entry) {
             Ok(content) => {
+                cache2
+                    .lock()
+                    .unwrap()
+                    .insert(entry.url.clone(), content.clone());
                 cb.send(Box::new(move |s: &mut Cursive| {
                     s.call_on_name("ci_content", |v: &mut TextView| {
                         v.set_content(content);
@@ -2447,13 +2479,14 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
         }
         let viewer2 = Arc::clone(&viewer_submit);
         let url_stack2 = Arc::clone(&url_stack_submit);
+        let cache2 = Arc::clone(&cache_submit);
         let cb = s.cb_sink().clone();
         std::thread::spawn(move || {
             match viewer2.list_artifacts(&entry_url) {
                 Ok(entries) => {
                     let viewer3 = Arc::clone(&viewer2);
                     cb.send(Box::new(move |s: &mut Cursive| {
-                        populate_ci_files(s, entries, viewer3);
+                        populate_ci_files(s, entries, viewer3, cache2);
                     }))
                     .ok();
                 }
@@ -2503,7 +2536,8 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
             s.pop_layer();
         })
         .on_event(cursive::event::Key::Backspace, move |s| {
-            // Pop the current directory and re-fetch the parent.
+            // Pop the current directory and re-fetch the parent listing.
+            // Note: file content is cached so revisiting files is instant.
             let parent_url = {
                 let mut stack = url_stack_back.lock().unwrap();
                 if stack.len() <= 1 {
@@ -2515,13 +2549,14 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
             if let Some(url) = parent_url {
                 let viewer2 = Arc::clone(&viewer_back);
                 let url_stack2 = Arc::clone(&url_stack_back);
+                let cache2 = Arc::clone(&cache_back);
                 let cb = s.cb_sink().clone();
                 std::thread::spawn(move || {
                     match viewer2.list_artifacts(&url) {
                         Ok(entries) => {
                             let viewer3 = Arc::clone(&viewer2);
                             cb.send(Box::new(move |s: &mut Cursive| {
-                                populate_ci_files(s, entries, viewer3);
+                                populate_ci_files(s, entries, viewer3, cache2);
                             }))
                             .ok();
                         }
@@ -2547,7 +2582,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
         Ok(entries) => {
             let viewer2 = Arc::clone(&viewer_init);
             cb.send(Box::new(move |s: &mut Cursive| {
-                populate_ci_files(s, entries, viewer2);
+                populate_ci_files(s, entries, viewer2, cache_init);
             }))
             .ok();
         }
@@ -2563,11 +2598,13 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
 }
 
 /// Populate `"ci_files"` SelectView with `entries`, auto-select the default
-/// entry (e.g. `report.html`), and immediately fetch its content.
+/// entry (e.g. `report.html`), and immediately show its content (from cache
+/// if available, otherwise fetch in background and store in cache).
 fn populate_ci_files(
     siv: &mut Cursive,
     entries: Vec<crate::ci::ArtifactEntry>,
     viewer: Arc<dyn crate::ci::CiJobViewer>,
+    cache: Arc<Mutex<HashMap<String, StyledString>>>,
 ) {
     let default_idx = viewer
         .default_entry(&entries)
@@ -2587,39 +2624,61 @@ fn populate_ci_files(
         },
     );
 
-    // Manually fetch content for the auto-selected entry since set_selection
-    // does not trigger on_select.
-    if let Some(idx) = default_idx {
-        if let Some(entry) = entries.get(idx) {
-            if !entry.is_dir {
-                let entry = entry.clone();
-                let viewer2 = Arc::clone(&viewer);
-                let cb = siv.cb_sink().clone();
-                std::thread::spawn(move || match viewer2.fetch_content(&entry) {
-                    Ok(content) => {
-                        cb.send(Box::new(move |s: &mut Cursive| {
-                            s.call_on_name("ci_content", |v: &mut TextView| {
-                                v.set_content(content);
-                            });
-                            s.call_on_name(
-                                "ci_content_scroll",
-                                |v: &mut ScrollView<NamedView<TextView>>| {
-                                    v.set_offset(cursive::Vec2::new(0, 0));
-                                },
-                            );
-                        }))
-                        .ok();
-                    }
-                    Err(e) => {
-                        cb.send(Box::new(move |s: &mut Cursive| {
-                            s.call_on_name("ci_content", |v: &mut TextView| {
-                                v.set_content(format!("Error loading {}:\n{}", entry.name, e));
-                            });
-                        }))
-                        .ok();
-                    }
-                });
-            }
-        }
+    // Show the auto-selected entry's content (set_selection does not trigger
+    // on_select, so we do it manually here).
+    let Some(idx) = default_idx else { return };
+    let Some(entry) = entries.get(idx) else {
+        return;
+    };
+    if entry.is_dir {
+        return;
     }
+
+    // Cache hit: instant display.
+    if let Some(cached) = cache.lock().unwrap().get(&entry.url).cloned() {
+        siv.call_on_name("ci_content", |v: &mut TextView| {
+            v.set_content(cached);
+        });
+        siv.call_on_name(
+            "ci_content_scroll",
+            |v: &mut ScrollView<NamedView<TextView>>| {
+                v.set_offset(cursive::Vec2::new(0, 0));
+            },
+        );
+        return;
+    }
+
+    // Cache miss: fetch in background, then cache and display.
+    let entry = entry.clone();
+    let viewer2 = Arc::clone(&viewer);
+    let cache2 = Arc::clone(&cache);
+    let cb = siv.cb_sink().clone();
+    std::thread::spawn(move || match viewer2.fetch_content(&entry) {
+        Ok(content) => {
+            cache2
+                .lock()
+                .unwrap()
+                .insert(entry.url.clone(), content.clone());
+            cb.send(Box::new(move |s: &mut Cursive| {
+                s.call_on_name("ci_content", |v: &mut TextView| {
+                    v.set_content(content);
+                });
+                s.call_on_name(
+                    "ci_content_scroll",
+                    |v: &mut ScrollView<NamedView<TextView>>| {
+                        v.set_offset(cursive::Vec2::new(0, 0));
+                    },
+                );
+            }))
+            .ok();
+        }
+        Err(e) => {
+            cb.send(Box::new(move |s: &mut Cursive| {
+                s.call_on_name("ci_content", |v: &mut TextView| {
+                    v.set_content(format!("Error loading {}:\n{}", entry.name, e));
+                });
+            }))
+            .ok();
+        }
+    });
 }
