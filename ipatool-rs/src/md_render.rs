@@ -98,7 +98,7 @@ pub fn render(input: &str) -> StyledString {
                 blockquote_depth += 1;
                 need_bq_prefix = true;
             }
-            Event::End(TagEnd::BlockQuote) => {
+            Event::End(TagEnd::BlockQuote(_)) => {
                 out.append_plain("\n");
                 blockquote_depth = blockquote_depth.saturating_sub(1);
                 need_bq_prefix = blockquote_depth > 0;
