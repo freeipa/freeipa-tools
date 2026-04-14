@@ -3,6 +3,7 @@ name = "ipatool"
 version = "0.1.0"
 edition = "2021"
 description = "Tool helping the IPA project processes"
+license = "GPL-3.0-or-later"
 
 [[bin]]
 name = "ipatool"
@@ -16,11 +17,11 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+reqwest = { version = "0.13", features = ["blocking", "json", "form"] }
 anyhow = "1"
 regex = "1"
-dirs = "5"
-cursive = { version = "0.21", default-features = false, features = ["crossterm-backend", "markdown"] }
-pulldown-cmark = { version = "0.11", default-features = false }
-rusqlite = { version = "0.31", features = ["bundled"] }
+dirs = "6"
+cursive = { version = "0.21", default-features = false, features = ["crossterm-backend"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+rusqlite = { version = "0.38" }
 flate2 = "1"
