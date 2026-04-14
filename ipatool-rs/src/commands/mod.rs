@@ -465,7 +465,19 @@ pub fn update_issue(ctx: &Ctx, ticket: &Ticket) {
         return;
     };
     let config_val = ctx.config.update_issue.as_str();
-    let Ok(title) = ticket.title() else { return };
+    let title = match ticket.title() {
+        Ok(t) => t,
+        Err(e) => {
+            ctx.out.print_red(&format!(
+                "Cannot retrieve ticket #{} from issue tracker: {}",
+                ticket.number(),
+                e
+            ));
+            ctx.out
+                .print_yellow("Please update the issue manually with the commit info above");
+            return;
+        }
+    };
     let do_comment = ask_yn(
         config_val,
         "update-issue",
@@ -491,15 +503,37 @@ pub fn close_issue(ctx: &Ctx, ticket: &Ticket, has_backport: bool) {
     if has_backport {
         return;
     }
-    let Ok(is_closed) = ticket.is_closed() else {
-        return;
+    let is_closed = match ticket.is_closed() {
+        Ok(v) => v,
+        Err(e) => {
+            ctx.out.print_red(&format!(
+                "Cannot retrieve ticket #{} from issue tracker: {}",
+                ticket.number(),
+                e
+            ));
+            ctx.out
+                .print_yellow("Please check and close the issue manually if appropriate");
+            return;
+        }
     };
     if is_closed {
         println!("Issue already closed.");
         return;
     }
     let config_val = ctx.config.close_issue.as_str();
-    let Ok(title) = ticket.title() else { return };
+    let title = match ticket.title() {
+        Ok(t) => t,
+        Err(e) => {
+            ctx.out.print_red(&format!(
+                "Cannot retrieve ticket #{} from issue tracker: {}",
+                ticket.number(),
+                e
+            ));
+            ctx.out
+                .print_yellow("Please close the issue manually if appropriate");
+            return;
+        }
+    };
     let do_close = ask_yn(
         config_val,
         "close-issue",
