@@ -7,7 +7,12 @@ managing GitHub pull requests.
 
 ## Building
 
+Make sure you've installed non-Rust dependencies:
+```sh
+dnf install sqlite-devel
 ```
+
+```sh
 cargo build --release
 # binary at target/release/ipatool
 ```
