@@ -40,10 +40,10 @@ patchdir: ~/patches/to-apply
 # ── URL templates ─────────────────────────────────────────────────────────────
 
 # Base URL for Pagure/Forgejo issues.  The issue number is appended.
-ticket-url: https://pagure.io/freeipa/issue/
+ticket-url: https://codeberg.org/freeipa/freeipa/issues/
 
 # Base URL for upstream commit links included in comments.
-commit-url: https://pagure.io/freeipa/c/
+commit-url: https://codeberg.org/freeipa/freeipa/commit/
 
 # Base URL for Bugzilla bugs (appended with bug ID).
 bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
@@ -52,20 +52,22 @@ bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 # automatically from the path prefix before "/browse/".
 jira-ticket-url: https://issues.redhat.com/browse/RHEL-
 
-# ── Pagure (primary issue tracker) ───────────────────────────────────────────
+# ── Pagure (legacy issue tracker) ───────────────────────────────────────────
 # Use either Pagure or Forgejo — not both.
 
-pagure-repository: freeipa
+# pagure-repository: freeipa
 # Create at https://pagure.io/<repo>/settings#apikeys
 # Required permissions: assign/change status/comment/create/subscribe/update
 # issues; create issues; update custom fields; update milestone.
-pagure-token: "0123456789abcdef0123456789abcdef01234567"
+# pagure-token: "0123456789abcdef0123456789abcdef01234567"
 
-# ── Forgejo (alternative issue tracker) ──────────────────────────────────────
+# ── Forgejo (primary issue tracker) ──────────────────────────────────────
 
-# forgejo-url: https://forgejo.example.com
-# forgejo-repo: owner/repository
-# forgejo-token: "0123456789abcdef0123456789abcdef01234567"
+forgejo-url: https://forgejo.example.com
+forgejo-repo: owner/repository
+# Create at https://codeberg.org/user/settings/applications
+# Required permissions: issue read/write, repository read/write
+forgejo-token: "0123456789abcdef0123456789abcdef01234567"
 
 # ── Issue tracker operations ──────────────────────────────────────────────────
 # Values: yes | no | ask  (ask = prompt interactively each time)

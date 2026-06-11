@@ -25,7 +25,7 @@ pub mod push;
 pub mod queue_submit;
 pub mod start_review;
 
-pub const GIT_REMOTE_SERVER: &str = "pagure.io";
+pub const GIT_REMOTE_SERVER: &str = "codeberg.org";
 
 /// Milestone to branches mapping (regex → list of branches)
 pub fn milestone_branches(milestone: &str) -> Option<Vec<String>> {

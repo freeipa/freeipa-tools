@@ -27,13 +27,13 @@ remote: origin
 patchdir: ~/patches/to-apply
 
 # URLs to use in reports & messages
-ticket-url: https://pagure.io/freeipa/issue/
-commit-url: https://pagure.io/freeipa/c/
+ticket-url: https://codeberg.org/freeipa/freeipa/issues/
+commit-url: https://codeberg.org/freeipa/freeipa/commit/
 bugzilla-bug-url: https://bugzilla.redhat.com/show_bug.cgi?id=
 jira-ticket-url: https://issues.redhat.com/browse/RHEL-
 
-# Pagure login details (used as default issue tracker)
-pagure-repository: freeipa
+# Pagure login details (legacy issue tracker)
+# pagure-repository: freeipa
 # Create the token in https://pagure.io/freeipa/settings
 # For token you need:
 #   * Assign issue to someone
@@ -44,15 +44,17 @@ pagure-repository: freeipa
 #   * Update an issue, status, comments, custom fields...
 #   * Update the custom fields of an issue
 #   * Update the milestone of an issue
-pagure-token: "YOUR_PAGURE_TOKEN_HERE"
+# pagure-token: "YOUR_PAGURE_TOKEN_HERE"
 # workaround: pagure doesn't provide the tokens for users so we cannot
 # dynamically detect username
 username: username
 
-# Forgejo login details (alternative to Pagure for issue tracking)
-# forgejo-url: https://forgejo.example.com
-# forgejo-repo: owner/repository
-# forgejo-token: "YOUR_FORGEJO_TOKEN_HERE"
+# Forgejo login details (primary issue tracker)
+forgejo-url: https://forgejo.example.com
+forgejo-repo: owner/repository
+# Create at https://codeberg.org/user/settings/applications
+# Required permissions: issue read/write, repository read/write
+forgejo-token: "0123456789abcdef0123456789abcdef01234567"
 
 # Issue tracker operations (apply to both Pagure and Forgejo)
 # update-issue options: yes/no/ask
