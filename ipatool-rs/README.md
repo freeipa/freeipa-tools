@@ -113,6 +113,26 @@ trac-username-map:
 
 db-path: ~/.ipa/ipatool-cache.db
 
+# ── Issue tracker migration (e.g. pagure → Codeberg) ─────────────────────────
+# When ticket-url has been updated to the new tracker but existing commits still
+# contain the old URL prefix, set legacy-ticket-url.  Issue numbers found via
+# this prefix are treated exactly like those found via ticket-url.
+
+# legacy-ticket-url: "https://pagure.io/freeipa/issue/"
+
+# If the migration did not preserve issue numbers, map old numbers to new ones.
+# Unmapped numbers pass through unchanged.
+
+# issue-number-map:
+#   9000: 1234   # pagure #9000 → Codeberg #1234
+#   8999: 1233
+
+# When true, legacy-ticket-url references in commit messages are replaced with
+# ticket-url before git-am writes them into history on push/backport.
+# Defaults to false (old pagure URLs are preserved in the commit log).
+
+# rewrite-ticket-urls: false
+
 # ── Named profiles ────────────────────────────────────────────────────────────
 # A profile overrides selected top-level fields and sets the PR source and
 # issue tracker.  Activate with --profile <name>.
@@ -160,6 +180,17 @@ profiles:
   gh-issues:
     pr-source: github
     issue-tracker: github
+
+  # (5) Codeberg PRs + Codeberg issues, with pagure legacy URL support
+  #     (commits written against pagure are still recognised)
+  codeberg-migrated:
+    pr-source: forgejo
+    issue-tracker: forgejo
+    forgejo-url: https://codeberg.org
+    forgejo-repo: freeipa/freeipa
+    forgejo-token: "YOUR_CODEBERG_TOKEN_HERE"
+    ticket-url: https://codeberg.org/freeipa/freeipa/issues/
+    legacy-ticket-url: "https://pagure.io/freeipa/issue/"
 ```
 
 ### Named profiles
@@ -182,6 +213,7 @@ ipatool --profile gh-issues pr-list    # GitHub PRs, GitHub issues (no Pagure)
 | `codeberg` | Codeberg | Codeberg | Full Codeberg / Forgejo workflow |
 | `cb-pagure` | Codeberg | Pagure | Codeberg PRs, Pagure issue tracker |
 | `gh-issues` | GitHub | GitHub Issues | No Pagure/Forgejo needed |
+| `codeberg-migrated` | Codeberg | Codeberg | Codeberg workflow; old pagure commit URLs still recognised |
 
 **Profile fields**
 
@@ -193,6 +225,7 @@ ipatool --profile gh-issues pr-list    # GitHub PRs, GitHub issues (no Pagure)
 | `pagure-repository`, `pagure-token` | strings | Override Pagure settings |
 | `forgejo-url`, `forgejo-repo`, `forgejo-token` | strings | Override Forgejo/Codeberg settings |
 | `ticket-url`, `commit-url`, `db-path` | strings | Override URL templates and cache path |
+| `legacy-ticket-url` | string | Old ticket URL prefix to recognise in existing commits (migration) |
 
 Profile field values replace their top-level counterparts when the profile is
 active; omitted fields fall through to the top-level values.
@@ -702,8 +735,9 @@ plain text of the right pane is submitted as the bug body via the Pagure API.
 The dialog dismisses immediately; success or failure is reported in a
 follow-up info/error dialog.
 
-Requires `pagure-token` and `pagure-repository` to be set in the
-configuration; the token needs **Create issues** permission.
+Requires `pagure-token` and `pagure-repository` (or `forgejo-token`,
+`forgejo-url`, and `forgejo-repo`) to be set in the configuration, and the
+token needs **Create issues** permission.
 
 ---
 
@@ -927,6 +961,96 @@ field of each Pagure/Forgejo issue.  After a push, ipatool optionally:
 
 The Jira REST API server is derived automatically from the scheme+host of
 `jira-ticket-url`.  Disable Jira with `--no-jira`.
+
+### Issue tracker migration (pagure → Codeberg)
+
+When the project's primary tracker changes (e.g. from pagure.io to
+codeberg.org), existing commits continue to reference the old URL.  Three
+config keys handle the transition without requiring a rebase of every branch:
+
+#### `legacy-ticket-url`
+
+Set this to the **old** issue URL prefix.  ipatool scans commit messages for
+both `ticket-url` and `legacy-ticket-url` when extracting issue numbers from
+patches.  Numbers found via either URL are used identically to look up, comment
+on, and close the corresponding issues in the **new** tracker.
+
+```yaml
+ticket-url: "https://codeberg.org/freeipa/freeipa/issues/"
+legacy-ticket-url: "https://pagure.io/freeipa/issue/"
+```
+
+With this configuration, a commit that contains:
+
+```
+Fixes: https://pagure.io/freeipa/issue/9000
+```
+
+is treated as if it referenced issue `#9000` in the Codeberg tracker and the
+Codeberg issue is commented on / closed after a push.
+
+#### `issue-number-map`
+
+If the migration did **not** preserve issue numbers (pagure issue `#9000` became
+Codeberg issue `#1234`), provide an explicit mapping.  Unmapped numbers pass
+through unchanged.
+
+```yaml
+issue-number-map:
+  9000: 1234
+  8999: 1233
+```
+
+The map is applied after all ticket numbers have been extracted (from both
+`ticket-url` and `legacy-ticket-url`), so pagure numbers found via
+`legacy-ticket-url` are translated to their Codeberg counterparts before any
+API call is made.
+
+#### `rewrite-ticket-urls`
+
+When set to `true`, any `legacy-ticket-url` occurrence in patch commit messages
+is replaced with `ticket-url` **before** `git am` writes the commit into the
+target branch.  This produces a clean commit history on the server side — the
+pushed commits contain only the new Codeberg URL.
+
+```yaml
+rewrite-ticket-urls: true
+```
+
+The rewrite is applied only to the patch header (commit message lines).  The
+diff body is never modified.  The setting has no effect when `legacy-ticket-url`
+is empty or equal to `ticket-url`.
+
+Default is `false` (the original pagure URL is preserved verbatim in the commit
+log).
+
+#### Minimal migration config
+
+```yaml
+# New primary tracker
+ticket-url: "https://codeberg.org/freeipa/freeipa/issues/"
+commit-url: "https://codeberg.org/freeipa/freeipa/commit/"
+forgejo-url: "https://codeberg.org"
+forgejo-repo: "freeipa/freeipa"
+forgejo-token: "YOUR_CODEBERG_TOKEN_HERE"
+
+# Legacy pagure tracker (read-only; used only to recognise old commit URLs)
+legacy-ticket-url: "https://pagure.io/freeipa/issue/"
+
+# Rewrite pagure URLs to Codeberg URLs in pushed commits (optional)
+rewrite-ticket-urls: true
+
+profiles:
+  codeberg:
+    pr-source: forgejo
+    issue-tracker: forgejo
+```
+
+Activate the Codeberg workflow with:
+
+```
+ipatool --profile codeberg pr-push 8309 -r abbra
+```
 
 ---
 
