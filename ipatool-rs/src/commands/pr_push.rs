@@ -1,8 +1,17 @@
 use anyhow::{bail, Result};
 use regex::Regex;
+use std::sync::OnceLock;
 
 use super::Ctx;
 use crate::patch::delete_patches;
+
+static BACKPORT_BRANCH_RE: OnceLock<Regex> = OnceLock::new();
+fn backport_branch_re() -> &'static Regex {
+    BACKPORT_BRANCH_RE.get_or_init(|| {
+        Regex::new(r"^ipa-\d+-\d+$")
+            .expect("BACKPORT_BRANCH_RE pattern is valid; failure is a compile-time bug")
+    })
+}
 
 pub fn run(
     ctx: &mut Ctx,
@@ -84,9 +93,8 @@ pub fn run(
         // Handle backports
         let mut bp_branches: Vec<String> = backport_branches.to_vec();
         if autobackport {
-            let pat = Regex::new(r"^ipa-\d+-\d+$").unwrap();
             for label in &labels {
-                if pat.is_match(label) && !bp_branches.contains(label) {
+                if backport_branch_re().is_match(label) && !bp_branches.contains(label) {
                     bp_branches.push(label.clone());
                 }
             }
