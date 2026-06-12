@@ -175,22 +175,14 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
         let cb = siv.cb_sink().clone();
         let db2 = db.clone();
         let profile2 = profile.clone();
-        std::thread::spawn(move || {
-            if let Ok(prs) = gh2.list_prs(&state) {
+        std::thread::spawn(move || match gh2.list_prs(&state) {
+            Ok(prs) => {
                 if let Some(ref d) = db2 {
                     if let Err(e) = d.cache_prs(&profile2, &prs) {
                         eprintln!("Warning: failed to update PR cache: {}", e);
                     }
                 }
-                let gh3 = gh2;
-                cb.send(Box::new(move |s: &mut Cursive| {
-                    while s.pop_layer().is_some() {}
-                    build_two_pane(s, gh3, prs);
-                }))
-                .ok();
             }
-            // On network error: silently keep the cached view.
-            // The user can press 'r' to retry manually.
         });
     } else {
         // No cached data: show a blocking loading dialog until the fetch lands.
@@ -898,9 +890,24 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitH
     std::thread::spawn(move || {
         // All fetches run sequentially in the background thread.
         // most_recent_statuses() returns HashMap<String, CiJobStatus>.
-        let statuses = gh.most_recent_statuses(&sha).unwrap_or_default();
-        let comments = gh.get_all_issue_comments(pr_number).unwrap_or_default();
-        let files = gh.get_pr_files(pr_number).unwrap_or_default();
+        let statuses = gh.most_recent_statuses(&sha).unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: failed to fetch CI statuses for PR {}: {}",
+                pr_number, e
+            );
+            Default::default()
+        });
+        let comments = gh.get_all_issue_comments(pr_number).unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: failed to fetch comments for PR {}: {}",
+                pr_number, e
+            );
+            Default::default()
+        });
+        let files = gh.get_pr_files(pr_number).unwrap_or_else(|e| {
+            eprintln!("Warning: failed to fetch files for PR {}: {}", pr_number, e);
+            Default::default()
+        });
 
         // Split CiJobStatus map into (state strings, url strings) for cache storage.
         let cached_states: HashMap<String, String> = statuses
@@ -1269,11 +1276,27 @@ fn show_review_view(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
     let gh2 = Arc::clone(&gh);
     let pr2 = pr.clone();
     std::thread::spawn(move || {
-        let files = gh2.get_pr_files(pr2.number).unwrap_or_default();
-        let review_comments = gh2.list_review_comments(pr2.number).unwrap_or_default();
+        let pr_number = pr2.number;
+        let files = gh2.get_pr_files(pr_number).unwrap_or_else(|e| {
+            eprintln!("Warning: failed to fetch files for PR {}: {}", pr_number, e);
+            Default::default()
+        });
+        let review_comments = gh2.list_review_comments(pr_number).unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: failed to fetch review comments for PR {}: {}",
+                pr_number, e
+            );
+            Default::default()
+        });
         let issue_comments = gh2
-            .get_last_issue_comments(pr2.number, 100)
-            .unwrap_or_default();
+            .get_last_issue_comments(pr_number, 100)
+            .unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: failed to fetch issue comments for PR {}: {}",
+                    pr_number, e
+                );
+                Default::default()
+            });
         let data = ReviewData {
             files,
             review_comments,
