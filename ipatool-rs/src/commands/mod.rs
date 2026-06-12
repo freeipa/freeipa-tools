@@ -343,13 +343,31 @@ impl Ctx {
         })
     }
 
+    /// Return the expected git remote server hostname for the active forge.
+    /// Used by `verify_remote_url` to warn when pushing to an unexpected host.
+    fn expected_remote_server(&self) -> &str {
+        // If a Forgejo URL is configured, derive the hostname from it.
+        // e.g. "https://codeberg.org" → "codeberg.org"
+        if !self.config.forgejo_url.is_empty() {
+            return self
+                .config
+                .forgejo_url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .trim_end_matches('/');
+        }
+        // Fall back to the Pagure default for Pagure/GitHub setups.
+        GIT_REMOTE_SERVER
+    }
+
     pub fn verify_remote_url(&self) -> Result<()> {
         let remote = &self.config.remote;
         let url = crate::git::remote_get_url(remote, &self.git_env, self.verbosity)?;
-        if !url.contains(GIT_REMOTE_SERVER) {
+        let expected = self.expected_remote_server();
+        if !url.contains(expected) {
             self.out.print_red(&format!(
                 "!!! WARNING !!! not pushing to {} git repo",
-                GIT_REMOTE_SERVER
+                expected
             ));
             let response = prompt(&format!("Push to \"{}\"? [y/n] ", url));
             if response.to_lowercase() != "y" {
