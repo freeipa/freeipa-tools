@@ -415,7 +415,7 @@ impl ForgejoClient {
                 l.id
             } else {
                 // Create the label with a neutral grey color
-                self.create_label(name, "cccccc")?
+                self.create_label(name, "#cccccc")?
             };
             ids.push(id);
         }
