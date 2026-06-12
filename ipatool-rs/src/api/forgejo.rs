@@ -779,12 +779,12 @@ impl ForgejoTicket {
     /// and one Jira URL on separate lines) are merged so both are visible to
     /// the regex scanners in push.rs.
     fn comment_field(&self, name: &str) -> Result<Option<String>> {
-        let comments = self.load_comments()?;
         let prefix = &self.comment_field_prefix;
         let needle = format!("{}:", name);
         let mut values: Vec<String> = Vec::new();
-        for comment in comments {
-            for line in comment.body.lines() {
+
+        let mut scan = |text: &str| {
+            for line in text.lines() {
                 let rest = if prefix.is_empty() {
                     line
                 } else {
@@ -800,7 +800,17 @@ impl ForgejoTicket {
                     }
                 }
             }
+        };
+
+        // Scan the issue body first, then all comments.
+        let issue = self.data()?;
+        if let Some(ref body) = issue.body {
+            scan(body);
         }
+        for comment in self.load_comments()? {
+            scan(&comment.body);
+        }
+
         if values.is_empty() {
             Ok(None)
         } else {
