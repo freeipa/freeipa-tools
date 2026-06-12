@@ -896,6 +896,7 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitH
     let sha = pr.head.sha.clone();
     let cb = siv.cb_sink().clone();
     std::thread::spawn(move || {
+        let mut critical_fetch_failed = false;
         // All fetches run sequentially in the background thread.
         // most_recent_statuses() returns HashMap<String, CiJobStatus>.
         let statuses = gh.most_recent_statuses(&sha).unwrap_or_else(|e| {
@@ -914,6 +915,7 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitH
         });
         let files = gh.get_pr_files(pr_number).unwrap_or_else(|e| {
             eprintln!("Warning: failed to fetch files for PR {}: {}", pr_number, e);
+            critical_fetch_failed = true;
             Default::default()
         });
 
@@ -928,17 +930,20 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitH
             .collect();
 
         // Persist so the next offline session can show these details.
+        // Skip cache write if any critical fetch failed to avoid storing incomplete data.
         if let Some(ref db) = db {
-            let cached = crate::db::CachedPrDetails {
-                statuses: cached_states,
-                comments: comments.clone(),
-                files: files.clone(),
-                commits: vec![],
-                status_urls: cached_urls,
-            };
-            let updated_at = pr.updated_at.as_deref();
-            if let Err(e) = db.cache_pr_details(&profile, pr_number, &cached, updated_at) {
-                eprintln!("Warning: failed to cache PR details: {}", e);
+            if !critical_fetch_failed {
+                let cached = crate::db::CachedPrDetails {
+                    statuses: cached_states,
+                    comments: comments.clone(),
+                    files: files.clone(),
+                    commits: vec![],
+                    status_urls: cached_urls,
+                };
+                let updated_at = pr.updated_at.as_deref();
+                if let Err(e) = db.cache_pr_details(&profile, pr_number, &cached, updated_at) {
+                    eprintln!("Warning: failed to cache PR details: {}", e);
+                }
             }
         }
 
@@ -1285,10 +1290,19 @@ fn show_review_view(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
     let pr2 = pr.clone();
     std::thread::spawn(move || {
         let pr_number = pr2.number;
-        let files = gh2.get_pr_files(pr_number).unwrap_or_else(|e| {
-            eprintln!("Warning: failed to fetch files for PR {}: {}", pr_number, e);
-            Default::default()
-        });
+        let files = match gh2.get_pr_files(pr_number) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Warning: failed to fetch files for PR {}: {}", pr_number, e);
+                let msg = format!("Failed to fetch PR diff: {}", e);
+                cb.send(Box::new(move |s: &mut Cursive| {
+                    s.pop_layer(); // remove loading dialog
+                    show_error(s, &msg);
+                }))
+                .ok();
+                return;
+            }
+        };
         let review_comments = gh2.list_review_comments(pr_number).unwrap_or_else(|e| {
             eprintln!(
                 "Warning: failed to fetch review comments for PR {}: {}",
@@ -2223,21 +2237,21 @@ fn sync_queued_actions(siv: &mut Cursive) {
     let cb = siv.cb_sink().clone();
     std::thread::spawn(move || {
         let mut ok = 0usize;
-        let mut errors: Vec<String> = Vec::new();
+        let mut first_error: Option<String> = None;
         for pa in actions {
             let result = match pa.provider_action.provider {
-                crate::db::Provider::GitHub => apply_github_action(&gh, &pa.provider_action.action),
+                crate::db::Provider::GitHub => apply_queued_action(&gh, &pa.provider_action.action),
                 crate::db::Provider::Forgejo => {
                     // PrClient already routes to the correct forge backend internally;
                     // no Forgejo-specific dispatch is needed here.
-                    apply_github_action(&gh, &pa.provider_action.action)
+                    apply_queued_action(&gh, &pa.provider_action.action)
                 }
                 crate::db::Provider::Pagure => Err(anyhow::anyhow!(
                     "Pagure provider is not yet supported for offline sync."
                 )),
             };
             if let Err(e) = result {
-                errors.push(format!("{:?}: {}", pa.provider_action.action, e));
+                first_error = Some(format!("{:?}: {}", pa.provider_action.action, e));
                 break; // stop on first error to preserve ordering
             } else if let Err(e) = db.delete_action(pa.id) {
                 eprintln!(
@@ -2252,12 +2266,16 @@ fn sync_queued_actions(siv: &mut Cursive) {
         }
         cb.send(Box::new(move |s: &mut Cursive| {
             s.pop_layer();
-            if errors.is_empty() {
+            if first_error.is_none() {
                 show_info(s, &format!("Synced {} action(s) successfully.", ok));
             } else {
                 show_error(
                     s,
-                    &format!("Synced {} action(s). First error:\n{}", ok, errors[0]),
+                    &format!(
+                        "Synced {} action(s). First error:\n{}",
+                        ok,
+                        first_error.as_deref().unwrap_or("unknown error")
+                    ),
                 );
             }
             // Refresh PR list after sync
@@ -2270,7 +2288,7 @@ fn sync_queued_actions(siv: &mut Cursive) {
     });
 }
 
-fn apply_github_action(gh: &Arc<PrClient>, action: &crate::db::QueuedAction) -> anyhow::Result<()> {
+fn apply_queued_action(gh: &Arc<PrClient>, action: &crate::db::QueuedAction) -> anyhow::Result<()> {
     use crate::db::QueuedAction::*;
     match action {
         AddLabel { pr_number, label } => gh.add_labels(*pr_number, &[label.as_str()]),
