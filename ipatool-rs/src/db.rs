@@ -131,7 +131,7 @@ impl Database {
     }
 
     fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
 
         // The action queue is never dropped — it holds persistent offline work.
         conn.execute_batch(
@@ -194,7 +194,7 @@ impl Database {
     /// The profile is the active `--profile` name (empty string for the default
     /// profile), so that different profile configurations keep separate caches.
     pub fn cache_prs(&self, profile: &str, prs: &[GitHubPR]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let now = now_secs();
         for pr in prs {
             let json = serde_json::to_string(pr)?;
@@ -209,7 +209,7 @@ impl Database {
 
     /// Load cached PRs for the given profile, optionally filtered by state.
     pub fn load_prs(&self, profile: &str, state_filter: &str) -> Result<Vec<GitHubPR>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let jsons: Vec<String> = if state_filter == "all" {
             let mut stmt =
                 conn.prepare("SELECT data_json FROM prs WHERE profile = ?1 ORDER BY number DESC")?;
@@ -246,7 +246,7 @@ impl Database {
         details: &CachedPrDetails,
         pr_updated_at: Option<&str>,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let json = serde_json::to_string(details)?;
         conn.execute(
             "INSERT OR REPLACE INTO pr_details
@@ -263,7 +263,7 @@ impl Database {
         profile: &str,
         pr_number: u64,
     ) -> Result<Option<CachedPrDetails>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let result = conn.query_row(
             "SELECT details_json FROM pr_details WHERE number = ?1 AND profile = ?2",
             params![pr_number as i64, profile],
@@ -279,7 +279,7 @@ impl Database {
     /// Return the `pr_updated_at` value stored when details were last cached,
     /// or `None` if no details have been cached for this PR.
     pub fn pr_details_updated_at(&self, profile: &str, pr_number: u64) -> Option<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.query_row(
             "SELECT pr_updated_at FROM pr_details WHERE number = ?1 AND profile = ?2",
             params![pr_number as i64, profile],
@@ -293,7 +293,7 @@ impl Database {
 
     /// Enqueue a provider-tagged action for later sync.
     pub fn queue_action(&self, action: &ProviderAction) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let json = serde_json::to_string(action)?;
         conn.execute(
             "INSERT INTO queued_actions (action_json, created_at) VALUES (?1, ?2)",
@@ -303,7 +303,7 @@ impl Database {
     }
 
     pub fn pending_actions(&self) -> Result<Vec<PendingAction>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let mut stmt = conn.prepare("SELECT id, action_json FROM queued_actions ORDER BY id")?;
         let collected: rusqlite::Result<Vec<(i64, String)>> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -329,13 +329,13 @@ impl Database {
     }
 
     pub fn delete_action(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         conn.execute("DELETE FROM queued_actions WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     pub fn pending_count(&self) -> usize {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         match conn.query_row("SELECT COUNT(*) FROM queued_actions", [], |r| {
             r.get::<_, i64>(0)
         }) {
@@ -664,7 +664,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         // Old format: plain QueuedAction JSON without the provider wrapper
         let old_json = r#"{"type":"Ack","pr_number":99,"comment":null}"#;
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn.lock().unwrap_or_else(|e| e.into_inner());
         let now = now_secs();
         conn.execute(
             "INSERT INTO queued_actions (action_json, created_at) VALUES (?1, ?2)",
