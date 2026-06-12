@@ -19,8 +19,8 @@ use std::{
 
 use super::pr_client::PrClient;
 use super::Ctx;
-use crate::api::types::{CiStatus, IssueComment, Label, PrFile, PullRequest, ReviewComment};
 use crate::api::pagure::PagureClient;
+use crate::api::types::{CiStatus, IssueComment, Label, PrFile, PullRequest, ReviewComment};
 use crate::tui_keys::TuiKeys;
 
 const FORGEJO_OFFLINE_MSG: &str =
@@ -177,11 +177,12 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
                     }
                 }
                 let gh3 = gh2;
-                cb.send(Box::new(move |s: &mut Cursive| {
+                if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                     while s.pop_layer().is_some() {}
                     build_two_pane(s, gh3, prs);
-                }))
-                .ok();
+                })) {
+                    eprintln!("Warning: TUI event send failed: {}", e);
+                }
             }
             Err(e) => {
                 eprintln!(
@@ -219,15 +220,16 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
                 }
             })();
             let gh3 = gh2;
-            cb.send(Box::new(move |s: &mut Cursive| {
+            if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                 s.pop_layer();
                 match result {
                     Err(e) => show_error(s, &format!("Failed to load PRs: {}", e)),
                     Ok(prs) if prs.is_empty() => show_error(s, "No pull requests found."),
                     Ok(prs) => build_two_pane(s, gh3, prs),
                 }
-            }))
-            .ok();
+            })) {
+                eprintln!("Warning: TUI event send failed: {}", e);
+            }
         });
     }
 
@@ -501,9 +503,9 @@ fn nav_down(siv: &mut Cursive) {
         .unwrap_or(false);
     if right {
         scroll_detail(siv, 1);
-    } else if let Some(cb) =
-        siv.call_on_name("pr_list", |v: &mut SelectView<PullRequest>| v.select_down(1))
-    {
+    } else if let Some(cb) = siv.call_on_name("pr_list", |v: &mut SelectView<PullRequest>| {
+        v.select_down(1)
+    }) {
         cb(siv);
     }
 }
@@ -594,15 +596,16 @@ fn refresh_list(siv: &mut Cursive, gh: Arc<PrClient>) {
             }
         })();
         let gh2 = gh;
-        cb.send(Box::new(move |s: &mut Cursive| {
+        if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
             s.pop_layer();
             match result {
                 Err(e) => show_error(s, &format!("Refresh failed: {}", e)),
                 Ok(prs) if prs.is_empty() => show_error(s, "No pull requests found."),
                 Ok(prs) => build_two_pane(s, gh2, prs),
             }
-        }))
-        .ok();
+        })) {
+            eprintln!("Warning: TUI event send failed: {}", e);
+        }
     });
 }
 
@@ -951,7 +954,7 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: Pull
             comments,
             files,
         };
-        cb.send(Box::new(move |s: &mut Cursive| {
+        if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
             let current = selected_pr(s).map(|p| p.number);
             if current == Some(pr_number) {
                 // Store statuses in TuiState so the 'i' key handler can open the job selector.
@@ -960,8 +963,9 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: Pull
                 }
                 update_detail_full(s, &pr, details);
             }
-        }))
-        .ok();
+        })) {
+            eprintln!("Warning: TUI event send failed: {}", e);
+        }
     });
 }
 
@@ -1293,11 +1297,12 @@ fn show_review_view(siv: &mut Cursive, gh: Arc<PrClient>, pr: PullRequest) {
             Err(e) => {
                 eprintln!("Warning: failed to fetch files for PR {}: {}", pr_number, e);
                 let msg = format!("Failed to fetch PR diff: {}", e);
-                cb.send(Box::new(move |s: &mut Cursive| {
+                if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                     s.pop_layer(); // remove loading dialog
                     show_error(s, &msg);
-                }))
-                .ok();
+                })) {
+                    eprintln!("Warning: TUI event send failed: {}", e);
+                }
                 return;
             }
         };
@@ -1323,11 +1328,12 @@ fn show_review_view(siv: &mut Cursive, gh: Arc<PrClient>, pr: PullRequest) {
             issue_comments,
         };
         let gh3 = gh2;
-        cb.send(Box::new(move |s: &mut Cursive| {
+        if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
             s.pop_layer();
             build_review_layer(s, gh3, pr2, data);
-        }))
-        .ok();
+        })) {
+            eprintln!("Warning: TUI event send failed: {}", e);
+        }
     });
 }
 
@@ -1465,15 +1471,16 @@ fn assemble_review_layer(siv: &mut Cursive, gh: Arc<PrClient>, focus_idx: usize)
     if focus_idx > 0 {
         let scroll_to = focus_idx.saturating_sub(5);
         let cb = siv.cb_sink().clone();
-        cb.send(Box::new(move |s: &mut Cursive| {
+        if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
             s.call_on_name(
                 "review_scroll",
                 |v: &mut ScrollView<NamedView<SelectView<ReviewItem>>>| {
                     let _ = v.set_offset((0usize, scroll_to));
                 },
             );
-        }))
-        .ok();
+        })) {
+            eprintln!("Warning: TUI event send failed: {}", e);
+        }
     }
 }
 
@@ -1661,16 +1668,18 @@ fn open_review_comment_form(
     // completed so last_available_size() is correct and the offset sticks.
     let scroll_to = focus_idx.saturating_sub(5);
     let cb = siv.cb_sink().clone();
-    cb.send(Box::new(move |s: &mut Cursive| {
+    if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
         let cb2 = s.cb_sink().clone();
-        cb2.send(Box::new(move |s: &mut Cursive| {
+        if let Err(e) = cb2.send(Box::new(move |s: &mut Cursive| {
             s.call_on_name("split_review_scroll", |v: &mut ScrollView<TextView>| {
                 v.set_offset((0usize, scroll_to));
             });
-        }))
-        .ok();
-    }))
-    .ok();
+        })) {
+            eprintln!("Warning: TUI event send failed: {}", e);
+        }
+    })) {
+        eprintln!("Warning: TUI event send failed: {}", e);
+    }
 }
 
 // ─── Action dialog (Enter key) ────────────────────────────────────────────────
@@ -1786,14 +1795,15 @@ fn show_label_editor(siv: &mut Cursive, gh: Arc<PrClient>, pr: PullRequest) {
     let gh2 = Arc::clone(&gh);
     std::thread::spawn(move || {
         let result = gh2.list_repo_labels();
-        cb.send(Box::new(move |s: &mut Cursive| {
+        if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
             s.pop_layer();
             match result {
                 Err(e) => show_error(s, &format!("Failed to fetch labels: {}", e)),
                 Ok(repo_labels) => build_label_editor_layer(s, gh2, pr, repo_labels),
             }
-        }))
-        .ok();
+        })) {
+            eprintln!("Warning: TUI event send failed: {}", e);
+        }
     });
 }
 
@@ -1913,7 +1923,7 @@ fn build_label_editor_layer(
                         // Re-fetch so the UI reflects the new label set.
                         gh2.get_pr(pr_number)
                     })();
-                    cb.send(Box::new(move |s: &mut Cursive| {
+                    if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                         s.pop_layer(); // remove loading dialog
                         match result {
                             Err(e) => show_error(s, &format!("Failed to update labels: {}", e)),
@@ -1922,8 +1932,9 @@ fn build_label_editor_layer(
                                 show_info(s, "Labels updated successfully.");
                             }
                         }
-                    }))
-                    .ok();
+                    })) {
+                        eprintln!("Warning: TUI event send failed: {}", e);
+                    }
                 });
             }
         })
@@ -2273,7 +2284,7 @@ fn sync_queued_actions(siv: &mut Cursive) {
                 ok += 1;
             }
         }
-        cb.send(Box::new(move |s: &mut Cursive| {
+        if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
             s.pop_layer();
             if first_error.is_none() {
                 show_info(s, &format!("Synced {} action(s) successfully.", ok));
@@ -2292,8 +2303,9 @@ fn sync_queued_actions(siv: &mut Cursive) {
             if let Some(gh2) = gh2 {
                 refresh_list(s, gh2);
             }
-        }))
-        .ok();
+        })) {
+            eprintln!("Warning: TUI event send failed: {}", e);
+        }
     });
 }
 
@@ -2340,11 +2352,12 @@ where
     let cb = siv.cb_sink().clone();
     std::thread::spawn(move || {
         let result = action();
-        cb.send(Box::new(move |s: &mut Cursive| {
+        if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
             s.pop_layer();
             on_done(s, result);
-        }))
-        .ok();
+        })) {
+            eprintln!("Warning: TUI event send failed: {}", e);
+        }
     });
 }
 
@@ -2642,7 +2655,7 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                             .unwrap()
                             .insert(entry.url.clone(), sub_artifacts.clone());
                     }
-                    cb.send(Box::new(move |s: &mut Cursive| {
+                    if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                         *content_ref.lock().unwrap() = content.clone();
                         s.call_on_name("ci_content", |v: &mut TextView| {
                             v.set_content(content);
@@ -2656,16 +2669,18 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                         if !sub_artifacts.is_empty() {
                             append_sub_entries_to_list(s, sub_artifacts);
                         }
-                    }))
-                    .ok();
+                    })) {
+                        eprintln!("Warning: TUI event send failed: {}", e);
+                    }
                 }
                 Err(e) => {
-                    cb.send(Box::new(move |s: &mut Cursive| {
+                    if let Err(send_err) = cb.send(Box::new(move |s: &mut Cursive| {
                         s.call_on_name("ci_content", |v: &mut TextView| {
                             v.set_content(format!("Error loading content:\n{}", e));
                         });
-                    }))
-                    .ok();
+                    })) {
+                        eprintln!("Warning: TUI event send failed: {}", send_err);
+                    }
                 }
             }
         });
@@ -2706,18 +2721,20 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                         .unwrap()
                         .insert(entry_url.clone(), entries.clone());
                     let viewer3 = Arc::clone(&viewer2);
-                    cb.send(Box::new(move |s: &mut Cursive| {
+                    if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                         populate_ci_files(s, entries, viewer3, cache2, sub2, cc2);
-                    }))
-                    .ok();
+                    })) {
+                        eprintln!("Warning: TUI event send failed: {}", e);
+                    }
                 }
                 Err(e) => {
                     // Undo the push since navigation failed.
                     url_stack2.lock().unwrap().pop();
-                    cb.send(Box::new(move |s: &mut Cursive| {
+                    if let Err(send_err) = cb.send(Box::new(move |s: &mut Cursive| {
                         show_error(s, &format!("Failed to load directory:\n{}", e));
-                    }))
-                    .ok();
+                    })) {
+                        eprintln!("Warning: TUI event send failed: {}", send_err);
+                    }
                 }
             }
         });
@@ -2944,18 +2961,20 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                                 .unwrap()
                                 .insert(url.clone(), entries.clone());
                             let viewer3 = Arc::clone(&viewer2);
-                            cb.send(Box::new(move |s: &mut Cursive| {
+                            if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                                 populate_ci_files(s, entries, viewer3, cache2, sub2, cc2);
-                            }))
-                            .ok();
+                            })) {
+                                eprintln!("Warning: TUI event send failed: {}", e);
+                            }
                         }
                         Err(e) => {
                             // Restore the URL we popped since re-fetch failed.
                             url_stack2.lock().unwrap().push(url);
-                            cb.send(Box::new(move |s: &mut Cursive| {
+                            if let Err(send_err) = cb.send(Box::new(move |s: &mut Cursive| {
                                 show_error(s, &format!("Failed to load parent listing:\n{}", e));
-                            }))
-                            .ok();
+                            })) {
+                                eprintln!("Warning: TUI event send failed: {}", send_err);
+                            }
                         }
                     }
                 });
@@ -2974,18 +2993,20 @@ fn show_job_results_view(siv: &mut Cursive, job_name: String, base_url: String) 
                 .unwrap()
                 .insert(base_url.clone(), entries.clone());
             let viewer2 = Arc::clone(&viewer_init);
-            cb.send(Box::new(move |s: &mut Cursive| {
+            if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                 populate_ci_files(s, entries, viewer2, cache_init, sub_init, content_init);
-            }))
-            .ok();
+            })) {
+                eprintln!("Warning: TUI event send failed: {}", e);
+            }
         }
         Err(e) => {
-            cb.send(Box::new(move |s: &mut Cursive| {
+            if let Err(send_err) = cb.send(Box::new(move |s: &mut Cursive| {
                 s.call_on_name("ci_content", |v: &mut TextView| {
                     v.set_content(format!("Error loading artifact listing:\n{}", e));
                 });
-            }))
-            .ok();
+            })) {
+                eprintln!("Warning: TUI event send failed: {}", send_err);
+            }
         }
     });
 }
@@ -3101,7 +3122,7 @@ fn populate_ci_files(
                     .unwrap()
                     .insert(entry.url.clone(), sub_artifacts.clone());
             }
-            cb.send(Box::new(move |s: &mut Cursive| {
+            if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                 *cc2.lock().unwrap() = content.clone();
                 s.call_on_name("ci_content", |v: &mut TextView| {
                     v.set_content(content);
@@ -3115,16 +3136,18 @@ fn populate_ci_files(
                 if !sub_artifacts.is_empty() {
                     append_sub_entries_to_list(s, sub_artifacts);
                 }
-            }))
-            .ok();
+            })) {
+                eprintln!("Warning: TUI event send failed: {}", e);
+            }
         }
         Err(e) => {
-            cb.send(Box::new(move |s: &mut Cursive| {
+            if let Err(send_err) = cb.send(Box::new(move |s: &mut Cursive| {
                 s.call_on_name("ci_content", |v: &mut TextView| {
                     v.set_content(format!("Error loading {}:\n{}", entry.name, e));
                 });
-            }))
-            .ok();
+            })) {
+                eprintln!("Warning: TUI event send failed: {}", send_err);
+            }
         }
     });
 }
@@ -3257,16 +3280,18 @@ fn show_file_bug_dialog(
                 let cb = s.cb_sink().clone();
                 std::thread::spawn(move || match pagure2.create_issue(&title, &body) {
                     Ok(id) => {
-                        cb.send(Box::new(move |s: &mut Cursive| {
+                        if let Err(e) = cb.send(Box::new(move |s: &mut Cursive| {
                             show_info(s, &format!("Bug #{} filed successfully!", id));
-                        }))
-                        .ok();
+                        })) {
+                            eprintln!("Warning: TUI event send failed: {}", e);
+                        }
                     }
                     Err(e) => {
-                        cb.send(Box::new(move |s: &mut Cursive| {
+                        if let Err(send_err) = cb.send(Box::new(move |s: &mut Cursive| {
                             show_error(s, &format!("Failed to file bug:\n{:#}", e));
-                        }))
-                        .ok();
+                        })) {
+                            eprintln!("Warning: TUI event send failed: {}", send_err);
+                        }
                     }
                 });
             }),
