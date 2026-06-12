@@ -413,8 +413,24 @@ impl Ctx {
     /// Return the expected git remote server hostname for the active forge.
     /// Used by `verify_remote_url` to warn when pushing to an unexpected host.
     fn expected_remote_server(&self) -> &str {
-        // If a Forgejo URL is configured, derive the hostname from it.
-        // e.g. "https://codeberg.org" → "codeberg.org"
+        // Check the active forge via pr_client first.
+        if let Some(client) = &self.pr_client {
+            match client.provider() {
+                crate::db::Provider::GitHub => return "github.com",
+                crate::db::Provider::Forgejo => {
+                    if !self.config.forgejo_url.is_empty() {
+                        return self
+                            .config
+                            .forgejo_url
+                            .trim_start_matches("https://")
+                            .trim_start_matches("http://")
+                            .trim_end_matches('/');
+                    }
+                }
+                crate::db::Provider::Pagure => return GIT_REMOTE_SERVER,
+            }
+        }
+        // Fallback: derive from configured URLs.
         if !self.config.forgejo_url.is_empty() {
             return self
                 .config
@@ -423,7 +439,6 @@ impl Ctx {
                 .trim_start_matches("http://")
                 .trim_end_matches('/');
         }
-        // Fall back to the Pagure default for Pagure/GitHub setups.
         GIT_REMOTE_SERVER
     }
 
