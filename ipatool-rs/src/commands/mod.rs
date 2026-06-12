@@ -37,23 +37,21 @@ fn get_reviewer_re() -> &'static Regex {
     })
 }
 
-/// Milestone to branches mapping (regex → list of branches)
+/// Milestone to branches mapping (prefix → list of branches)
 pub fn milestone_branches(milestone: &str) -> Option<Vec<String>> {
+    // Prefixes are chosen so that starts_with replicates the original regex semantics:
+    //   "FreeIPA 3.3." requires at least one character after the second dot (like ^FreeIPA 3\.3\..*)
+    //   "FreeIPA 4.4"  matches "FreeIPA 4.4" and "FreeIPA 4.4.x" (like ^FreeIPA 4\.4.*)
     let mappings: &[(&str, &[&str])] = &[
-        (
-            r"^FreeIPA 3\.3\..*",
-            &["master", "ipa-4-1", "ipa-4-0", "ipa-3-3"],
-        ),
-        (r"^FreeIPA 4\.4.*", &["master", "ipa-4-5", "ipa-4-4"]),
-        (r"^FreeIPA 4\.5.*", &["master", "ipa-4-5"]),
-        (r"^FreeIPA 4\.6.*", &["master"]),
-        (r"^FreeIPA 4\.7.*", &["master"]),
+        ("FreeIPA 3.3.", &["master", "ipa-4-1", "ipa-4-0", "ipa-3-3"]),
+        ("FreeIPA 4.4", &["master", "ipa-4-5", "ipa-4-4"]),
+        ("FreeIPA 4.5", &["master", "ipa-4-5"]),
+        ("FreeIPA 4.6", &["master"]),
+        ("FreeIPA 4.7", &["master"]),
     ];
-    for (pattern, branches) in mappings {
-        if let Ok(re) = Regex::new(pattern) {
-            if re.is_match(milestone) {
-                return Some(branches.iter().map(|s| s.to_string()).collect());
-            }
+    for (prefix, branches) in mappings {
+        if milestone.starts_with(prefix) {
+            return Some(branches.iter().map(|s| s.to_string()).collect());
         }
     }
     None
