@@ -576,6 +576,10 @@ impl ForgejoClient {
         number: u64,
         n: usize,
     ) -> Result<Vec<crate::api::github::GitHubComment>> {
+        // Fetches the full comment history in order to return the last `n` entries.
+        // For issues with many comments this performs multiple page fetches.
+        // A reverse-pagination approach would be more efficient but requires
+        // server support for sorting by descending date.
         let mut all = self.get_all_issue_comments(number)?;
         if all.len() > n {
             all.drain(..all.len() - n);
