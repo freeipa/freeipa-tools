@@ -18,14 +18,14 @@ pub fn run(
     backport_branches: &[String],
 ) -> Result<()> {
     let patchdir = ctx.config.patchdir_expanded();
-    let ticket_url = ctx.config.ticket_url.clone();
-    let legacy_ticket_url = ctx.config.legacy_ticket_url.clone();
-    let mut patches = collect_patches(patch_paths, &patchdir, &ticket_url, &legacy_ticket_url)?;
+    let ticket_url = &ctx.config.ticket_url;
+    let legacy_ticket_url = &ctx.config.legacy_ticket_url;
+    let mut patches = collect_patches(patch_paths, &patchdir, ticket_url, legacy_ticket_url)?;
 
     // Rewrite legacy ticket URLs in commit messages before git-am writes them into history.
     if ctx.config.rewrite_ticket_urls && !legacy_ticket_url.is_empty() && !ticket_url.is_empty() {
         for patch in &mut patches {
-            patch.rewrite_urls(&legacy_ticket_url, &ticket_url);
+            patch.rewrite_urls(legacy_ticket_url, ticket_url);
         }
     }
 
