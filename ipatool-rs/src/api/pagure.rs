@@ -2,6 +2,8 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::api::types::TicketOps;
+
 pub struct PagureClient {
     pub http: reqwest::blocking::Client,
     token: String,
@@ -220,4 +222,15 @@ impl PagureTicket {
     pub fn close(&self) -> Result<()> {
         self.client.close_issue(self.number)
     }
+}
+
+impl TicketOps for PagureTicket {
+    fn number(&self) -> u64 { self.number }
+    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
+    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
+    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
+    fn title(&self) -> Result<String> { self.title() }
+    fn is_closed(&self) -> Result<bool> { self.is_closed() }
+    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
+    fn close(&self) -> Result<()> { self.close() }
 }

@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::api::types::{CiStatus, Commit, IssueComment, Label, PrFile, PullRequest, ReviewComment};
+use crate::api::types::{CiStatus, Commit, IssueComment, Label, PrFile, PullRequest, ReviewComment, TicketOps};
 
 pub struct ForgejoClient {
     pub http: reqwest::blocking::Client,
@@ -847,4 +847,15 @@ impl ForgejoTicket {
     pub fn close(&self) -> Result<()> {
         self.client.close_issue(self.number)
     }
+}
+
+impl TicketOps for ForgejoTicket {
+    fn number(&self) -> u64 { self.number }
+    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
+    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
+    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
+    fn title(&self) -> Result<String> { self.title() }
+    fn is_closed(&self) -> Result<bool> { self.is_closed() }
+    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
+    fn close(&self) -> Result<()> { self.close() }
 }
