@@ -335,6 +335,12 @@ impl ForgejoClient {
         }
         let statuses: Vec<ForgejoStatus> =
             resp.json().with_context(|| "Parsing Forgejo statuses")?;
+        if statuses.len() == 50 {
+            eprintln!(
+                "Warning: CI status results for commit {} may be truncated at 50 entries.",
+                sha
+            );
+        }
         let mut result = HashMap::new();
         for s in statuses {
             result
