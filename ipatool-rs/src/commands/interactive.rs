@@ -25,6 +25,9 @@ use crate::api::github::{
 use crate::api::pagure::PagureClient;
 use crate::tui_keys::TuiKeys;
 
+const FORGEJO_OFFLINE_MSG: &str =
+    "Offline mode is not yet supported for Forgejo. Connect to the network and try again.";
+
 // ─── Persistent TUI state (survives layer pops on resize) ─────────────────────
 
 /// Snapshot of the current review session, stored so the layer can be
@@ -1537,7 +1540,7 @@ fn open_review_comment_form(
                     s.pop_layer();
                     restore_review_layer(s, focus_post);
                     if provider == crate::db::Provider::Forgejo {
-                        show_error(s, "Offline mode is not yet supported for Forgejo. Connect to the network and try again.");
+                        show_error(s, FORGEJO_OFFLINE_MSG);
                     } else if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
                             provider,
@@ -1808,7 +1811,7 @@ fn build_label_editor_layer(
             s.pop_layer();
             if offline {
                 if provider == crate::db::Provider::Forgejo {
-                    show_error(s, "Offline mode is not yet supported for Forgejo. Connect to the network and try again.");
+                    show_error(s, FORGEJO_OFFLINE_MSG);
                 } else if let Some(db) = db {
                     match db.queue_action(&crate::db::ProviderAction {
                         provider,
@@ -1902,7 +1905,7 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                 s.pop_layer();
                 if offline {
                     if provider == crate::db::Provider::Forgejo {
-                        show_error(s, "Offline mode is not yet supported for Forgejo. Connect to the network and try again.");
+                        show_error(s, FORGEJO_OFFLINE_MSG);
                     } else if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
                             provider,
@@ -1975,7 +1978,7 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                 s.pop_layer();
                 if offline {
                     if provider == crate::db::Provider::Forgejo {
-                        show_error(s, "Offline mode is not yet supported for Forgejo. Connect to the network and try again.");
+                        show_error(s, FORGEJO_OFFLINE_MSG);
                     } else if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
                             provider,
