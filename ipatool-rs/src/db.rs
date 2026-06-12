@@ -336,10 +336,15 @@ impl Database {
 
     pub fn pending_count(&self) -> usize {
         let conn = self.conn.lock().unwrap();
-        conn.query_row("SELECT COUNT(*) FROM queued_actions", [], |r| {
+        match conn.query_row("SELECT COUNT(*) FROM queued_actions", [], |r| {
             r.get::<_, i64>(0)
-        })
-        .unwrap_or(0) as usize
+        }) {
+            Ok(n) => n as usize,
+            Err(e) => {
+                eprintln!("Warning: failed to query pending action count: {}", e);
+                0
+            }
+        }
     }
 }
 
