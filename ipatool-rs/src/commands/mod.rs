@@ -422,8 +422,22 @@ pub fn get_reviewers(
     if ctx.has_tracker() && reviewers.is_empty() {
         let mut found = std::collections::HashSet::new();
         for ticket in tickets {
-            if let Ok(Some(r)) = ticket.reviewer() {
-                found.insert(r);
+            match ticket.reviewer() {
+                Ok(Some(r)) => {
+                    found.insert(r);
+                }
+                Ok(None) => {
+                    // No reviewer set in this ticket; continue checking others.
+                }
+                Err(e) => {
+                    // Surface network/parse errors as a warning rather than
+                    // silently treating them as "no reviewer set".
+                    ctx.out.print_yellow(&format!(
+                        "Warning: could not retrieve reviewer from ticket #{}: {}",
+                        ticket.number(),
+                        e
+                    ));
+                }
             }
         }
         if found.len() > 1 {
