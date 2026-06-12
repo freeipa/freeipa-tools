@@ -243,7 +243,15 @@ fn build_push_info(
 
     if !jira_ticket_url.is_empty() {
         let jira_re = Regex::new(&format!(r"({}[\d]+)", regex::escape(jira_ticket_url))).ok();
-        let bz_re = Regex::new(&format!(r"({}[\d]+)", regex::escape(bugzilla_bug_url))).ok();
+        let bz_re = if bugzilla_bug_url.is_empty() {
+            None
+        } else {
+            Some(
+                Regex::new(&format!(r"({}[\d]+)", regex::escape(bugzilla_bug_url))).expect(
+                    "bugzilla_bug_url regex: escaped URL should always produce valid regex",
+                ),
+            )
+        };
 
         for ticket in tickets {
             if let Ok(Some(rhbz)) = ticket.rhbz() {
