@@ -299,7 +299,8 @@ impl ForgejoClient {
             .with_context(|| format!("GET {}", url))?;
         if !resp.status().is_success() {
             let status = resp.status();
-            anyhow::bail!("Forgejo get_commit_patch failed ({}): {}", status, sha);
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo get_commit_patch failed ({}): {}", status, body);
         }
         Ok(resp.bytes()?.to_vec())
     }
