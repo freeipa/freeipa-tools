@@ -90,8 +90,17 @@ pub fn run(
         // Collect milestones from tickets
         let mut milestones = HashSet::new();
         for ticket in &tickets {
-            if let Ok(Some(m)) = ticket.milestone() {
-                milestones.insert(m);
+            match ticket.milestone() {
+                Ok(Some(m)) => {
+                    milestones.insert(m);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!(
+                        "Warning: could not retrieve milestone from ticket: {}",
+                        e
+                    );
+                }
             }
         }
         if milestones.is_empty() {
