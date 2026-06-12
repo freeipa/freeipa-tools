@@ -13,13 +13,13 @@ pub fn run_backport_cmd(ctx: &mut Ctx, pr_id: u64, branches: &[String]) -> Resul
     let pr = prc.get_pr(pr_id)?;
     let labels = prc.pr_label_names(pr_id)?;
 
-    if !labels.contains(&"ack".to_string()) {
+    if !labels.iter().any(|l| l == "ack") {
         bail!("Pull request is not ACKed");
     }
-    if labels.contains(&"rejected".to_string()) {
+    if labels.iter().any(|l| l == "rejected") {
         bail!("Pull request is rejected");
     }
-    if !labels.contains(&"pushed".to_string()) && !pr.mergeable.unwrap_or(true) {
+    if !labels.iter().any(|l| l == "pushed") && !pr.mergeable.unwrap_or(true) {
         bail!("Pull request is not mergeable");
     }
 
