@@ -1540,7 +1540,9 @@ fn open_review_comment_form(
                 if offline {
                     s.pop_layer();
                     restore_review_layer(s, focus_post);
-                    if let Some(db) = db {
+                    if provider == crate::db::Provider::Forgejo {
+                        show_error(s, "Offline mode is not yet supported for Forgejo. Connect to the network and try again.");
+                    } else if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
                             provider,
                             action: crate::db::QueuedAction::PostReviewComment {
@@ -1809,7 +1811,9 @@ fn build_label_editor_layer(
             let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
             s.pop_layer();
             if offline {
-                if let Some(db) = db {
+                if provider == crate::db::Provider::Forgejo {
+                    show_error(s, "Offline mode is not yet supported for Forgejo. Connect to the network and try again.");
+                } else if let Some(db) = db {
                     match db.queue_action(&crate::db::ProviderAction {
                         provider,
                         action: crate::db::QueuedAction::UpdateLabels {
@@ -1901,7 +1905,9 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
-                    if let Some(db) = db {
+                    if provider == crate::db::Provider::Forgejo {
+                        show_error(s, "Offline mode is not yet supported for Forgejo. Connect to the network and try again.");
+                    } else if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
                             provider,
                             action: crate::db::QueuedAction::Ack {
@@ -1972,7 +1978,9 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
-                    if let Some(db) = db {
+                    if provider == crate::db::Provider::Forgejo {
+                        show_error(s, "Offline mode is not yet supported for Forgejo. Connect to the network and try again.");
+                    } else if let Some(db) = db {
                         match db.queue_action(&crate::db::ProviderAction {
                             provider,
                             action: crate::db::QueuedAction::Reject {
