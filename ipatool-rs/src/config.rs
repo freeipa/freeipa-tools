@@ -69,6 +69,11 @@ pub struct ProfileConfig {
     /// it is matched literally against the start of each comment line.
     /// Example: "ipatool:" → matches lines like "ipatool:rhbz: https://…".
     pub forgejo_comment_field_prefix: Option<String>,
+
+    // GitHub comment-field overrides
+    /// Prefix for custom-field lines in GitHub issue bodies and comments.
+    /// Same semantics as `forgejo_comment_field_prefix`.
+    pub github_comment_field_prefix: Option<String>,
 }
 
 // ── Main Config ───────────────────────────────────────────────────────────────
@@ -170,6 +175,11 @@ pub struct Config {
     /// it is matched literally against the start of each comment line.
     #[serde(default)]
     pub forgejo_comment_field_prefix: String,
+
+    /// Line prefix used to identify custom-field lines in GitHub issue bodies
+    /// and comments.  Same format and semantics as `forgejo_comment_field_prefix`.
+    #[serde(default)]
+    pub github_comment_field_prefix: String,
 }
 
 fn default_remote() -> String {
@@ -196,6 +206,7 @@ impl Config {
         let config: Config = serde_yaml::from_str(&content)
             .with_context(|| format!("Cannot parse config file: {}", expanded.display()))?;
         config.validate_forgejo_comment_field_prefix()?;
+        config.validate_github_comment_field_prefix()?;
         Ok(config)
     }
 
@@ -269,6 +280,7 @@ impl Config {
         // - gh_token, gh_repo, gh_fork_remote
         // - pagure_repository, pagure_token
         // - forgejo_url, forgejo_repo, forgejo_token, forgejo_comment_field_prefix
+        // - github_comment_field_prefix
         // - ticket_url, commit_url, legacy_ticket_url
         // - db_path
         // Note: pr_source and issue_tracker are handled separately (see NOTE below).
@@ -322,8 +334,12 @@ impl Config {
         if let Some(v) = profile.forgejo_comment_field_prefix {
             self.forgejo_comment_field_prefix = v;
         }
+        if let Some(v) = profile.github_comment_field_prefix {
+            self.github_comment_field_prefix = v;
+        }
 
         self.validate_forgejo_comment_field_prefix()?;
+        self.validate_github_comment_field_prefix()?;
         Ok(())
     }
 
@@ -337,6 +353,19 @@ impl Config {
                 "forgejo-comment-field-prefix must end with ':' (e.g. \"ipatool:\"); \
                  the colon separates the prefix from the field name. Got: {:?}",
                 self.forgejo_comment_field_prefix
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_github_comment_field_prefix(&self) -> Result<()> {
+        if !self.github_comment_field_prefix.is_empty()
+            && !self.github_comment_field_prefix.ends_with(':')
+        {
+            bail!(
+                "github-comment-field-prefix must end with ':' (e.g. \"ipatool:\"); \
+                 the colon separates the prefix from the field name. Got: {:?}",
+                self.github_comment_field_prefix
             );
         }
         Ok(())

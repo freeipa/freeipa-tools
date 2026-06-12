@@ -109,12 +109,7 @@ pub struct GitHubIssue {
     pub labels: Vec<GitHubLabel>,
     #[serde(default)]
     pub title: String,
-    // Body is not yet scanned for external tracker links on the GitHub path
-    // (Ticket::GitHub returns Ok(None) for reviewer/rhbz today).
-    // Kept so that when GitHub scanning is implemented the field is already
-    // deserialized; remove the allow once it is actually read.
     #[serde(default)]
-    #[allow(dead_code)]
     pub body: Option<String>,
     #[serde(default)]
     pub milestone: Option<GitHubMilestone>,

@@ -136,15 +136,16 @@ gh-fork-remote: "mygh"
 #
 # rewrite-ticket-urls: false
 
-# ── Forgejo comment-based custom fields ──────────────────────────────────────
+# ── Comment-based custom fields (Forgejo and GitHub) ─────────────────────────
 #
-# Forgejo/Codeberg has no issue custom fields.  ipatool derives the 'reviewer'
-# and 'rhbz' (downstream bug / Jira link) values from issue comments instead.
-# Write a line anywhere in a comment body matching:
+# Neither Forgejo/Codeberg nor GitHub have issue custom fields.  ipatool derives
+# the 'reviewer' and 'rhbz' (downstream bug / Jira link) values from the issue
+# body and comments instead.  Write a line anywhere in the issue body or a
+# comment matching:
 #
 #   <prefix><fieldname>: <value>
 #
-# Example with forgejo-comment-field-prefix: "ipatool:"
+# Example with prefix "ipatool:"
 #   ipatool:rhbz: https://bugzilla.redhat.com/show_bug.cgi?id=12345
 #   ipatool:rhbz: https://issues.redhat.com/browse/RHEL-99
 #   ipatool:reviewer: abbra
@@ -154,6 +155,7 @@ gh-fork-remote: "mygh"
 # lines without any prefix requirement.
 #
 # forgejo-comment-field-prefix: "ipatool:"
+# github-comment-field-prefix: "ipatool:"
 "#;
 
 #[derive(Parser)]
