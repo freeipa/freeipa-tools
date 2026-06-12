@@ -115,6 +115,14 @@ impl ForgejoClient {
             .header("Authorization", format!("token {}", self.token))
             .send()
             .with_context(|| format!("GET {}", url))?;
+        if resp.status().as_u16() == 404 {
+            anyhow::bail!("Issue {} not found", number);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo get_issue failed ({}): {}", status, body);
+        }
         let issue: ForgejoIssue = resp
             .json()
             .with_context(|| format!("Parsing forgejo issue {}", number))?;
@@ -614,6 +622,13 @@ impl ForgejoClient {
             .header("Authorization", format!("token {}", self.token))
             .send()
             .with_context(|| "GET /api/v1/user")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            anyhow::bail!(
+                "Forgejo authentication failed ({}): check your forgejo-token",
+                status
+            );
+        }
         let user: serde_json::Value = resp.json().with_context(|| "Parsing Forgejo /user")?;
         user["login"]
             .as_str()
