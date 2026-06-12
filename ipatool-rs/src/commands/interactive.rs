@@ -2171,9 +2171,7 @@ fn sync_queued_actions(siv: &mut Cursive) {
         for pa in actions {
             let result = match pa.provider_action.provider {
                 crate::db::Provider::GitHub => apply_github_action(&gh, &pa.provider_action.action),
-                crate::db::Provider::Forgejo => {
-                    Err(anyhow::anyhow!("Forgejo sync not yet implemented"))
-                }
+                crate::db::Provider::Forgejo => apply_github_action(&gh, &pa.provider_action.action),
             };
             if let Err(e) = result {
                 errors.push(format!("{:?}: {}", pa.provider_action.action, e));
