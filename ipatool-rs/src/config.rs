@@ -65,9 +65,9 @@ pub struct ProfileConfig {
 
     // Forgejo comment-field overrides
     /// Prefix for custom-field lines in Forgejo issue comments.
-    /// Matching is case-sensitive. The prefix must NOT end with `:`;
-    /// the colon is appended automatically when building the search needle.
-    /// Example: "ipatool" → matches lines like "ipatool:rhbz: https://…".
+    /// Matching is case-sensitive. The prefix MUST end with `:` when non-empty;
+    /// it is matched literally against the start of each comment line.
+    /// Example: "ipatool:" → matches lines like "ipatool:rhbz: https://…".
     pub forgejo_comment_field_prefix: Option<String>,
 }
 
@@ -164,10 +164,10 @@ pub struct Config {
     pub issue_number_map: HashMap<u64, u64>,
 
     /// Line prefix used to identify custom-field lines in Forgejo issue comments.
-    /// E.g. "ipatool" → matches lines like "ipatool:rhbz: https://…".
+    /// E.g. "ipatool:" → matches lines like "ipatool:rhbz: https://…".
     /// Empty string (default) matches bare "rhbz: …" / "reviewer: …" lines.
-    /// Matching is case-sensitive. The prefix must NOT end with `:`;
-    /// the colon separator is appended automatically when building the needle.
+    /// Matching is case-sensitive. When non-empty, the prefix MUST end with `:`;
+    /// it is matched literally against the start of each comment line.
     #[serde(default)]
     pub forgejo_comment_field_prefix: String,
 }
@@ -321,11 +321,12 @@ impl Config {
     /// Validate config invariants that cannot be enforced by serde alone.
     /// Returns an error if a misconfigured field is detected.
     fn validate_forgejo_comment_field_prefix(&self) -> Result<()> {
-        if self.forgejo_comment_field_prefix.ends_with(':') {
+        if !self.forgejo_comment_field_prefix.is_empty()
+            && !self.forgejo_comment_field_prefix.ends_with(':')
+        {
             bail!(
-                "forgejo-comment-field-prefix must not end with ':' (got {:?}). \
-                 The colon separator is appended automatically. \
-                 Remove the trailing ':' from the config value.",
+                "forgejo-comment-field-prefix must end with ':' (e.g. \"ipatool:\"); \
+                 the colon separates the prefix from the field name. Got: {:?}",
                 self.forgejo_comment_field_prefix
             );
         }
@@ -748,34 +749,51 @@ profiles:
     }
 
     #[test]
-    fn test_forgejo_comment_field_prefix_valid() {
+    fn test_forgejo_comment_field_prefix_colon_required_when_non_empty() {
+        // "ipatool:" (with trailing colon) is the documented valid form
         let mut c = Config::default();
-        c.forgejo_comment_field_prefix = "ipatool".to_string();
+        c.forgejo_comment_field_prefix = "ipatool:".to_string();
         assert!(c.validate_forgejo_comment_field_prefix().is_ok());
     }
 
     #[test]
+    fn test_forgejo_comment_field_prefix_no_colon_rejected() {
+        // "ipatool" without trailing colon must be rejected
+        let mut c = Config::default();
+        c.forgejo_comment_field_prefix = "ipatool".to_string();
+        assert!(c.validate_forgejo_comment_field_prefix().is_err());
+    }
+
+    #[test]
     fn test_forgejo_comment_field_prefix_empty_valid() {
+        // empty prefix is always valid (no colon required)
         let c = Config::default();
         assert!(c.validate_forgejo_comment_field_prefix().is_ok());
     }
 
     #[test]
-    fn test_forgejo_comment_field_prefix_trailing_colon_rejected() {
-        let mut c = Config::default();
-        c.forgejo_comment_field_prefix = "ipatool:".to_string();
-        assert!(c.validate_forgejo_comment_field_prefix().is_err());
-    }
-
-    #[test]
     fn test_apply_profile_rejects_bad_comment_field_prefix() {
+        // Profile value without trailing colon must be rejected
         let yaml = r#"
 profiles:
   bad:
-    forgejo-comment-field-prefix: "ipatool:"
+    forgejo-comment-field-prefix: "ipatool"
 "#;
         let mut config: Config = serde_yaml::from_str(yaml).unwrap();
         assert!(config.apply_profile("bad").is_err());
+    }
+
+    #[test]
+    fn test_apply_profile_accepts_valid_comment_field_prefix() {
+        // Profile value with trailing colon must be accepted
+        let yaml = r#"
+profiles:
+  good:
+    forgejo-comment-field-prefix: "ipatool:"
+"#;
+        let mut config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.apply_profile("good").is_ok());
+        assert_eq!(config.forgejo_comment_field_prefix, "ipatool:");
     }
 
     #[test]
