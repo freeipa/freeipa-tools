@@ -230,13 +230,17 @@ impl Config {
 
     pub fn jira_server(&self) -> Option<String> {
         if self.jira_ticket_url.contains("/browse/") {
-            Some(
-                self.jira_ticket_url
-                    .split("/browse/")
-                    .next()
-                    .unwrap_or("")
-                    .to_string(),
-            )
+            let server = self
+                .jira_ticket_url
+                .split("/browse/")
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if server.is_empty() {
+                None
+            } else {
+                Some(server)
+            }
         } else {
             None
         }
