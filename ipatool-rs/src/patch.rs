@@ -207,14 +207,28 @@ pub fn patch_filename(msg: &str, num: usize) -> String {
 
 /// Delete all .patch files in a directory
 pub fn delete_patches(dir: &Path) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map(|e| e == "patch").unwrap_or(false) {
-                if let Err(e) = std::fs::remove_file(&path) {
-                    eprintln!("Warning: could not delete patch {}: {}", path.display(), e);
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!(
+                "Warning: could not read patch directory {}: {}",
+                dir.display(),
+                e
+            );
+            return;
+        }
+    };
+    for entry in entries {
+        match entry {
+            Ok(e) => {
+                let path = e.path();
+                if path.extension().map(|ext| ext == "patch").unwrap_or(false) {
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        eprintln!("Warning: could not delete patch {}: {}", path.display(), e);
+                    }
                 }
             }
+            Err(err) => eprintln!("Warning: error reading patch directory entry: {}", err),
         }
     }
 }
