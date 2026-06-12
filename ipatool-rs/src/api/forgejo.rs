@@ -308,7 +308,9 @@ impl ForgejoClient {
             .send()
             .with_context(|| format!("GET {}", url))?;
         if !resp.status().is_success() {
-            return Ok(HashMap::new()); // no statuses is fine
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo most_recent_statuses failed ({}): {}", status, body);
         }
         let statuses: Vec<ForgejoStatus> =
             resp.json().with_context(|| "Parsing Forgejo statuses")?;
@@ -359,7 +361,13 @@ impl ForgejoClient {
                 .send()
                 .with_context(|| format!("GET {}", url))?;
             if !resp.status().is_success() {
-                break;
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!(
+                    "Forgejo list_repo_labels_with_id failed ({}): {}",
+                    status,
+                    body
+                );
             }
             let labels: Vec<ForgejoLabelId> =
                 resp.json().with_context(|| "Parsing Forgejo repo labels")?;
@@ -546,7 +554,13 @@ impl ForgejoClient {
                 .send()
                 .with_context(|| format!("GET {}", url))?;
             if !resp.status().is_success() {
-                break;
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!(
+                    "Forgejo get_all_issue_comments failed ({}): {}",
+                    status,
+                    body
+                );
             }
             let comments: Vec<crate::api::github::GitHubComment> = resp
                 .json()
