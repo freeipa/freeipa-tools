@@ -111,6 +111,30 @@ gh-fork-remote: "mygh"
 #     forgejo-repo: myuser/freeipa
 #     forgejo-token: "YOUR_CODEBERG_TOKEN_HERE"
 #     ticket-url: https://codeberg.org/myuser/freeipa/issues/
+
+# ── Issue tracker migration support (pagure → Codeberg) ──────────────────────
+#
+# When ticket-url points to the new Codeberg tracker but existing commits still
+# contain old pagure.io URLs, set legacy-ticket-url to the old prefix.  Issue
+# numbers found via this URL are treated identically to those found via
+# ticket-url and are used to comment on / close the corresponding Codeberg
+# issues after a push.
+#
+# legacy-ticket-url: "https://pagure.io/freeipa/issue/"
+#
+# If the migration did not preserve issue numbers, supply a mapping from old
+# (pagure) numbers to new (Codeberg) numbers.  Unmapped numbers are used as-is.
+#
+# issue-number-map:
+#   9000: 1234
+#   8999: 1233
+#
+# Set rewrite-ticket-urls to true to update pagure URLs to Codeberg URLs in
+# commit messages when patches are applied via git-am during push/backport.
+# This rewrites the history on the target branch; leave false to keep the
+# original pagure references in the commit log.
+#
+# rewrite-ticket-urls: false
 "#;
 
 #[derive(Parser)]
