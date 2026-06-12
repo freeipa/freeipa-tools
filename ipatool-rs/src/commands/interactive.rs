@@ -88,19 +88,15 @@ pub fn run(ctx: &mut Ctx, state: &str) -> Result<()> {
                 backport_branches,
                 autobackport,
             }) => {
-                if let Err(e) = crate::commands::pr_push::run(
-                    ctx,
-                    pr_id,
-                    &reviewers,
-                    &backport_branches,
-                    autobackport,
-                ) {
+                if let Err(e) =
+                    super::pr_push::run(ctx, pr_id, &reviewers, &backport_branches, autobackport)
+                {
                     eprintln!("\x1b[31mPush failed: {:#}\x1b[0m", e);
                 }
                 crate::output::prompt("Press Enter to return to the TUI…");
             }
             Some(PendingTuiAction::Backport { pr_id, branches }) => {
-                if let Err(e) = crate::commands::backport::run_backport_cmd(ctx, pr_id, &branches) {
+                if let Err(e) = super::backport::run_backport_cmd(ctx, pr_id, &branches) {
                     eprintln!("\x1b[31mBackport failed: {:#}\x1b[0m", e);
                 }
                 crate::output::prompt("Press Enter to return to the TUI…");
