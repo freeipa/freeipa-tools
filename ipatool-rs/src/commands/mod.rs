@@ -393,7 +393,10 @@ pub fn normalize_reviewer(ctx: &Ctx, reviewer: &str) -> Result<String> {
 
     match matches.len() {
         0 => bail!("Reviewer '{}' not found in git shortlog", reviewer),
-        1 => Ok(matches.into_iter().next().unwrap()),
+        1 => Ok(matches
+            .into_iter()
+            .next()
+            .expect("exactly one match confirmed above; None here is a logic error")),
         _ => {
             ctx.out
                 .print_red(&format!("Reviewer '{}' could be:", reviewer));
