@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::api::{
     forgejo::{ForgejoClient, ForgejoTicket},
-    github::GitHubClient,
+    github::{GitHubClient, GitHubComment},
     jira::JiraClient,
     pagure::{PagureClient, PagureTicket},
 };
@@ -144,15 +144,19 @@ mod milestone_tests {
 pub struct GitHubTicket {
     pub client: Arc<GitHubClient>,
     pub number: u64,
-    data: std::sync::OnceLock<crate::api::github::GitHubIssue>,
+    pub comment_field_prefix: String,
+    data: OnceLock<crate::api::github::GitHubIssue>,
+    comments: OnceLock<Vec<GitHubComment>>,
 }
 
 impl GitHubTicket {
-    pub fn new(client: Arc<GitHubClient>, number: u64) -> Self {
+    pub fn new(client: Arc<GitHubClient>, number: u64, comment_field_prefix: String) -> Self {
         GitHubTicket {
             client,
             number,
-            data: std::sync::OnceLock::new(),
+            comment_field_prefix,
+            data: OnceLock::new(),
+            comments: OnceLock::new(),
         }
     }
 
@@ -167,6 +171,68 @@ impl GitHubTicket {
             .data
             .get()
             .expect("OnceLock was just set above; this is a logic error if None"))
+    }
+
+    fn load_comments(&self) -> Result<&[GitHubComment]> {
+        if let Some(c) = self.comments.get() {
+            return Ok(c);
+        }
+        let fetched = self.client.get_all_issue_comments(self.number)?;
+        let _ = self.comments.set(fetched);
+        Ok(self
+            .comments
+            .get()
+            .expect("OnceLock was just set above; this is a logic error if None"))
+    }
+
+    /// Scan the issue body and all comments for a line of the form
+    /// `<prefix><name>: <value>` and return the joined values.
+    fn comment_field(&self, name: &str) -> Result<Option<String>> {
+        let prefix = &self.comment_field_prefix;
+        let needle = format!("{}:", name);
+        let mut values: Vec<String> = Vec::new();
+
+        let mut scan = |text: &str| {
+            for line in text.lines() {
+                let rest = if prefix.is_empty() {
+                    line
+                } else {
+                    match line.strip_prefix(prefix.as_str()) {
+                        Some(r) => r.trim_start(),
+                        None => continue,
+                    }
+                };
+                if let Some(val) = rest.strip_prefix(&*needle) {
+                    let v = val.trim();
+                    if !v.is_empty() {
+                        values.push(v.to_string());
+                    }
+                }
+            }
+        };
+
+        // Scan the issue body first, then all comments.
+        let issue = self.data()?;
+        if let Some(ref body) = issue.body {
+            scan(body);
+        }
+        for comment in self.load_comments()? {
+            scan(&comment.body);
+        }
+
+        if values.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(values.join(" ")))
+        }
+    }
+
+    pub fn reviewer(&self) -> Result<Option<String>> {
+        self.comment_field("reviewer")
+    }
+
+    pub fn rhbz(&self) -> Result<Option<String>> {
+        self.comment_field("rhbz")
     }
 
     pub fn title(&self) -> Result<String> {
@@ -210,7 +276,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.reviewer(),
             Ticket::Forgejo(t) => t.reviewer(),
-            Ticket::GitHub(_) => Ok(None),
+            Ticket::GitHub(t) => t.reviewer(),
         }
     }
 
@@ -218,7 +284,7 @@ impl Ticket {
         match self {
             Ticket::Pagure(t) => t.rhbz(),
             Ticket::Forgejo(t) => t.rhbz(),
-            Ticket::GitHub(_) => Ok(None),
+            Ticket::GitHub(t) => t.rhbz(),
         }
     }
 
@@ -315,10 +381,13 @@ impl Ctx {
                     self.config.forgejo_comment_field_prefix.clone(),
                 ))
             }),
-            IssueTracker::GitHub => self
-                .github
-                .as_ref()
-                .map(|gh| Ticket::GitHub(GitHubTicket::new(Arc::clone(gh), number))),
+            IssueTracker::GitHub => self.github.as_ref().map(|gh| {
+                Ticket::GitHub(GitHubTicket::new(
+                    Arc::clone(gh),
+                    number,
+                    self.config.github_comment_field_prefix.clone(),
+                ))
+            }),
         }
     }
 
