@@ -76,6 +76,25 @@ struct CreatePRBody {
     body: String,
 }
 
+/// Percent-encode a string for use as a URL path segment (RFC 3986 unreserved chars pass through).
+fn encode_path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            // unreserved characters (RFC 3986 §2.3)
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            other => {
+                out.push('%');
+                out.push(char::from_digit((other >> 4) as u32, 16).unwrap().to_ascii_uppercase());
+                out.push(char::from_digit((other & 0xf) as u32, 16).unwrap().to_ascii_uppercase());
+            }
+        }
+    }
+    out
+}
+
 impl GitHubClient {
     pub fn new(token: &str, owner: &str, repo: &str) -> Result<Self> {
         use std::time::Duration;
@@ -116,6 +135,11 @@ impl GitHubClient {
         if resp.status().as_u16() == 404 {
             anyhow::bail!("Pull request {} not found", number);
         }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("GitHub API error {} fetching PR {}: {}", status, number, body);
+        }
         let pr: PullRequest = resp
             .json()
             .with_context(|| format!("Parsing PR {}", number))?;
@@ -131,6 +155,16 @@ impl GitHubClient {
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!(
+                "GitHub API error {} fetching issue {}: {}",
+                status,
+                number,
+                body
+            );
+        }
         let issue: GitHubIssue = resp
             .json()
             .with_context(|| format!("Parsing issue {}", number))?;
@@ -279,7 +313,11 @@ impl GitHubClient {
     }
 
     pub fn remove_label(&self, number: u64, label: &str) -> Result<()> {
-        let url = self.api_url(&format!("/issues/{}/labels/{}", number, label));
+        let url = self.api_url(&format!(
+            "/issues/{}/labels/{}",
+            number,
+            encode_path_segment(label)
+        ));
         let resp = self
             .http
             .delete(&url)
