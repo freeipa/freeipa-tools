@@ -209,7 +209,8 @@ fn build_push_info(
     tickets: &[super::Ticket],
 ) -> Result<PushInfo> {
     let remote = &ctx.config.remote;
-    let branches: Vec<&String> = sha1s.keys().collect();
+    let mut branches: Vec<&String> = sha1s.keys().collect();
+    branches.sort();
 
     let mut pagure_log: Vec<String> = Vec::new();
     let mut bugzilla_log = vec!["Fixed upstream".to_string()];
