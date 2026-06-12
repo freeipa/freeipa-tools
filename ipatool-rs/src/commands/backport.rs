@@ -58,7 +58,17 @@ pub fn run_backport(
 
     let patchdir = ctx.config.patchdir_expanded();
     let ticket_url = ctx.config.ticket_url.clone();
-    let patches = crate::patch::collect_patches(&[], &patchdir, &ticket_url)?;
+    let legacy_ticket_url = ctx.config.legacy_ticket_url.clone();
+    let mut patches =
+        crate::patch::collect_patches(&[], &patchdir, &ticket_url, &legacy_ticket_url)?;
+
+    // Rewrite legacy ticket URLs in commit messages before git-am writes them into history.
+    if ctx.config.rewrite_ticket_urls && !legacy_ticket_url.is_empty() && !ticket_url.is_empty() {
+        for patch in &mut patches {
+            patch.rewrite_urls(&legacy_ticket_url, &ticket_url);
+        }
+    }
+    let patches = patches;
 
     let repo_path = ctx.config.clean_repo_path_expanded();
     std::env::set_current_dir(&repo_path)
