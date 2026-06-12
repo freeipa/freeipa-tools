@@ -415,8 +415,7 @@ impl ForgejoClient {
                 l.id
             } else {
                 // Create the label with a neutral grey color
-                let new_id = self.create_label(name, "cccccc")?;
-                new_id
+                self.create_label(name, "cccccc")?
             };
             ids.push(id);
         }
@@ -650,15 +649,24 @@ impl ForgejoClient {
 pub struct ForgejoTicket {
     pub client: std::sync::Arc<ForgejoClient>,
     pub number: u64,
+    /// Prefix that marks metadata lines in comments (from config).
+    pub comment_field_prefix: String,
     data: std::sync::OnceLock<ForgejoIssue>,
+    comments: std::sync::OnceLock<Vec<crate::api::github::GitHubComment>>,
 }
 
 impl ForgejoTicket {
-    pub fn new(client: std::sync::Arc<ForgejoClient>, number: u64) -> Self {
+    pub fn new(
+        client: std::sync::Arc<ForgejoClient>,
+        number: u64,
+        comment_field_prefix: String,
+    ) -> Self {
         ForgejoTicket {
             client,
             number,
+            comment_field_prefix,
             data: std::sync::OnceLock::new(),
+            comments: std::sync::OnceLock::new(),
         }
     }
 
@@ -672,12 +680,55 @@ impl ForgejoTicket {
         Ok(self.data.get().unwrap())
     }
 
-    pub fn reviewer(&self) -> Option<String> {
-        None // Forgejo has no custom fields
+    fn load_comments(&self) -> Result<&Vec<crate::api::github::GitHubComment>> {
+        if let Some(c) = self.comments.get() {
+            return Ok(c);
+        }
+        let comments = self.client.get_all_issue_comments(self.number)?;
+        let _ = self.comments.set(comments);
+        Ok(self.comments.get().unwrap())
     }
 
-    pub fn rhbz(&self) -> Option<String> {
-        None // Forgejo has no custom fields
+    /// Collect all comment lines matching `<prefix><fieldname>: <value>` and
+    /// join them with a space.  Multiple matching lines (e.g. one Bugzilla URL
+    /// and one Jira URL on separate lines) are merged so both are visible to
+    /// the regex scanners in push.rs.
+    fn comment_field(&self, name: &str) -> Result<Option<String>> {
+        let comments = self.load_comments()?;
+        let prefix = &self.comment_field_prefix;
+        let needle = format!("{}:", name);
+        let mut values: Vec<String> = Vec::new();
+        for comment in comments {
+            for line in comment.body.lines() {
+                let rest = if prefix.is_empty() {
+                    line
+                } else {
+                    match line.strip_prefix(prefix.as_str()) {
+                        Some(r) => r.trim_start(),
+                        None => continue,
+                    }
+                };
+                if let Some(val) = rest.strip_prefix(needle.as_str()) {
+                    let v = val.trim();
+                    if !v.is_empty() {
+                        values.push(v.to_string());
+                    }
+                }
+            }
+        }
+        if values.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(values.join(" ")))
+        }
+    }
+
+    pub fn reviewer(&self) -> Result<Option<String>> {
+        self.comment_field("reviewer")
+    }
+
+    pub fn rhbz(&self) -> Result<Option<String>> {
+        self.comment_field("rhbz")
     }
 
     pub fn milestone(&self) -> Result<Option<String>> {

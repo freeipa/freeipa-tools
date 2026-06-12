@@ -62,6 +62,9 @@ pub struct ProfileConfig {
 
     // Migration overrides
     pub legacy_ticket_url: Option<String>,
+
+    // Forgejo comment-field overrides
+    pub forgejo_comment_field_prefix: Option<String>,
 }
 
 // ── Main Config ───────────────────────────────────────────────────────────────
@@ -155,6 +158,12 @@ pub struct Config {
     /// Numbers not present in the map are used as-is.
     #[serde(default)]
     pub issue_number_map: HashMap<u64, u64>,
+
+    /// Line prefix used to identify custom-field lines in Forgejo issue comments.
+    /// E.g. "ipatool:" → lines like "ipatool:rhbz: https://...".
+    /// Empty string (default) matches bare "rhbz: …" / "reviewer: …" lines.
+    #[serde(default)]
+    pub forgejo_comment_field_prefix: String,
 }
 
 fn default_remote() -> String {
@@ -284,6 +293,9 @@ impl Config {
         }
         if let Some(v) = profile.legacy_ticket_url {
             self.legacy_ticket_url = v;
+        }
+        if let Some(v) = profile.forgejo_comment_field_prefix {
+            self.forgejo_comment_field_prefix = v;
         }
 
         Ok(())
