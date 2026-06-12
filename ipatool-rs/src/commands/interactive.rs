@@ -139,13 +139,9 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
 
     // Rebuild the pane layout whenever the terminal is resized.
     siv.add_global_callback(cursive::event::Event::WindowResize, |s| {
-        let state = s.user_data::<TuiState>().cloned();
-        if let Some(TuiState {
-            pr_client: Some(gh),
-            prs: Some(prs),
-            ..
-        }) = state
-        {
+        let gh = s.user_data::<TuiState>().and_then(|t| t.pr_client.clone());
+        let prs = s.user_data::<TuiState>().and_then(|t| t.prs.clone());
+        if let (Some(gh), Some(prs)) = (gh, prs) {
             // Close every layer (dialogs + main layout) so we can rebuild clean.
             while s.pop_layer().is_some() {}
             build_two_pane(s, gh, prs);
@@ -182,6 +178,18 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
                         eprintln!("Warning: failed to update PR cache: {}", e);
                     }
                 }
+                let gh3 = gh2;
+                cb.send(Box::new(move |s: &mut Cursive| {
+                    while s.pop_layer().is_some() {}
+                    build_two_pane(s, gh3, prs);
+                }))
+                .ok();
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: background PR list refresh failed: {}. Keeping cached view.",
+                    e
+                );
             }
         });
     } else {
@@ -1571,7 +1579,10 @@ fn open_review_comment_form(
                     show_error(s, "File path and comment text are required.");
                     return;
                 }
-                let (offline, provider) = tui_offline_and_provider(s);
+                let Some((offline, provider)) = tui_offline_and_provider(s) else {
+                    show_error(s, "Internal error: TUI state missing.");
+                    return;
+                };
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 if offline {
                     s.pop_layer();
@@ -1843,7 +1854,10 @@ fn build_label_editor_layer(
                 s.pop_layer();
                 return;
             }
-            let (offline, provider) = tui_offline_and_provider(s);
+            let Some((offline, provider)) = tui_offline_and_provider(s) else {
+                show_error(s, "Internal error: TUI state missing.");
+                return;
+            };
             let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
             s.pop_layer();
             if offline {
@@ -1937,7 +1951,10 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                         v.get_content().to_string()
                     })
                     .unwrap_or_default();
-                let (offline, provider) = tui_offline_and_provider(s);
+                let Some((offline, provider)) = tui_offline_and_provider(s) else {
+                    show_error(s, "Internal error: TUI state missing.");
+                    return;
+                };
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
@@ -2010,7 +2027,10 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                     show_error(s, "A reason is required.");
                     return;
                 }
-                let (offline, provider) = tui_offline_and_provider(s);
+                let Some((offline, provider)) = tui_offline_and_provider(s) else {
+                    show_error(s, "Internal error: TUI state missing.");
+                    return;
+                };
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
@@ -2363,20 +2383,17 @@ fn pr_row_styled(pr: &GitHubPR, inner_width: usize) -> StyledString {
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
-/// Returns (offline, provider) from the current TuiState.
-/// If TuiState is absent, emits a warning to stderr and returns safe defaults
-/// (offline=false, Provider::GitHub). Does NOT panic.
-fn tui_offline_and_provider(s: &mut Cursive) -> (bool, crate::db::Provider) {
-    let Some(state) = s.user_data::<TuiState>() else {
-        eprintln!("Warning: TUI state not initialized");
-        return (false, crate::db::Provider::GitHub);
-    };
+/// Returns `Some((offline, provider))` from the current TuiState.
+/// Returns `None` when TuiState is absent; callers should handle this as an
+/// internal error and show an error dialog rather than silently using defaults.
+fn tui_offline_and_provider(s: &mut Cursive) -> Option<(bool, crate::db::Provider)> {
+    let state = s.user_data::<TuiState>()?;
     let provider = state
         .pr_client
         .as_ref()
         .map(|p| p.provider())
         .unwrap_or(crate::db::Provider::GitHub);
-    (state.offline, provider)
+    Some((state.offline, provider))
 }
 
 fn show_info(siv: &mut Cursive, msg: &str) {
