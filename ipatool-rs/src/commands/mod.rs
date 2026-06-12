@@ -198,16 +198,16 @@ impl Ticket {
     pub fn reviewer(&self) -> Result<Option<String>> {
         match self {
             Ticket::Pagure(t) => t.reviewer(),
-            Ticket::Forgejo(t) => Ok(t.reviewer()),
-            Ticket::GitHub(_) => Ok(None), // GitHub Issues have no reviewer custom field
+            Ticket::Forgejo(t) => t.reviewer(),
+            Ticket::GitHub(_) => Ok(None),
         }
     }
 
     pub fn rhbz(&self) -> Result<Option<String>> {
         match self {
             Ticket::Pagure(t) => t.rhbz(),
-            Ticket::Forgejo(t) => Ok(t.rhbz()),
-            Ticket::GitHub(_) => Ok(None), // GitHub Issues have no rhbz custom field
+            Ticket::Forgejo(t) => t.rhbz(),
+            Ticket::GitHub(_) => Ok(None),
         }
     }
 
@@ -297,10 +297,13 @@ impl Ctx {
                 .pagure
                 .as_ref()
                 .map(|p| Ticket::Pagure(PagureTicket::new(Arc::clone(p), number))),
-            IssueTracker::Forgejo => self
-                .forgejo
-                .as_ref()
-                .map(|f| Ticket::Forgejo(ForgejoTicket::new(Arc::clone(f), number))),
+            IssueTracker::Forgejo => self.forgejo.as_ref().map(|f| {
+                Ticket::Forgejo(ForgejoTicket::new(
+                    Arc::clone(f),
+                    number,
+                    self.config.forgejo_comment_field_prefix.clone(),
+                ))
+            }),
             IssueTracker::GitHub => self
                 .github
                 .as_ref()
