@@ -238,6 +238,11 @@ impl ForgejoClient {
         if resp.status().as_u16() == 404 {
             anyhow::bail!("Pull request {} not found", number);
         }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo get_pr failed ({}): {}", status, body);
+        }
         let pr: crate::api::github::GitHubPR = resp
             .json()
             .with_context(|| format!("Parsing Forgejo PR {}", number))?;
