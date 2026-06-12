@@ -144,7 +144,7 @@ mod milestone_tests {
 
 /// Trait implemented by all issue-tracker backends.
 /// The `Ticket` enum also implements this trait via delegation.
-pub trait TicketOps {
+pub(crate) trait TicketOps {
     fn number(&self) -> u64;
     fn reviewer(&self) -> Result<Option<String>>;
     fn rhbz(&self) -> Result<Option<String>>;
@@ -157,7 +157,7 @@ pub trait TicketOps {
 
 // ── GitHub Issues as a ticket backend ────────────────────────────────────────
 
-pub struct GitHubTicket {
+pub(crate) struct GitHubTicket {
     pub client: Arc<GitHubClient>,
     pub number: u64,
     pub comment_field_prefix: String,
@@ -284,7 +284,7 @@ impl TicketOps for GitHubTicket {
 }
 
 /// Ticket abstraction that works with Pagure, Forgejo, or GitHub Issues
-pub enum Ticket {
+pub(crate) enum Ticket {
     Pagure(PagureTicket),
     Forgejo(ForgejoTicket),
     GitHub(GitHubTicket),
