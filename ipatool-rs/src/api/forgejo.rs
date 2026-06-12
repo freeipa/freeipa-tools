@@ -358,7 +358,9 @@ impl ForgejoClient {
             .send()
             .with_context(|| format!("GET {}", url))?;
         if !resp.status().is_success() {
-            return Ok(vec![]);
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo get_pr_files failed ({}): {}", status, body);
         }
         let files: Vec<crate::api::github::GitHubFile> =
             resp.json().with_context(|| "Parsing Forgejo PR files")?;
@@ -432,7 +434,13 @@ impl ForgejoClient {
             .send()
             .with_context(|| format!("GET {}", url))?;
         if !resp.status().is_success() {
-            return Ok(vec![]);
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!(
+                "Forgejo get_issue_labels_with_id failed ({}): {}",
+                status,
+                body
+            );
         }
         let labels: Vec<ForgejoLabelId> = resp
             .json()
