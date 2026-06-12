@@ -74,6 +74,7 @@ pub fn run_backport(
     let user_login = prc.get_authenticated_user_login()?;
     let old_branch = crate::git::current_branch(&ctx.git_env, ctx.verbosity)?;
 
+    let mut failed = 0usize;
     for bb in backport_branches {
         let result = (|| -> Result<()> {
             // Checkout remote branch
@@ -86,25 +87,23 @@ pub fn run_backport(
                 ctx.verbosity,
             )?;
             if checkout_result.returncode != 0 {
-                println!(
-                    "\x1b[31mFailed to checkout {}/{}. Manual backport is needed. {}\x1b[0m",
-                    ctx.config.remote, bb, checkout_result.stderr
-                );
-                return Ok(());
+                return Err(anyhow::anyhow!(
+                    "Failed to checkout {}/{}: {}",
+                    ctx.config.remote,
+                    bb,
+                    checkout_result.stderr
+                ));
             }
 
             // Apply patches
-            let sha = match super::apply_patches_to_branch(ctx, &patches, bb, false) {
-                Ok(sha) => sha,
-                Err(e) => {
-                    println!(
-                        "\x1b[31mFailed to apply patches onto {}/{}. Manual backport is needed.\x1b[0m",
-                        ctx.config.remote, bb
-                    );
-                    println!("\x1b[31m{}\x1b[0m", e);
-                    return Ok(());
-                }
-            };
+            let sha = super::apply_patches_to_branch(ctx, &patches, bb, false).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to apply patches onto {}/{}: {}",
+                    ctx.config.remote,
+                    bb,
+                    e
+                )
+            })?;
 
             println!("Applied patches on {}/{}", ctx.config.remote, bb);
 
@@ -162,9 +161,13 @@ pub fn run_backport(
 
         if let Err(e) = result {
             println!("\x1b[31mBackport to {} failed: {}\x1b[0m", bb, e);
+            failed += 1;
         }
     }
 
+    if failed == backport_branches.len() && !backport_branches.is_empty() {
+        anyhow::bail!("All {} backport branch(es) failed", backport_branches.len());
+    }
     Ok(())
 }
 
