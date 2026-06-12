@@ -2327,9 +2327,10 @@ fn pr_row_styled(pr: &GitHubPR, inner_width: usize) -> StyledString {
 /// the provider defaults to `GitHub`, which is a safe conservative choice — the
 /// action will still be tagged with the right provider once a client exists.
 fn tui_offline_and_provider(s: &mut Cursive) -> (bool, crate::db::Provider) {
-    let state = s
-        .user_data::<TuiState>()
-        .expect("TuiState must be present during TUI operation");
+    let Some(state) = s.user_data::<TuiState>() else {
+        eprintln!("Warning: TUI state not initialized");
+        return (false, crate::db::Provider::GitHub);
+    };
     let provider = state
         .pr_client
         .as_ref()
