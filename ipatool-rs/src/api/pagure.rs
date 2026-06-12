@@ -187,7 +187,10 @@ impl PagureTicket {
         println!("Retrieving ticket {}", self.number);
         let issue = self.client.get_issue(self.number)?;
         let _ = self.data.set(issue);
-        Ok(self.data.get().unwrap())
+        Ok(self
+            .data
+            .get()
+            .expect("OnceLock was just set above; this is a logic error if None"))
     }
 
     pub fn reviewer(&self) -> Result<Option<String>> {
