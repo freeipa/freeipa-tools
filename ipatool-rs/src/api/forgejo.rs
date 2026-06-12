@@ -520,23 +520,11 @@ impl ForgejoClient {
         number: u64,
         n: usize,
     ) -> Result<Vec<crate::api::github::GitHubComment>> {
-        let url = self.api_url(&format!(
-            "/repos/{}/{}/issues/{}/comments?page=1&limit={}&token={}",
-            self.owner, self.repo, number, n, self.token
-        ));
-        let resp = self
-            .http
-            .get(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .send()
-            .with_context(|| format!("GET {}", url))?;
-        if !resp.status().is_success() {
-            return Ok(vec![]);
+        let mut all = self.get_all_issue_comments(number)?;
+        if all.len() > n {
+            all.drain(..all.len() - n);
         }
-        let comments: Vec<crate::api::github::GitHubComment> = resp
-            .json()
-            .with_context(|| "Parsing Forgejo issue comments")?;
-        Ok(comments)
+        Ok(all)
     }
 
     /// Return all issue comments in chronological order.
