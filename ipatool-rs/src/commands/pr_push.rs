@@ -78,16 +78,28 @@ pub fn run(
 
         println!("Adding label 'pushed'");
         if let Err(e) = prc.add_labels(pr_id, &["pushed"]) {
-            eprintln!("Warning: failed to add 'pushed' label: {}", e);
+            eprintln!(
+                "Warning: failed to add 'pushed' label to PR #{} ({}): {}. \
+                 Please add the 'pushed' label manually.",
+                pr_id, pr.html_url, e
+            );
         }
 
         if let Err(e) = prc.create_comment(pr_id, &push_info.pagure_comment) {
-            eprintln!("Warning: failed to create push comment: {}", e);
+            eprintln!(
+                "Warning: failed to create push comment on PR #{} ({}): {}. \
+                 Please post the push comment manually.",
+                pr_id, pr.html_url, e
+            );
         }
 
         println!("Closing pull request {}", pr_id);
         if let Err(e) = prc.close_pr(pr_id) {
-            eprintln!("Warning: failed to close PR: {}", e);
+            eprintln!(
+                "Warning: failed to close PR #{} ({}): {}. \
+                 Please close the pull request manually.",
+                pr_id, pr.html_url, e
+            );
         }
 
         // Handle backports
