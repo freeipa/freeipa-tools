@@ -258,6 +258,15 @@ impl Config {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found in config", name))?;
 
+        // NOTE: `pr_source` and `issue_tracker` from the profile are intentionally
+        // NOT merged into `self` here.  `Config` has no top-level `pr_source` /
+        // `issue_tracker` fields; these values live only in `ProfileConfig` and are
+        // read by `pr_source_for()` / `issue_tracker_for()` before `apply_profile`
+        // is called.  The caller (build_ctx in main.rs) stores them in `Ctx` directly.
+        // Merging them into `Config` would require adding new fields to `Config` and
+        // would change the semantics of the existing helper methods, so the current
+        // approach keeps things simple and consistent.
+
         if let Some(v) = profile.gh_token {
             self.gh_token = v;
         }
