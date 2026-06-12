@@ -194,6 +194,67 @@ pub fn labels_colorize(labels: &[Label], color_enabled: bool) -> String {
     parts.join(",")
 }
 
+// ── Shared comment-field scanning ────────────────────────────────────────────
+
+/// Scan issue body and comments for lines matching `<prefix><field_name>: <value>`
+/// and return the joined values.  Used by both ForgejoTicket and GitHubTicket.
+pub(crate) fn scan_comment_fields(
+    body: Option<&str>,
+    comments: &[IssueComment],
+    prefix: &str,
+    field_name: &str,
+) -> Option<String> {
+    let needle = format!("{}:", field_name);
+    let mut values: Vec<String> = Vec::new();
+
+    let mut scan = |text: &str| {
+        for line in text.lines() {
+            let rest = if prefix.is_empty() {
+                line
+            } else {
+                match line.strip_prefix(prefix) {
+                    Some(r) => r.trim_start(),
+                    None => continue,
+                }
+            };
+            if let Some(val) = rest.strip_prefix(&*needle) {
+                let v = val.trim();
+                if !v.is_empty() {
+                    values.push(v.to_string());
+                }
+            }
+        }
+    };
+
+    if let Some(body) = body {
+        scan(body);
+    }
+    for comment in comments {
+        scan(&comment.body);
+    }
+
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.join(" "))
+    }
+}
+
+// ── Common ticket interface ───────────────────────────────────────────────────
+
+/// Trait implemented by all issue-tracker backends (GitHubTicket, ForgejoTicket,
+/// PagureTicket) and by the `Ticket` dispatch enum.
+pub(crate) trait TicketOps {
+    fn number(&self) -> u64;
+    fn reviewer(&self) -> anyhow::Result<Option<String>>;
+    fn rhbz(&self) -> anyhow::Result<Option<String>>;
+    fn milestone(&self) -> anyhow::Result<Option<String>>;
+    fn title(&self) -> anyhow::Result<String>;
+    fn is_closed(&self) -> anyhow::Result<bool>;
+    fn comment(&self, text: &str) -> anyhow::Result<()>;
+    fn close(&self) -> anyhow::Result<()>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

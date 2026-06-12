@@ -5,13 +5,14 @@ use std::sync::{Arc, OnceLock};
 
 use crate::api::{
     forgejo::{ForgejoClient, ForgejoTicket},
-    github::GitHubClient,
+    github::{GitHubClient, GitHubTicket},
     jira::JiraClient,
     pagure::{PagureClient, PagureTicket},
-    types::IssueComment,
 };
 use crate::config::{Config, IssueTracker};
 use crate::output::{ask_yn, prompt, Output};
+
+pub(crate) use crate::api::types::TicketOps;
 
 pub mod am;
 pub mod backport;
@@ -140,176 +141,11 @@ mod milestone_tests {
     }
 }
 
-// ── Common ticket interface ───────────────────────────────────────────────────
-
-/// Trait implemented by all issue-tracker backends.
-/// The `Ticket` enum also implements this trait via delegation.
-pub(crate) trait TicketOps {
-    fn number(&self) -> u64;
-    fn reviewer(&self) -> Result<Option<String>>;
-    fn rhbz(&self) -> Result<Option<String>>;
-    fn milestone(&self) -> Result<Option<String>>;
-    fn title(&self) -> Result<String>;
-    fn is_closed(&self) -> Result<bool>;
-    fn comment(&self, text: &str) -> Result<()>;
-    fn close(&self) -> Result<()>;
-}
-
-// ── GitHub Issues as a ticket backend ────────────────────────────────────────
-
-pub(crate) struct GitHubTicket {
-    pub client: Arc<GitHubClient>,
-    pub number: u64,
-    pub comment_field_prefix: String,
-    data: OnceLock<crate::api::github::GitHubIssue>,
-    comments: OnceLock<Vec<IssueComment>>,
-}
-
-impl GitHubTicket {
-    pub fn new(client: Arc<GitHubClient>, number: u64, comment_field_prefix: String) -> Self {
-        GitHubTicket {
-            client,
-            number,
-            comment_field_prefix,
-            data: OnceLock::new(),
-            comments: OnceLock::new(),
-        }
-    }
-
-    pub fn data(&self) -> Result<&crate::api::github::GitHubIssue> {
-        if let Some(d) = self.data.get() {
-            return Ok(d);
-        }
-        println!("Retrieving GitHub issue #{}", self.number);
-        let issue = self.client.get_issue(self.number)?;
-        let _ = self.data.set(issue);
-        Ok(self
-            .data
-            .get()
-            .expect("OnceLock was just set above; this is a logic error if None"))
-    }
-
-    fn load_comments(&self) -> Result<&[IssueComment]> {
-        if let Some(c) = self.comments.get() {
-            return Ok(c);
-        }
-        let fetched = self.client.get_all_issue_comments(self.number)?;
-        let _ = self.comments.set(fetched);
-        Ok(self
-            .comments
-            .get()
-            .expect("OnceLock was just set above; this is a logic error if None"))
-    }
-
-    /// Scan the issue body and all comments for a line of the form
-    /// `<prefix><name>: <value>` and return the joined values.
-    fn comment_field(&self, name: &str) -> Result<Option<String>> {
-        let prefix = &self.comment_field_prefix;
-        let needle = format!("{}:", name);
-        let mut values: Vec<String> = Vec::new();
-
-        let mut scan = |text: &str| {
-            for line in text.lines() {
-                let rest = if prefix.is_empty() {
-                    line
-                } else {
-                    match line.strip_prefix(prefix.as_str()) {
-                        Some(r) => r.trim_start(),
-                        None => continue,
-                    }
-                };
-                if let Some(val) = rest.strip_prefix(&*needle) {
-                    let v = val.trim();
-                    if !v.is_empty() {
-                        values.push(v.to_string());
-                    }
-                }
-            }
-        };
-
-        // Scan the issue body first, then all comments.
-        let issue = self.data()?;
-        if let Some(ref body) = issue.body {
-            scan(body);
-        }
-        for comment in self.load_comments()? {
-            scan(&comment.body);
-        }
-
-        if values.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(values.join(" ")))
-        }
-    }
-
-    pub fn reviewer(&self) -> Result<Option<String>> {
-        self.comment_field("reviewer")
-    }
-
-    pub fn rhbz(&self) -> Result<Option<String>> {
-        self.comment_field("rhbz")
-    }
-
-    pub fn title(&self) -> Result<String> {
-        Ok(self.data()?.title.clone())
-    }
-
-    pub fn is_closed(&self) -> Result<bool> {
-        Ok(self.data()?.is_closed())
-    }
-
-    pub fn comment(&self, text: &str) -> Result<()> {
-        self.client.create_comment(self.number, text)
-    }
-
-    pub fn close(&self) -> Result<()> {
-        self.client.close_issue(self.number)
-    }
-
-    pub fn milestone(&self) -> Result<Option<String>> {
-        Ok(self.data()?.milestone.as_ref().map(|m| m.title.clone()))
-    }
-}
-
-impl TicketOps for GitHubTicket {
-    fn number(&self) -> u64 { self.number }
-    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
-    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
-    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
-    fn title(&self) -> Result<String> { self.title() }
-    fn is_closed(&self) -> Result<bool> { self.is_closed() }
-    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
-    fn close(&self) -> Result<()> { self.close() }
-}
-
 /// Ticket abstraction that works with Pagure, Forgejo, or GitHub Issues
 pub(crate) enum Ticket {
     Pagure(PagureTicket),
     Forgejo(ForgejoTicket),
     GitHub(GitHubTicket),
-}
-
-impl TicketOps for ForgejoTicket {
-    fn number(&self) -> u64 { self.number }
-    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
-    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
-    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
-    fn title(&self) -> Result<String> { self.title() }
-    fn is_closed(&self) -> Result<bool> { self.is_closed() }
-    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
-    fn close(&self) -> Result<()> { self.close() }
-}
-
-impl TicketOps for PagureTicket {
-    fn number(&self) -> u64 { self.number }
-    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
-    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
-    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
-    fn title(&self) -> Result<String> { self.title() }
-    fn is_closed(&self) -> Result<bool> { self.is_closed() }
-    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
-    fn close(&self) -> Result<()> { self.close() }
 }
 
 impl TicketOps for Ticket {
