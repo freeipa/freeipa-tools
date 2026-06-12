@@ -140,6 +140,21 @@ mod milestone_tests {
     }
 }
 
+// ── Common ticket interface ───────────────────────────────────────────────────
+
+/// Trait implemented by all issue-tracker backends.
+/// The `Ticket` enum also implements this trait via delegation.
+pub trait TicketOps {
+    fn number(&self) -> u64;
+    fn reviewer(&self) -> Result<Option<String>>;
+    fn rhbz(&self) -> Result<Option<String>>;
+    fn milestone(&self) -> Result<Option<String>>;
+    fn title(&self) -> Result<String>;
+    fn is_closed(&self) -> Result<bool>;
+    fn comment(&self, text: &str) -> Result<()>;
+    fn close(&self) -> Result<()>;
+}
+
 // ── GitHub Issues as a ticket backend ────────────────────────────────────────
 
 pub struct GitHubTicket {
@@ -257,6 +272,17 @@ impl GitHubTicket {
     }
 }
 
+impl TicketOps for GitHubTicket {
+    fn number(&self) -> u64 { self.number }
+    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
+    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
+    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
+    fn title(&self) -> Result<String> { self.title() }
+    fn is_closed(&self) -> Result<bool> { self.is_closed() }
+    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
+    fn close(&self) -> Result<()> { self.close() }
+}
+
 /// Ticket abstraction that works with Pagure, Forgejo, or GitHub Issues
 pub enum Ticket {
     Pagure(PagureTicket),
@@ -264,69 +290,56 @@ pub enum Ticket {
     GitHub(GitHubTicket),
 }
 
-impl Ticket {
-    pub fn number(&self) -> u64 {
+impl TicketOps for ForgejoTicket {
+    fn number(&self) -> u64 { self.number }
+    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
+    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
+    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
+    fn title(&self) -> Result<String> { self.title() }
+    fn is_closed(&self) -> Result<bool> { self.is_closed() }
+    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
+    fn close(&self) -> Result<()> { self.close() }
+}
+
+impl TicketOps for PagureTicket {
+    fn number(&self) -> u64 { self.number }
+    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
+    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
+    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
+    fn title(&self) -> Result<String> { self.title() }
+    fn is_closed(&self) -> Result<bool> { self.is_closed() }
+    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
+    fn close(&self) -> Result<()> { self.close() }
+}
+
+impl TicketOps for Ticket {
+    fn number(&self) -> u64 {
         match self {
             Ticket::Pagure(t) => t.number,
             Ticket::Forgejo(t) => t.number,
             Ticket::GitHub(t) => t.number,
         }
     }
-
-    pub fn reviewer(&self) -> Result<Option<String>> {
-        match self {
-            Ticket::Pagure(t) => t.reviewer(),
-            Ticket::Forgejo(t) => t.reviewer(),
-            Ticket::GitHub(t) => t.reviewer(),
-        }
+    fn reviewer(&self) -> Result<Option<String>> {
+        match self { Ticket::Pagure(t) => t.reviewer(), Ticket::Forgejo(t) => t.reviewer(), Ticket::GitHub(t) => t.reviewer() }
     }
-
-    pub fn rhbz(&self) -> Result<Option<String>> {
-        match self {
-            Ticket::Pagure(t) => t.rhbz(),
-            Ticket::Forgejo(t) => t.rhbz(),
-            Ticket::GitHub(t) => t.rhbz(),
-        }
+    fn rhbz(&self) -> Result<Option<String>> {
+        match self { Ticket::Pagure(t) => t.rhbz(), Ticket::Forgejo(t) => t.rhbz(), Ticket::GitHub(t) => t.rhbz() }
     }
-
-    pub fn milestone(&self) -> Result<Option<String>> {
-        match self {
-            Ticket::Pagure(t) => t.milestone(),
-            Ticket::Forgejo(t) => t.milestone(),
-            Ticket::GitHub(t) => t.milestone(),
-        }
+    fn milestone(&self) -> Result<Option<String>> {
+        match self { Ticket::Pagure(t) => t.milestone(), Ticket::Forgejo(t) => t.milestone(), Ticket::GitHub(t) => t.milestone() }
     }
-
-    pub fn title(&self) -> Result<String> {
-        match self {
-            Ticket::Pagure(t) => t.title(),
-            Ticket::Forgejo(t) => t.title(),
-            Ticket::GitHub(t) => t.title(),
-        }
+    fn title(&self) -> Result<String> {
+        match self { Ticket::Pagure(t) => t.title(), Ticket::Forgejo(t) => t.title(), Ticket::GitHub(t) => t.title() }
     }
-
-    pub fn is_closed(&self) -> Result<bool> {
-        match self {
-            Ticket::Pagure(t) => t.is_closed(),
-            Ticket::Forgejo(t) => t.is_closed(),
-            Ticket::GitHub(t) => t.is_closed(),
-        }
+    fn is_closed(&self) -> Result<bool> {
+        match self { Ticket::Pagure(t) => t.is_closed(), Ticket::Forgejo(t) => t.is_closed(), Ticket::GitHub(t) => t.is_closed() }
     }
-
-    pub fn comment(&self, text: &str) -> Result<()> {
-        match self {
-            Ticket::Pagure(t) => t.comment(text),
-            Ticket::Forgejo(t) => t.comment(text),
-            Ticket::GitHub(t) => t.comment(text),
-        }
+    fn comment(&self, text: &str) -> Result<()> {
+        match self { Ticket::Pagure(t) => t.comment(text), Ticket::Forgejo(t) => t.comment(text), Ticket::GitHub(t) => t.comment(text) }
     }
-
-    pub fn close(&self) -> Result<()> {
-        match self {
-            Ticket::Pagure(t) => t.close(),
-            Ticket::Forgejo(t) => t.close(),
-            Ticket::GitHub(t) => t.close(),
-        }
+    fn close(&self) -> Result<()> {
+        match self { Ticket::Pagure(t) => t.close(), Ticket::Forgejo(t) => t.close(), Ticket::GitHub(t) => t.close() }
     }
 }
 
@@ -606,7 +619,7 @@ pub fn git_cleanup(ctx: &Ctx, old_branch: &str) {
 }
 
 /// Update a ticket with push info
-pub fn update_issue(ctx: &Ctx, ticket: &Ticket) {
+pub fn update_issue(ctx: &Ctx, ticket: &impl TicketOps) {
     let Some(push_info) = &ctx.push_info else {
         return;
     };
@@ -645,7 +658,7 @@ pub fn update_issue(ctx: &Ctx, ticket: &Ticket) {
 }
 
 /// Close a ticket if configured and not already closed
-pub fn close_issue(ctx: &Ctx, ticket: &Ticket, has_backport: bool) {
+pub fn close_issue(ctx: &Ctx, ticket: &impl TicketOps, has_backport: bool) {
     if has_backport {
         return;
     }

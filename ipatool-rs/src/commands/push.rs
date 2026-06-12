@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{
     apply_patches_to_branch, close_issue, get_reviewers, git_cleanup, milestone_branches,
-    update_issue, update_jira_issues, Ctx, PushInfo,
+    update_issue, update_jira_issues, Ctx, PushInfo, TicketOps,
 };
 use crate::output::prompt;
 use crate::patch::{collect_patches, Patch};
