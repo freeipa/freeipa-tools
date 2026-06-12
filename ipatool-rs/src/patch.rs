@@ -7,12 +7,17 @@ static SUBJECT_RE: OnceLock<Regex> = OnceLock::new();
 static REVIEWER_LINE_RE: OnceLock<Regex> = OnceLock::new();
 
 fn subject_re() -> &'static Regex {
-    SUBJECT_RE
-        .get_or_init(|| Regex::new(r"^Subject:(?:\s*\[PATCH[^\]]*\])*\s*(?P<subj>.*)").unwrap())
+    SUBJECT_RE.get_or_init(|| {
+        Regex::new(r"^Subject:(?:\s*\[PATCH[^\]]*\])*\s*(?P<subj>.*)")
+            .expect("SUBJECT_RE pattern is valid; this is a bug if it fails")
+    })
 }
 
 fn reviewer_line_re() -> &'static Regex {
-    REVIEWER_LINE_RE.get_or_init(|| Regex::new(r"^[-_a-zA-Z0-9]+: .*$").unwrap())
+    REVIEWER_LINE_RE.get_or_init(|| {
+        Regex::new(r"^[-_a-zA-Z0-9]+: .*$")
+            .expect("REVIEWER_LINE_RE pattern is valid; this is a bug if it fails")
+    })
 }
 
 /// A sanitized patch ready for application
