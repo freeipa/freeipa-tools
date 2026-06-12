@@ -150,7 +150,7 @@ pub fn run_backport(
             )?;
 
             println!(
-                "\x1b[32mCreated and auto-ACKed PR {} against branch {}: {}\x1b[0m",
+                "Created and auto-ACKed PR {} against branch {}: {}",
                 backport_pr.number, bb, backport_pr.html_url
             );
 
@@ -160,13 +160,17 @@ pub fn run_backport(
         super::git_cleanup(ctx, &old_branch);
 
         if let Err(e) = result {
-            println!("\x1b[31mBackport to {} failed: {}\x1b[0m", bb, e);
+            eprintln!("ERROR: Backport to {} failed: {}", bb, e);
             failed += 1;
         }
     }
 
-    if failed == backport_branches.len() && !backport_branches.is_empty() {
-        anyhow::bail!("All {} backport branch(es) failed", backport_branches.len());
+    if failed > 0 {
+        anyhow::bail!(
+            "{}/{} backport branch(es) failed",
+            failed,
+            backport_branches.len()
+        );
     }
     Ok(())
 }
