@@ -1623,12 +1623,19 @@ fn open_review_comment_form(
                     restore_review_layer(s, focus_post);
                     let gh3 = Arc::clone(&gh_post);
                     let commit3 = commit_post.clone();
+                    let is_forgejo = provider == crate::db::Provider::Forgejo;
                     do_in_background(
                         s,
                         "Posting comment…",
                         move || gh3.create_review_comment(pr_number, &commit3, &path, line, &body),
                         move |s, res| match res {
-                            Ok(()) => show_info(s, "Comment posted successfully."),
+                            Ok(()) => {
+                                if is_forgejo {
+                                    show_info(s, "Comment posted as issue comment (Forgejo inline review comments not yet supported).");
+                                } else {
+                                    show_info(s, "Comment posted successfully.");
+                                }
+                            }
                             Err(e) => show_error(s, &format!("Failed to post comment: {}", e)),
                         },
                     );
