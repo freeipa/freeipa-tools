@@ -708,7 +708,10 @@ impl ForgejoTicket {
         println!("Retrieving issue {}", self.number);
         let issue = self.client.get_issue(self.number)?;
         let _ = self.data.set(issue);
-        Ok(self.data.get().unwrap())
+        Ok(self
+            .data
+            .get()
+            .expect("OnceLock was just set above; this is a logic error if None"))
     }
 
     fn load_comments(&self) -> Result<&Vec<crate::api::github::GitHubComment>> {
@@ -717,7 +720,10 @@ impl ForgejoTicket {
         }
         let comments = self.client.get_all_issue_comments(self.number)?;
         let _ = self.comments.set(comments);
-        Ok(self.comments.get().unwrap())
+        Ok(self
+            .comments
+            .get()
+            .expect("OnceLock was just set above; this is a logic error if None"))
     }
 
     /// Collect all comment lines matching `<prefix><fieldname>: <value>` and
