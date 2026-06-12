@@ -2143,8 +2143,10 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                         backport_branches,
                         autobackport,
                     });
+                    s.quit();
+                } else {
+                    show_error(s, "Internal error: TUI state missing. Push aborted.");
                 }
-                s.quit();
             })
             .button("Cancel", |s| {
                 s.pop_layer();
@@ -2187,8 +2189,10 @@ fn show_backport_dialog(siv: &mut Cursive, pr_number: u64) {
                         pr_id: pr_number,
                         branches,
                     });
+                    s.quit();
+                } else {
+                    show_error(s, "Internal error: TUI state missing. Backport aborted.");
                 }
-                s.quit();
             })
             .button("Cancel", |s| {
                 s.pop_layer();
