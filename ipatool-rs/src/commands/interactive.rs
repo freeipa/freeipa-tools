@@ -1954,7 +1954,7 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                         {
                             let gh3 = Arc::clone(&gh2);
                             move || {
-                                crate::commands::pr_ack::run_api(
+                                super::pr_ack::run_api(
                                     &gh3,
                                     pr_number,
                                     Some(comment.as_str()).filter(|s| !s.is_empty()),
@@ -2027,7 +2027,7 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                         "Rejecting PR…",
                         {
                             let gh3 = Arc::clone(&gh2);
-                            move || crate::commands::pr_reject::run_api(&gh3, pr_number, &reason)
+                            move || super::pr_reject::run_api(&gh3, pr_number, &reason)
                         },
                         move |s, res| match res {
                             Ok(()) => show_info(s, &format!("PR #{} rejected.", pr_number)),
@@ -2251,12 +2251,8 @@ fn apply_github_action(gh: &Arc<PrClient>, action: &crate::db::QueuedAction) -> 
             line,
             body,
         } => gh.create_review_comment(*pr_number, commit_id, path, *line, body),
-        Ack { pr_number, comment } => {
-            crate::commands::pr_ack::run_api(gh, *pr_number, comment.as_deref())
-        }
-        Reject { pr_number, comment } => {
-            crate::commands::pr_reject::run_api(gh, *pr_number, comment)
-        }
+        Ack { pr_number, comment } => super::pr_ack::run_api(gh, *pr_number, comment.as_deref()),
+        Reject { pr_number, comment } => super::pr_reject::run_api(gh, *pr_number, comment),
         UpdateLabels {
             pr_number,
             to_add,
