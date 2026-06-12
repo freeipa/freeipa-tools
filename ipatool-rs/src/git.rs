@@ -189,23 +189,23 @@ pub fn rev_parse_head(env: &HashMap<String, String>, verbosity: u8) -> Result<St
 }
 
 /// Abort any in-progress git am
-pub fn am_abort(env: &HashMap<String, String>) {
-    let _ = run_process(&["git", "am", "--abort"], env, None, false, None, 0);
+pub fn am_abort(env: &HashMap<String, String>) -> anyhow::Result<()> {
+    run_process(&["git", "am", "--abort"], env, None, false, None, 0).map(|_| ())
 }
 
 /// Hard reset
-pub fn reset_hard(env: &HashMap<String, String>) {
-    let _ = run_process(&["git", "reset", "--hard"], env, None, false, None, 0);
+pub fn reset_hard(env: &HashMap<String, String>) -> anyhow::Result<()> {
+    run_process(&["git", "reset", "--hard"], env, None, false, None, 0).map(|_| ())
 }
 
 /// Checkout branch
-pub fn checkout_branch(branch: &str, env: &HashMap<String, String>) {
-    let _ = run_process(&["git", "checkout", branch], env, None, false, None, 0);
+pub fn checkout_branch(branch: &str, env: &HashMap<String, String>) -> anyhow::Result<()> {
+    run_process(&["git", "checkout", branch], env, None, false, None, 0).map(|_| ())
 }
 
 /// Clean working tree
-pub fn clean_fxd(env: &HashMap<String, String>) {
-    let _ = run_process(&["git", "clean", "-fxd"], env, None, false, None, 0);
+pub fn clean_fxd(env: &HashMap<String, String>) -> anyhow::Result<()> {
+    run_process(&["git", "clean", "-fxd"], env, None, false, None, 0).map(|_| ())
 }
 
 /// Get git shortlog for reviewer lookup

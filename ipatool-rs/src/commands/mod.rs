@@ -566,18 +566,27 @@ pub fn apply_patches_to_branch(
     Ok(sha)
 }
 
-/// Cleanup git state after push attempt
+/// Cleanup git state after push attempt.
 ///
-/// Note: `am_abort`, `reset_hard`, `checkout_branch`, and `clean_fxd` all return `()` —
-/// they silently discard `run_process` results internally.  Failure logging for each
-/// individual git step would require changing those function signatures to return `Result`.
-/// For now, cleanup failures will be visible only via git's own stderr output.
+/// Each git step is attempted independently; failures are logged as warnings
+/// so that subsequent cleanup steps still run.
 pub fn git_cleanup(ctx: &Ctx, old_branch: &str) {
     println!("Cleaning up");
-    crate::git::am_abort(&ctx.git_env);
-    crate::git::reset_hard(&ctx.git_env);
-    crate::git::checkout_branch(old_branch, &ctx.git_env);
-    crate::git::clean_fxd(&ctx.git_env);
+    if let Err(e) = crate::git::am_abort(&ctx.git_env) {
+        eprintln!("Warning: git am --abort failed during cleanup: {}", e);
+    }
+    if let Err(e) = crate::git::reset_hard(&ctx.git_env) {
+        eprintln!("Warning: git reset --hard failed during cleanup: {}", e);
+    }
+    if let Err(e) = crate::git::checkout_branch(old_branch, &ctx.git_env) {
+        eprintln!(
+            "Warning: git checkout '{}' failed during cleanup (repository may be on wrong branch): {}",
+            old_branch, e
+        );
+    }
+    if let Err(e) = crate::git::clean_fxd(&ctx.git_env) {
+        eprintln!("Warning: git clean -fxd failed during cleanup: {}", e);
+    }
 }
 
 /// Update a ticket with push info
