@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::pr_client::PrClient;
 use super::Ctx;
-use crate::api::github::{sorted_commits, GitHubPR};
+use crate::api::types::{sorted_commits, PullRequest};
 use crate::patch::{delete_patches, patch_filename};
 
 pub fn run_backport_cmd(ctx: &mut Ctx, pr_id: u64, branches: &[String]) -> Result<()> {
@@ -48,7 +48,7 @@ pub fn run_backport(
     ctx: &mut Ctx,
     backport_branches: &[String],
     prc: &Arc<PrClient>,
-    pr: &GitHubPR,
+    pr: &PullRequest,
 ) -> Result<()> {
     let fork_remote = ctx.config.gh_fork_remote.clone();
     if fork_remote.is_empty() {
@@ -177,7 +177,7 @@ pub fn run_backport(
 
 pub fn download_pr_patches(
     prc: &Arc<PrClient>,
-    pr: &GitHubPR,
+    pr: &PullRequest,
     patchdir: &std::path::Path,
 ) -> Result<()> {
     let commits_raw = prc.get_pr_commits(pr.number)?;

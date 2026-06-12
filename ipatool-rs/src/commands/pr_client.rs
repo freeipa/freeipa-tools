@@ -1,16 +1,16 @@
 /// Unified pull-request client that abstracts over GitHub and Forgejo.
 ///
 /// Each variant wraps the underlying provider's client.  All methods return the
-/// shared GitHub-shaped types (`GitHubPR`, `GitHubCommit`, …) so the rest of
+/// shared provider-agnostic types from `api::types` so the rest of
 /// the codebase does not need to know which forge is in use.
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::api::forgejo::ForgejoClient;
-use crate::api::github::{
-    CiJobStatus, GitHubClient, GitHubComment, GitHubFile, GitHubLabel, GitHubPR,
-    GitHubReviewComment,
+use crate::api::github::GitHubClient;
+use crate::api::types::{
+    CiStatus, Commit, IssueComment, Label, PrFile, PullRequest, ReviewComment,
 };
 
 pub enum PrClient {
@@ -21,7 +21,7 @@ pub enum PrClient {
 impl PrClient {
     // ── PR listing ────────────────────────────────────────────────────────────
 
-    pub fn list_prs(&self, state: &str) -> Result<Vec<GitHubPR>> {
+    pub fn list_prs(&self, state: &str) -> Result<Vec<PullRequest>> {
         match self {
             PrClient::GitHub(gh) => gh.list_prs(state),
             PrClient::Forgejo(fj) => fj.list_prs(state),
@@ -33,7 +33,7 @@ impl PrClient {
         state: &str,
         limit: usize,
         on_page: impl FnMut(u32, usize),
-    ) -> Result<Vec<GitHubPR>> {
+    ) -> Result<Vec<PullRequest>> {
         match self {
             PrClient::GitHub(gh) => gh.list_prs_limited(state, limit, on_page),
             PrClient::Forgejo(fj) => fj.list_prs_limited(state, limit, on_page),
@@ -42,7 +42,7 @@ impl PrClient {
 
     // ── Single PR ─────────────────────────────────────────────────────────────
 
-    pub fn get_pr(&self, number: u64) -> Result<GitHubPR> {
+    pub fn get_pr(&self, number: u64) -> Result<PullRequest> {
         match self {
             PrClient::GitHub(gh) => gh.get_pr(number),
             PrClient::Forgejo(fj) => fj.get_pr(number),
@@ -58,8 +58,8 @@ impl PrClient {
 
     // ── Labels ────────────────────────────────────────────────────────────────
 
-    /// Return the current labels on a PR/issue (as GitHubLabel list).
-    pub fn get_pr_labels(&self, number: u64) -> Result<Vec<GitHubLabel>> {
+    /// Return the current labels on a PR/issue (as Label list).
+    pub fn get_pr_labels(&self, number: u64) -> Result<Vec<Label>> {
         match self {
             PrClient::GitHub(gh) => {
                 let issue = gh.get_issue(number)?;
@@ -69,7 +69,7 @@ impl PrClient {
                 let lbls = fj.get_issue_labels_with_id(number)?;
                 Ok(lbls
                     .into_iter()
-                    .map(|l| GitHubLabel {
+                    .map(|l| Label {
                         name: l.name,
                         color: l.color,
                     })
@@ -92,7 +92,7 @@ impl PrClient {
         }
     }
 
-    pub fn list_repo_labels(&self) -> Result<Vec<GitHubLabel>> {
+    pub fn list_repo_labels(&self) -> Result<Vec<Label>> {
         match self {
             PrClient::GitHub(gh) => gh.list_repo_labels(),
             PrClient::Forgejo(fj) => fj.list_repo_labels(),
@@ -108,14 +108,14 @@ impl PrClient {
         }
     }
 
-    pub fn get_last_issue_comments(&self, number: u64, n: usize) -> Result<Vec<GitHubComment>> {
+    pub fn get_last_issue_comments(&self, number: u64, n: usize) -> Result<Vec<IssueComment>> {
         match self {
             PrClient::GitHub(gh) => gh.get_last_issue_comments(number, n),
             PrClient::Forgejo(fj) => fj.get_last_issue_comments(number, n),
         }
     }
 
-    pub fn get_all_issue_comments(&self, number: u64) -> Result<Vec<GitHubComment>> {
+    pub fn get_all_issue_comments(&self, number: u64) -> Result<Vec<IssueComment>> {
         match self {
             PrClient::GitHub(gh) => gh.get_all_issue_comments(number),
             PrClient::Forgejo(fj) => fj.get_all_issue_comments(number),
@@ -124,7 +124,7 @@ impl PrClient {
 
     // ── Review comments ───────────────────────────────────────────────────────
 
-    pub fn list_review_comments(&self, pr_number: u64) -> Result<Vec<GitHubReviewComment>> {
+    pub fn list_review_comments(&self, pr_number: u64) -> Result<Vec<ReviewComment>> {
         match self {
             PrClient::GitHub(gh) => gh.list_review_comments(pr_number),
             PrClient::Forgejo(fj) => fj.list_review_comments(pr_number),
@@ -161,7 +161,7 @@ impl PrClient {
 
     // ── Commits & patches ─────────────────────────────────────────────────────
 
-    pub fn get_pr_commits(&self, number: u64) -> Result<Vec<crate::api::github::GitHubCommit>> {
+    pub fn get_pr_commits(&self, number: u64) -> Result<Vec<Commit>> {
         match self {
             PrClient::GitHub(gh) => gh.get_pr_commits(number),
             PrClient::Forgejo(fj) => fj.get_pr_commits(number),
@@ -177,7 +177,7 @@ impl PrClient {
 
     // ── CI statuses ───────────────────────────────────────────────────────────
 
-    pub fn most_recent_statuses(&self, sha: &str) -> Result<HashMap<String, CiJobStatus>> {
+    pub fn most_recent_statuses(&self, sha: &str) -> Result<HashMap<String, CiStatus>> {
         match self {
             PrClient::GitHub(gh) => gh.most_recent_statuses(sha),
             PrClient::Forgejo(fj) => fj.most_recent_statuses(sha),
@@ -186,7 +186,7 @@ impl PrClient {
 
     // ── Files ─────────────────────────────────────────────────────────────────
 
-    pub fn get_pr_files(&self, number: u64) -> Result<Vec<GitHubFile>> {
+    pub fn get_pr_files(&self, number: u64) -> Result<Vec<PrFile>> {
         match self {
             PrClient::GitHub(gh) => gh.get_pr_files(number),
             PrClient::Forgejo(fj) => fj.get_pr_files(number),
@@ -204,7 +204,13 @@ impl PrClient {
 
     // ── PR creation ───────────────────────────────────────────────────────────
 
-    pub fn create_pr(&self, title: &str, base: &str, head: &str, body: &str) -> Result<GitHubPR> {
+    pub fn create_pr(
+        &self,
+        title: &str,
+        base: &str,
+        head: &str,
+        body: &str,
+    ) -> Result<PullRequest> {
         match self {
             PrClient::GitHub(gh) => gh.create_pr(title, base, head, body),
             PrClient::Forgejo(fj) => fj.create_pr(title, base, head, body),

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::api::github::{GitHubComment, GitHubCommit, GitHubFile, GitHubPR};
+use crate::api::types::{Commit, IssueComment, PrFile, PullRequest};
 
 // ── Provider identifier ───────────────────────────────────────────────────────
 
@@ -38,13 +38,13 @@ impl Provider {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CachedPrDetails {
     pub statuses: HashMap<String, String>,
-    pub comments: Vec<GitHubComment>,
-    pub files: Vec<GitHubFile>,
+    pub comments: Vec<IssueComment>,
+    pub files: Vec<PrFile>,
     /// PR commits in topological order (oldest first).
     /// `#[serde(default)]` ensures old cached records (before this field was added)
     /// deserialize without error.
     #[serde(default)]
-    pub commits: Vec<GitHubCommit>,
+    pub commits: Vec<Commit>,
     /// Job result URLs keyed by CI context name (same keys as `statuses`).
     /// Added later; empty on old cache entries.
     #[serde(default)]
@@ -131,7 +131,10 @@ impl Database {
     }
 
     fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
 
         // The action queue is never dropped — it holds persistent offline work.
         conn.execute_batch(
@@ -193,8 +196,11 @@ impl Database {
     /// Cache a slice of PRs under the given profile namespace.
     /// The profile is the active `--profile` name (empty string for the default
     /// profile), so that different profile configurations keep separate caches.
-    pub fn cache_prs(&self, profile: &str, prs: &[GitHubPR]) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
+    pub fn cache_prs(&self, profile: &str, prs: &[PullRequest]) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let now = now_secs();
         for pr in prs {
             let json = serde_json::to_string(pr)?;
@@ -208,8 +214,11 @@ impl Database {
     }
 
     /// Load cached PRs for the given profile, optionally filtered by state.
-    pub fn load_prs(&self, profile: &str, state_filter: &str) -> Result<Vec<GitHubPR>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
+    pub fn load_prs(&self, profile: &str, state_filter: &str) -> Result<Vec<PullRequest>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let jsons: Vec<String> = if state_filter == "all" {
             let mut stmt =
                 conn.prepare("SELECT data_json FROM prs WHERE profile = ?1 ORDER BY number DESC")?;
@@ -246,7 +255,10 @@ impl Database {
         details: &CachedPrDetails,
         pr_updated_at: Option<&str>,
     ) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let json = serde_json::to_string(details)?;
         conn.execute(
             "INSERT OR REPLACE INTO pr_details
@@ -263,7 +275,10 @@ impl Database {
         profile: &str,
         pr_number: u64,
     ) -> Result<Option<CachedPrDetails>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let result = conn.query_row(
             "SELECT details_json FROM pr_details WHERE number = ?1 AND profile = ?2",
             params![pr_number as i64, profile],
@@ -279,7 +294,10 @@ impl Database {
     /// Return the `pr_updated_at` value stored when details were last cached,
     /// or `None` if no details have been cached for this PR.
     pub fn pr_details_updated_at(&self, profile: &str, pr_number: u64) -> Option<String> {
-        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let conn = self.conn.lock().unwrap_or_else(|e| {
+            eprintln!("Warning: database mutex was poisoned, recovering");
+            e.into_inner()
+        });
         conn.query_row(
             "SELECT pr_updated_at FROM pr_details WHERE number = ?1 AND profile = ?2",
             params![pr_number as i64, profile],
@@ -293,7 +311,10 @@ impl Database {
 
     /// Enqueue a provider-tagged action for later sync.
     pub fn queue_action(&self, action: &ProviderAction) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let json = serde_json::to_string(action)?;
         conn.execute(
             "INSERT INTO queued_actions (action_json, created_at) VALUES (?1, ?2)",
@@ -303,7 +324,10 @@ impl Database {
     }
 
     pub fn pending_actions(&self) -> Result<Vec<PendingAction>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         let mut stmt = conn.prepare("SELECT id, action_json FROM queued_actions ORDER BY id")?;
         let collected: rusqlite::Result<Vec<(i64, String)>> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -315,6 +339,10 @@ impl Database {
                 // to plain QueuedAction (written by older code) and assume GitHub.
                 let provider_action: ProviderAction = serde_json::from_str(json).or_else(|_| {
                     let action: QueuedAction = serde_json::from_str(json)?;
+                    eprintln!(
+                        "Warning: queued action #{} uses old format, assuming GitHub provider",
+                        id
+                    );
                     Ok::<_, anyhow::Error>(ProviderAction {
                         provider: Provider::GitHub,
                         action,
@@ -329,13 +357,19 @@ impl Database {
     }
 
     pub fn delete_action(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Database mutex poisoned: {}", e))?;
         conn.execute("DELETE FROM queued_actions WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     pub fn pending_count(&self) -> usize {
-        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let conn = self.conn.lock().unwrap_or_else(|e| {
+            eprintln!("Warning: database mutex was poisoned, recovering");
+            e.into_inner()
+        });
         match conn.query_row("SELECT COUNT(*) FROM queued_actions", [], |r| {
             r.get::<_, i64>(0)
         }) {
@@ -358,7 +392,7 @@ fn now_secs() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::github::{GitHubLabel, GitHubRef, GitHubUser};
+    use crate::api::types::{GitRef, Label, User};
 
     impl Database {
         fn open_in_memory() -> Result<Self> {
@@ -371,21 +405,21 @@ mod tests {
         }
     }
 
-    fn make_pr(number: u64, state: &str) -> GitHubPR {
-        GitHubPR {
+    fn make_pr(number: u64, state: &str) -> PullRequest {
+        PullRequest {
             number,
             title: format!("PR #{}", number),
             state: state.to_string(),
             html_url: format!("https://github.com/test/repo/pull/{}", number),
-            head: GitHubRef {
+            head: GitRef {
                 ref_name: "feature".to_string(),
                 sha: "abc123".to_string(),
             },
-            base: GitHubRef {
+            base: GitRef {
                 ref_name: "master".to_string(),
                 sha: "def456".to_string(),
             },
-            user: GitHubUser {
+            user: User {
                 login: "tester".to_string(),
             },
             mergeable: None,
@@ -407,15 +441,15 @@ mod tests {
         statuses.insert("ci/test".to_string(), "success".to_string());
         CachedPrDetails {
             statuses,
-            comments: vec![GitHubComment {
+            comments: vec![IssueComment {
                 id: 1,
-                user: GitHubUser {
+                user: User {
                     login: "reviewer".to_string(),
                 },
                 body: "LGTM".to_string(),
                 created_at: "2024-01-01T00:00:00Z".to_string(),
             }],
-            files: vec![GitHubFile {
+            files: vec![PrFile {
                 filename: "src/main.rs".to_string(),
                 status: "modified".to_string(),
                 additions: 5,
@@ -464,7 +498,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let mut pr = make_pr(42, "open");
         pr.title = "Special title".to_string();
-        pr.labels = vec![GitHubLabel {
+        pr.labels = vec![Label {
             name: "ack".to_string(),
             color: "00ff00".to_string(),
         }];
