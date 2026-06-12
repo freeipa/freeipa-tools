@@ -1535,18 +1535,7 @@ fn open_review_comment_form(
                     );
                     return;
                 }
-                let (offline, provider) = s
-                    .user_data::<TuiState>()
-                    .map(|t| {
-                        (
-                            t.offline,
-                            t.pr_client
-                                .as_ref()
-                                .map(|p| p.provider())
-                                .unwrap_or(crate::db::Provider::GitHub),
-                        )
-                    })
-                    .unwrap_or((false, crate::db::Provider::GitHub));
+                let (offline, provider) = tui_offline_and_provider(s);
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 if offline {
                     s.pop_layer();
@@ -1816,18 +1805,7 @@ fn build_label_editor_layer(
                 s.pop_layer();
                 return;
             }
-            let (offline, provider) = s
-                .user_data::<TuiState>()
-                .map(|t| {
-                    (
-                        t.offline,
-                        t.pr_client
-                            .as_ref()
-                            .map(|p| p.provider())
-                            .unwrap_or(crate::db::Provider::GitHub),
-                    )
-                })
-                .unwrap_or((false, crate::db::Provider::GitHub));
+            let (offline, provider) = tui_offline_and_provider(s);
             let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
             s.pop_layer();
             if offline {
@@ -1919,18 +1897,7 @@ fn show_ack_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                         v.get_content().to_string()
                     })
                     .unwrap_or_default();
-                let (offline, provider) = s
-                    .user_data::<TuiState>()
-                    .map(|t| {
-                        (
-                            t.offline,
-                            t.pr_client
-                                .as_ref()
-                                .map(|p| p.provider())
-                                .unwrap_or(crate::db::Provider::GitHub),
-                        )
-                    })
-                    .unwrap_or((false, crate::db::Provider::GitHub));
+                let (offline, provider) = tui_offline_and_provider(s);
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
@@ -2001,18 +1968,7 @@ fn show_reject_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr_number: u64) {
                     show_error(s, "A reason is required.");
                     return;
                 }
-                let (offline, provider) = s
-                    .user_data::<TuiState>()
-                    .map(|t| {
-                        (
-                            t.offline,
-                            t.pr_client
-                                .as_ref()
-                                .map(|p| p.provider())
-                                .unwrap_or(crate::db::Provider::GitHub),
-                        )
-                    })
-                    .unwrap_or((false, crate::db::Provider::GitHub));
+                let (offline, provider) = tui_offline_and_provider(s);
                 let db = s.user_data::<TuiState>().and_then(|t| t.db.clone());
                 s.pop_layer();
                 if offline {
@@ -2355,6 +2311,26 @@ fn pr_row_styled(pr: &GitHubPR, inner_width: usize) -> StyledString {
 }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
+
+/// Extract the `(offline, provider)` pair from TUI state.
+///
+/// Panics if `TuiState` is absent — that is a programming error; TuiState must
+/// always be registered before any callback runs.  Getting the provider from
+/// `pr_client` is intentional: it is the only authoritative source for which
+/// forge backend is in use.  When `pr_client` is `None` (no forge configured)
+/// the provider defaults to `GitHub`, which is a safe conservative choice — the
+/// action will still be tagged with the right provider once a client exists.
+fn tui_offline_and_provider(s: &mut Cursive) -> (bool, crate::db::Provider) {
+    let state = s
+        .user_data::<TuiState>()
+        .expect("TuiState must be present during TUI operation");
+    let provider = state
+        .pr_client
+        .as_ref()
+        .map(|p| p.provider())
+        .unwrap_or(crate::db::Provider::GitHub);
+    (state.offline, provider)
+}
 
 fn show_info(siv: &mut Cursive, msg: &str) {
     siv.add_layer(Dialog::text(msg).title("Done").button("OK", |s| {
