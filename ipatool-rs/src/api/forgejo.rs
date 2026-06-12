@@ -268,6 +268,13 @@ impl ForgejoClient {
         let commits: Vec<crate::api::github::GitHubCommit> = resp
             .json()
             .with_context(|| format!("Parsing commits for PR {}", number))?;
+        if commits.len() == 50 {
+            eprintln!(
+                "Warning: get_pr_commits returned exactly 50 commits for PR {}; \
+                 results may be truncated (hard limit reached)",
+                number
+            );
+        }
         Ok(commits)
     }
 
@@ -350,6 +357,13 @@ impl ForgejoClient {
         }
         let files: Vec<crate::api::github::GitHubFile> =
             resp.json().with_context(|| "Parsing Forgejo PR files")?;
+        if files.len() == 100 {
+            eprintln!(
+                "Warning: get_pr_files returned exactly 100 files for PR {}; \
+                 results may be truncated (hard limit reached)",
+                number
+            );
+        }
         Ok(files)
     }
 
