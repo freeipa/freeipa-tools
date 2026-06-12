@@ -230,7 +230,7 @@ enum Command {
         patches: Vec<String>,
     },
 
-    /// Set yourself as reviewer for tickets
+    /// Set yourself as reviewer for tickets (NOT YET IMPLEMENTED)
     StartReview {
         /// Force setting reviewer even if already set
         #[arg(short, long)]
