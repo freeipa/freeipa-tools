@@ -15,6 +15,9 @@ use crate::api::github::{GitHubComment, GitHubCommit, GitHubFile, GitHubPR};
 pub enum Provider {
     GitHub,
     Forgejo,
+    /// Pagure is supported as an issue-tracker backend but has no offline
+    /// action-queue support; actions targeting Pagure must be executed online.
+    Pagure,
 }
 
 impl Provider {
@@ -22,6 +25,7 @@ impl Provider {
         match self {
             Provider::GitHub => "github",
             Provider::Forgejo => "forgejo",
+            Provider::Pagure => "pagure",
         }
     }
 }
