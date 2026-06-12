@@ -376,6 +376,7 @@ impl ForgejoClient {
 
     /// Return all labels defined in this repository, with their numeric IDs.
     pub fn list_repo_labels_with_id(&self) -> Result<Vec<ForgejoLabelId>> {
+        const MAX_PAGES: u32 = 1_000;
         let mut all = Vec::new();
         let mut page = 1u32;
         loop {
@@ -405,6 +406,13 @@ impl ForgejoClient {
             }
             all.extend(labels);
             page += 1;
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: pagination in {} exceeded {} pages; results may be incomplete.",
+                    "list_repo_labels_with_id", MAX_PAGES
+                );
+                break;
+            }
         }
         Ok(all)
     }
@@ -575,6 +583,7 @@ impl ForgejoClient {
         &self,
         number: u64,
     ) -> Result<Vec<crate::api::github::GitHubComment>> {
+        const MAX_PAGES: u32 = 1_000;
         let mut all = Vec::new();
         let mut page = 1u32;
         loop {
@@ -605,6 +614,13 @@ impl ForgejoClient {
             }
             all.extend(comments);
             page += 1;
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: pagination in {} exceeded {} pages; results may be incomplete.",
+                    "get_all_issue_comments", MAX_PAGES
+                );
+                break;
+            }
         }
         Ok(all)
     }
