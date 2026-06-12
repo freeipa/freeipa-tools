@@ -20,13 +20,13 @@ pub fn run(
     if prc.pr_is_closed(pr_id)? {
         bail!("Pull request is already closed");
     }
-    if !labels.contains(&"ack".to_string()) {
+    if !labels.iter().any(|l| l == "ack") {
         bail!("Pull request is not ACKed");
     }
-    if labels.contains(&"rejected".to_string()) {
+    if labels.iter().any(|l| l == "rejected") {
         bail!("Pull request is rejected");
     }
-    if labels.contains(&"pushed".to_string()) {
+    if labels.iter().any(|l| l == "pushed") {
         bail!("Pull request was already pushed");
     }
     if !pr.mergeable.unwrap_or(true) {
