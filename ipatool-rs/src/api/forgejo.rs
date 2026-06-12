@@ -456,6 +456,11 @@ impl ForgejoClient {
         Ok(labels)
     }
 
+    /// Applies `label_names` to the given issue/PR.
+    /// If a label does not yet exist in the repository, it is automatically created
+    /// with a default grey colour (`#cccccc`). Callers that pass user-derived label names
+    /// should validate them first.
+    ///
     /// Ensure labels exist in the repo (create them if absent), then add them to
     /// issue/PR `number` by ID.
     pub fn add_labels(&self, number: u64, labels: &[&str]) -> Result<()> {
