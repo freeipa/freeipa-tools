@@ -2355,14 +2355,9 @@ fn pr_row_styled(pr: &GitHubPR, inner_width: usize) -> StyledString {
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
-/// Extract the `(offline, provider)` pair from TUI state.
-///
-/// Panics if `TuiState` is absent — that is a programming error; TuiState must
-/// always be registered before any callback runs.  Getting the provider from
-/// `pr_client` is intentional: it is the only authoritative source for which
-/// forge backend is in use.  When `pr_client` is `None` (no forge configured)
-/// the provider defaults to `GitHub`, which is a safe conservative choice — the
-/// action will still be tagged with the right provider once a client exists.
+/// Returns (offline, provider) from the current TuiState.
+/// If TuiState is absent, emits a warning to stderr and returns safe defaults
+/// (offline=false, Provider::GitHub). Does NOT panic.
 fn tui_offline_and_provider(s: &mut Cursive) -> (bool, crate::db::Provider) {
     let Some(state) = s.user_data::<TuiState>() else {
         eprintln!("Warning: TUI state not initialized");
