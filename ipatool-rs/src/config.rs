@@ -64,6 +64,10 @@ pub struct ProfileConfig {
     pub legacy_ticket_url: Option<String>,
 
     // Forgejo comment-field overrides
+    /// Prefix for custom-field lines in Forgejo issue comments.
+    /// Matching is case-sensitive. The prefix must NOT end with `:`;
+    /// the colon is appended automatically when building the search needle.
+    /// Example: "ipatool" → matches lines like "ipatool:rhbz: https://…".
     pub forgejo_comment_field_prefix: Option<String>,
 }
 
@@ -160,8 +164,10 @@ pub struct Config {
     pub issue_number_map: HashMap<u64, u64>,
 
     /// Line prefix used to identify custom-field lines in Forgejo issue comments.
-    /// E.g. "ipatool:" → lines like "ipatool:rhbz: https://...".
+    /// E.g. "ipatool" → matches lines like "ipatool:rhbz: https://…".
     /// Empty string (default) matches bare "rhbz: …" / "reviewer: …" lines.
+    /// Matching is case-sensitive. The prefix must NOT end with `:`;
+    /// the colon separator is appended automatically when building the needle.
     #[serde(default)]
     pub forgejo_comment_field_prefix: String,
 }
@@ -189,6 +195,7 @@ impl Config {
             .with_context(|| format!("Cannot read config file: {}", expanded.display()))?;
         let config: Config = serde_yaml::from_str(&content)
             .with_context(|| format!("Cannot parse config file: {}", expanded.display()))?;
+        config.validate_forgejo_comment_field_prefix()?;
         Ok(config)
     }
 
@@ -307,6 +314,21 @@ impl Config {
             self.forgejo_comment_field_prefix = v;
         }
 
+        self.validate_forgejo_comment_field_prefix()?;
+        Ok(())
+    }
+
+    /// Validate config invariants that cannot be enforced by serde alone.
+    /// Returns an error if a misconfigured field is detected.
+    fn validate_forgejo_comment_field_prefix(&self) -> Result<()> {
+        if self.forgejo_comment_field_prefix.ends_with(':') {
+            bail!(
+                "forgejo-comment-field-prefix must not end with ':' (got {:?}). \
+                 The colon separator is appended automatically. \
+                 Remove the trailing ':' from the config value.",
+                self.forgejo_comment_field_prefix
+            );
+        }
         Ok(())
     }
 
@@ -723,6 +745,37 @@ profiles:
             config.profiles["x"].issue_tracker,
             Some(IssueTracker::Pagure)
         );
+    }
+
+    #[test]
+    fn test_forgejo_comment_field_prefix_valid() {
+        let mut c = Config::default();
+        c.forgejo_comment_field_prefix = "ipatool".to_string();
+        assert!(c.validate_forgejo_comment_field_prefix().is_ok());
+    }
+
+    #[test]
+    fn test_forgejo_comment_field_prefix_empty_valid() {
+        let c = Config::default();
+        assert!(c.validate_forgejo_comment_field_prefix().is_ok());
+    }
+
+    #[test]
+    fn test_forgejo_comment_field_prefix_trailing_colon_rejected() {
+        let mut c = Config::default();
+        c.forgejo_comment_field_prefix = "ipatool:".to_string();
+        assert!(c.validate_forgejo_comment_field_prefix().is_err());
+    }
+
+    #[test]
+    fn test_apply_profile_rejects_bad_comment_field_prefix() {
+        let yaml = r#"
+profiles:
+  bad:
+    forgejo-comment-field-prefix: "ipatool:"
+"#;
+        let mut config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.apply_profile("bad").is_err());
     }
 
     #[test]
