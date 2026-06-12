@@ -135,6 +135,25 @@ gh-fork-remote: "mygh"
 # original pagure references in the commit log.
 #
 # rewrite-ticket-urls: false
+
+# ── Forgejo comment-based custom fields ──────────────────────────────────────
+#
+# Forgejo/Codeberg has no issue custom fields.  ipatool derives the 'reviewer'
+# and 'rhbz' (downstream bug / Jira link) values from issue comments instead.
+# Write a line anywhere in a comment body matching:
+#
+#   <prefix><fieldname>: <value>
+#
+# Example with forgejo-comment-field-prefix: "ipatool:"
+#   ipatool:rhbz: https://bugzilla.redhat.com/show_bug.cgi?id=12345
+#   ipatool:rhbz: https://issues.redhat.com/browse/RHEL-99
+#   ipatool:reviewer: abbra
+#
+# Multiple rhbz: lines are merged so both Bugzilla and Jira URLs are picked up.
+# Leave the prefix empty (the default) to match bare "rhbz: …" / "reviewer: …"
+# lines without any prefix requirement.
+#
+# forgejo-comment-field-prefix: "ipatool:"
 "#;
 
 #[derive(Parser)]
