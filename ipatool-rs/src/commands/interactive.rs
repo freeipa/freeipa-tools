@@ -2404,11 +2404,7 @@ fn pr_row_styled(pr: &PullRequest, inner_width: usize) -> StyledString {
 /// internal error and show an error dialog rather than silently using defaults.
 fn tui_offline_and_provider(s: &mut Cursive) -> Option<(bool, crate::db::Provider)> {
     let state = s.user_data::<TuiState>()?;
-    let provider = state
-        .pr_client
-        .as_ref()
-        .map(|p| p.provider())
-        .unwrap_or(crate::db::Provider::GitHub);
+    let provider = state.pr_client.as_ref()?.provider();
     Some((state.offline, provider))
 }
 
