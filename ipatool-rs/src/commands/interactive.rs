@@ -19,9 +19,7 @@ use std::{
 
 use super::pr_client::PrClient;
 use super::Ctx;
-use crate::api::github::{
-    CiJobStatus, GitHubComment, GitHubFile, GitHubLabel, GitHubPR, GitHubReviewComment,
-};
+use crate::api::types::{CiStatus, IssueComment, Label, PrFile, PullRequest, ReviewComment};
 use crate::api::pagure::PagureClient;
 use crate::tui_keys::TuiKeys;
 
@@ -34,7 +32,7 @@ const FORGEJO_OFFLINE_MSG: &str =
 /// rebuilt after the comment form is closed.
 #[derive(Clone)]
 struct ReviewSession {
-    pr: GitHubPR,
+    pr: PullRequest,
     items: Vec<ReviewItem>,
     commit_id: String,
 }
@@ -57,7 +55,7 @@ enum PendingTuiAction {
 #[derive(Clone)]
 struct TuiState {
     pr_client: Option<Arc<PrClient>>,
-    prs: Option<Vec<GitHubPR>>,
+    prs: Option<Vec<PullRequest>>,
     review: Option<ReviewSession>,
     offline: bool,
     db: Option<Arc<crate::db::Database>>,
@@ -72,7 +70,7 @@ struct TuiState {
     focus_right: bool,
     /// CI job statuses for the currently selected PR (populated by background fetch).
     /// Stored here so the 'i' key handler can open the job selector without re-fetching.
-    ci_statuses: HashMap<String, CiJobStatus>,
+    ci_statuses: HashMap<String, CiStatus>,
     /// Bug tracker client for filing issues from the CI viewer.
     pagure: Option<Arc<PagureClient>>,
 }
@@ -247,7 +245,7 @@ fn compute_left_width(screen_width: usize) -> usize {
     (screen_width * 2 / 5).clamp(35, 60)
 }
 
-fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<GitHubPR>) {
+fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<PullRequest>) {
     // Preserve offline/db/state/profile/keys/focus/pagure from existing user_data (set during run()) or use defaults.
     let (offline, db, current_state, profile, tui_keys, focus_right, pagure) = siv
         .user_data::<TuiState>()
@@ -303,19 +301,19 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<GitHubPR>) {
     let gh_s = Arc::clone(&gh);
     let gh_enter = Arc::clone(&gh);
 
-    let mut select = SelectView::<GitHubPR>::new();
+    let mut select = SelectView::<PullRequest>::new();
     for pr in &prs {
         select.add_item(pr_row_styled(pr, inner_width), pr.clone());
     }
 
     // Fires on Up/Down arrow keys and mouse clicks; keeps right pane in sync.
-    select.set_on_select(move |s, pr: &GitHubPR| {
+    select.set_on_select(move |s, pr: &PullRequest| {
         update_detail_from_pr(s, pr);
         fetch_pr_details_in_background(s, Arc::clone(&gh_select), pr.clone());
     });
 
     // Enter opens an action pop-up.
-    select.set_on_submit(move |s, pr: &GitHubPR| {
+    select.set_on_submit(move |s, pr: &PullRequest| {
         show_action_dialog(s, Arc::clone(&gh_enter), pr.clone());
     });
 
@@ -504,7 +502,7 @@ fn nav_down(siv: &mut Cursive) {
     if right {
         scroll_detail(siv, 1);
     } else if let Some(cb) =
-        siv.call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.select_down(1))
+        siv.call_on_name("pr_list", |v: &mut SelectView<PullRequest>| v.select_down(1))
     {
         cb(siv);
     }
@@ -519,7 +517,7 @@ fn nav_up(siv: &mut Cursive) {
     if right {
         scroll_detail(siv, -1);
     } else if let Some(cb) =
-        siv.call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.select_up(1))
+        siv.call_on_name("pr_list", |v: &mut SelectView<PullRequest>| v.select_up(1))
     {
         cb(siv);
     }
@@ -539,7 +537,7 @@ fn update_help_bar(siv: &mut Cursive) {
         let content = build_help_content(&keys, focus_right, offline, queued);
         siv.call_on_name("help_bar", |v: &mut TextView| v.set_content(content));
         let pr_count = siv
-            .call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| v.len())
+            .call_on_name("pr_list", |v: &mut SelectView<PullRequest>| v.len())
             .unwrap_or(0);
         siv.call_on_name("pr_left_panel", |p: &mut Panel<BoxedView>| {
             p.set_title(panel_title(&format!("{} PRs", pr_count), !focus_right));
@@ -552,8 +550,8 @@ fn update_help_bar(siv: &mut Cursive) {
 
 // ─── Selection helper ─────────────────────────────────────────────────────────
 
-fn selected_pr(siv: &mut Cursive) -> Option<GitHubPR> {
-    siv.call_on_name("pr_list", |v: &mut SelectView<GitHubPR>| {
+fn selected_pr(siv: &mut Cursive) -> Option<PullRequest> {
+    siv.call_on_name("pr_list", |v: &mut SelectView<PullRequest>| {
         v.selection().map(|rc| (*rc).clone())
     })
     .flatten()
@@ -610,7 +608,7 @@ fn refresh_list(siv: &mut Cursive, gh: Arc<PrClient>) {
 
 // ─── Detail pane content ─────────────────────────────────────────────────────
 
-fn pr_label_names(pr: &GitHubPR) -> Vec<String> {
+fn pr_label_names(pr: &PullRequest) -> Vec<String> {
     pr.labels.iter().map(|l| l.name.clone()).collect()
 }
 
@@ -629,7 +627,7 @@ fn append_field(s: &mut StyledString, label: &str, value: &str) {
     s.append_plain("\n");
 }
 
-fn body_excerpt(pr: &GitHubPR) -> String {
+fn body_excerpt(pr: &PullRequest) -> String {
     pr.body
         .as_deref()
         .unwrap_or("")
@@ -640,7 +638,7 @@ fn body_excerpt(pr: &GitHubPR) -> String {
         .join("\n")
 }
 
-fn detail_header(pr: &GitHubPR) -> StyledString {
+fn detail_header(pr: &PullRequest) -> StyledString {
     let labels = pr_label_names(pr);
     let labels_str = if labels.is_empty() {
         "none".to_string()
@@ -672,14 +670,14 @@ fn detail_header(pr: &GitHubPR) -> StyledString {
 
 /// Data fetched in the background for the full detail view.
 struct PrDetails {
-    statuses: HashMap<String, CiJobStatus>,
-    comments: Vec<GitHubComment>,
-    files: Vec<GitHubFile>,
+    statuses: HashMap<String, CiStatus>,
+    comments: Vec<IssueComment>,
+    files: Vec<PrFile>,
 }
 
 // ── Immediate summary (shown before background fetch completes) ───────────────
 
-fn pr_summary(pr: &GitHubPR) -> StyledString {
+fn pr_summary(pr: &PullRequest) -> StyledString {
     let mut s = detail_header(pr);
     append_stats_line(&mut s, pr);
     s.append_plain("\n");
@@ -697,7 +695,7 @@ fn pr_summary(pr: &GitHubPR) -> StyledString {
 
 /// Append the compact stats line (Commits / Comments / Reviews) using whatever
 /// fields the PR list response populated.
-fn append_stats_line(s: &mut StyledString, pr: &GitHubPR) {
+fn append_stats_line(s: &mut StyledString, pr: &PullRequest) {
     let mut has = false;
     let mut sep = |s: &mut StyledString| {
         if has {
@@ -727,7 +725,7 @@ fn append_stats_line(s: &mut StyledString, pr: &GitHubPR) {
 
 // ── Full summary (replaces immediate version when background fetch finishes) ──
 
-fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
+fn pr_summary_full(pr: &PullRequest, details: PrDetails) -> StyledString {
     let PrDetails {
         statuses,
         comments,
@@ -740,7 +738,7 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
     // ── CI status ────────────────────────────────────────────────────────────
     s.append_plain("\n");
     s.append_styled("CI Status:\n", bold());
-    let mut ci_entries: Vec<(String, CiJobStatus)> = statuses.into_iter().collect();
+    let mut ci_entries: Vec<(String, CiStatus)> = statuses.into_iter().collect();
     ci_entries.sort_by_key(|(k, _)| k.clone());
     if ci_entries.is_empty() {
         s.append_plain("  (no CI status reported)\n");
@@ -837,21 +835,21 @@ fn pr_summary_full(pr: &GitHubPR, details: PrDetails) -> StyledString {
     s
 }
 
-fn update_detail_from_pr(siv: &mut Cursive, pr: &GitHubPR) {
+fn update_detail_from_pr(siv: &mut Cursive, pr: &PullRequest) {
     let content = pr_summary(pr);
     siv.call_on_name("pr_detail", |v: &mut TextView| {
         v.set_content(content);
     });
 }
 
-fn update_detail_full(siv: &mut Cursive, pr: &GitHubPR, details: PrDetails) {
+fn update_detail_full(siv: &mut Cursive, pr: &PullRequest, details: PrDetails) {
     let content = pr_summary_full(pr, details);
     siv.call_on_name("pr_detail", |v: &mut TextView| {
         v.set_content(content);
     });
 }
 
-fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
+fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: PullRequest) {
     let (offline, profile) = siv
         .user_data::<TuiState>()
         .map(|t| (t.offline, t.profile.clone()))
@@ -862,15 +860,15 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitH
         // Serve from cache — no network call.
         if let Some(ref db) = db {
             if let Ok(Some(cached)) = db.load_pr_details(&profile, pr.number) {
-                // Reassemble CiJobStatus from statuses + status_urls.
-                let statuses: HashMap<String, CiJobStatus> = cached
+                // Reassemble CiStatus from statuses + status_urls.
+                let statuses: HashMap<String, CiStatus> = cached
                     .statuses
                     .iter()
                     .map(|(ctx, state)| {
                         let url = cached.status_urls.get(ctx).cloned();
                         (
                             ctx.clone(),
-                            CiJobStatus {
+                            CiStatus {
                                 state: state.clone(),
                                 url,
                             },
@@ -898,7 +896,7 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitH
     std::thread::spawn(move || {
         let mut critical_fetch_failed = false;
         // All fetches run sequentially in the background thread.
-        // most_recent_statuses() returns HashMap<String, CiJobStatus>.
+        // most_recent_statuses() returns HashMap<String, CiStatus>.
         let statuses = gh.most_recent_statuses(&sha).unwrap_or_else(|e| {
             eprintln!(
                 "Warning: failed to fetch CI statuses for PR {}: {}",
@@ -919,7 +917,7 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitH
             Default::default()
         });
 
-        // Split CiJobStatus map into (state strings, url strings) for cache storage.
+        // Split CiStatus map into (state strings, url strings) for cache storage.
         let cached_states: HashMap<String, String> = statuses
             .iter()
             .map(|(ctx, job)| (ctx.clone(), job.state.clone()))
@@ -991,9 +989,9 @@ struct ReviewItem {
 }
 
 struct ReviewData {
-    files: Vec<GitHubFile>,
-    review_comments: Vec<GitHubReviewComment>,
-    issue_comments: Vec<GitHubComment>,
+    files: Vec<PrFile>,
+    review_comments: Vec<ReviewComment>,
+    issue_comments: Vec<IssueComment>,
 }
 
 /// Parse `@@ -old_start[,count] +new_start[,count] @@` and return (old, new) start lines.
@@ -1272,7 +1270,7 @@ fn review_item_label(item: &ReviewItem) -> StyledString {
     }
 }
 
-fn show_review_view(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
+fn show_review_view(siv: &mut Cursive, gh: Arc<PrClient>, pr: PullRequest) {
     let offline = siv
         .user_data::<TuiState>()
         .map(|t| t.offline)
@@ -1333,7 +1331,7 @@ fn show_review_view(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
     });
 }
 
-fn build_review_layer(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR, data: ReviewData) {
+fn build_review_layer(siv: &mut Cursive, gh: Arc<PrClient>, pr: PullRequest, data: ReviewData) {
     // Panel border = 2 chars; comment indent prefix "    " = 4 chars.
     let body_width = siv.screen_size().x.saturating_sub(6);
     let items = build_review_items(&data, body_width);
@@ -1670,7 +1668,7 @@ fn open_review_comment_form(
 
 // ─── Action dialog (Enter key) ────────────────────────────────────────────────
 
-fn show_action_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
+fn show_action_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr: PullRequest) {
     let tui_keys = siv
         .user_data::<TuiState>()
         .map(|s| s.tui_keys.clone())
@@ -1775,7 +1773,7 @@ fn show_action_dialog(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
 
 // ─── Label editor ────────────────────────────────────────────────────────────
 
-fn show_label_editor(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
+fn show_label_editor(siv: &mut Cursive, gh: Arc<PrClient>, pr: PullRequest) {
     siv.add_layer(loading_dialog("Fetching labels…"));
     let cb = siv.cb_sink().clone();
     let gh2 = Arc::clone(&gh);
@@ -1795,8 +1793,8 @@ fn show_label_editor(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitHubPR) {
 fn build_label_editor_layer(
     siv: &mut Cursive,
     gh: Arc<PrClient>,
-    pr: GitHubPR,
-    repo_labels: Vec<GitHubLabel>,
+    pr: PullRequest,
+    repo_labels: Vec<Label>,
 ) {
     let key_quit = siv
         .user_data::<TuiState>()
@@ -1897,7 +1895,7 @@ fn build_label_editor_layer(
                 let cb = s.cb_sink().clone();
                 let gh2 = Arc::clone(&gh_apply);
                 std::thread::spawn(move || {
-                    let result: Result<GitHubPR> = (|| {
+                    let result: Result<PullRequest> = (|| {
                         if !to_add.is_empty() {
                             let refs: Vec<&str> = to_add.iter().map(|s| s.as_str()).collect();
                             gh2.add_labels(pr_number, &refs)?;
@@ -2343,7 +2341,7 @@ where
 
 /// Build a colour-coded row for the PR list.
 /// `inner_width` is the usable width inside the panel border.
-fn pr_row_styled(pr: &GitHubPR, inner_width: usize) -> StyledString {
+fn pr_row_styled(pr: &PullRequest, inner_width: usize) -> StyledString {
     let label_names: Vec<&str> = pr.labels.iter().map(|l| l.name.as_str()).collect();
 
     // Use Dark base-color variants: they have sufficient contrast on both
@@ -2451,7 +2449,7 @@ fn truncate(s: &str, max_chars: usize) -> String {
 
 /// Show a dialog listing completed CI jobs with result URLs for the selected PR.
 /// If there is exactly one such job, jump directly into the file browser.
-fn show_ci_job_selector(siv: &mut Cursive, pr: GitHubPR) {
+fn show_ci_job_selector(siv: &mut Cursive, pr: PullRequest) {
     let ci_statuses = siv
         .user_data::<TuiState>()
         .map(|t| t.ci_statuses.clone())

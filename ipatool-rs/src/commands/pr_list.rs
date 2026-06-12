@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::collections::HashSet;
 
 use super::Ctx;
-use crate::api::github::labels_colorize;
+use crate::api::types::labels_colorize;
 
 pub fn run(ctx: &Ctx, state_args: &[String], label_args: &[String]) -> Result<()> {
     let prc = ctx.pr_client_or_err()?;

@@ -5,9 +5,10 @@ use std::sync::{Arc, OnceLock};
 
 use crate::api::{
     forgejo::{ForgejoClient, ForgejoTicket},
-    github::{GitHubClient, GitHubComment},
+    github::GitHubClient,
     jira::JiraClient,
     pagure::{PagureClient, PagureTicket},
+    types::IssueComment,
 };
 use crate::config::{Config, IssueTracker};
 use crate::output::{ask_yn, prompt, Output};
@@ -146,7 +147,7 @@ pub struct GitHubTicket {
     pub number: u64,
     pub comment_field_prefix: String,
     data: OnceLock<crate::api::github::GitHubIssue>,
-    comments: OnceLock<Vec<GitHubComment>>,
+    comments: OnceLock<Vec<IssueComment>>,
 }
 
 impl GitHubTicket {
@@ -173,7 +174,7 @@ impl GitHubTicket {
             .expect("OnceLock was just set above; this is a logic error if None"))
     }
 
-    fn load_comments(&self) -> Result<&[GitHubComment]> {
+    fn load_comments(&self) -> Result<&[IssueComment]> {
         if let Some(c) = self.comments.get() {
             return Ok(c);
         }

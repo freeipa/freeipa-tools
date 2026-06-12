@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use std::io::Write;
 
 use super::Ctx;
-use crate::api::github::sorted_commits;
+use crate::api::types::sorted_commits;
 use crate::db::CachedPrDetails;
 use std::collections::HashMap;
 

@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::api::types::{CiStatus, Commit, IssueComment, Label, PrFile, PullRequest, ReviewComment};
+
 pub struct ForgejoClient {
     pub http: reqwest::blocking::Client,
     token: String,
@@ -175,7 +177,7 @@ impl ForgejoClient {
 
     /// List pull requests.  `state` is one of "open", "closed", "all".
     /// Returns PRs as `GitHubPR` (Forgejo's JSON shape is compatible).
-    pub fn list_prs(&self, state: &str) -> Result<Vec<crate::api::github::GitHubPR>> {
+    pub fn list_prs(&self, state: &str) -> Result<Vec<PullRequest>> {
         self.list_prs_limited(state, usize::MAX, |_, _| {})
     }
 
@@ -184,7 +186,7 @@ impl ForgejoClient {
         state: &str,
         limit: usize,
         mut on_page: impl FnMut(u32, usize),
-    ) -> Result<Vec<crate::api::github::GitHubPR>> {
+    ) -> Result<Vec<PullRequest>> {
         let mut all = Vec::new();
         let mut page = 1u32;
         let forgejo_state = match state {
@@ -208,7 +210,7 @@ impl ForgejoClient {
                 let body = resp.text().unwrap_or_default();
                 anyhow::bail!("Forgejo list_prs failed ({}): {}", status, body);
             }
-            let prs: Vec<crate::api::github::GitHubPR> =
+            let prs: Vec<PullRequest> =
                 resp.json().with_context(|| "Parsing Forgejo PR list")?;
             if prs.is_empty() {
                 break;
@@ -224,7 +226,7 @@ impl ForgejoClient {
         Ok(all)
     }
 
-    pub fn get_pr(&self, number: u64) -> Result<crate::api::github::GitHubPR> {
+    pub fn get_pr(&self, number: u64) -> Result<PullRequest> {
         let url = self.api_url(&format!(
             "/repos/{}/{}/pulls/{}",
             self.owner, self.repo, number
@@ -243,7 +245,7 @@ impl ForgejoClient {
             let body = resp.text().unwrap_or_default();
             anyhow::bail!("Forgejo get_pr failed ({}): {}", status, body);
         }
-        let pr: crate::api::github::GitHubPR = resp
+        let pr: PullRequest = resp
             .json()
             .with_context(|| format!("Parsing Forgejo PR {}", number))?;
         Ok(pr)
@@ -254,7 +256,7 @@ impl ForgejoClient {
         Ok(pr.is_merged())
     }
 
-    pub fn get_pr_commits(&self, number: u64) -> Result<Vec<crate::api::github::GitHubCommit>> {
+    pub fn get_pr_commits(&self, number: u64) -> Result<Vec<Commit>> {
         let url = self.api_url(&format!(
             "/repos/{}/{}/pulls/{}/commits?limit=50",
             self.owner, self.repo, number
@@ -270,7 +272,7 @@ impl ForgejoClient {
             let body = resp.text().unwrap_or_default();
             anyhow::bail!("Forgejo get_pr_commits failed ({}): {}", status, body);
         }
-        let commits: Vec<crate::api::github::GitHubCommit> = resp
+        let commits: Vec<Commit> = resp
             .json()
             .with_context(|| format!("Parsing commits for PR {}", number))?;
         if commits.len() == 50 {
@@ -305,12 +307,11 @@ impl ForgejoClient {
         Ok(resp.bytes()?.to_vec())
     }
 
-    /// CI status check: maps Forgejo statuses to the same `CiJobStatus` struct
-    /// as the GitHub client.
+    /// CI status check: maps Forgejo statuses to a `CiStatus` for the caller.
     pub fn most_recent_statuses(
         &self,
         sha: &str,
-    ) -> Result<HashMap<String, crate::api::github::CiJobStatus>> {
+    ) -> Result<HashMap<String, CiStatus>> {
         #[derive(Deserialize)]
         struct ForgejoStatus {
             state: String,
@@ -345,7 +346,7 @@ impl ForgejoClient {
         for s in statuses {
             result
                 .entry(s.context)
-                .or_insert(crate::api::github::CiJobStatus {
+                .or_insert(CiStatus {
                     state: s.state,
                     url: s.target_url,
                 });
@@ -353,7 +354,7 @@ impl ForgejoClient {
         Ok(result)
     }
 
-    pub fn get_pr_files(&self, number: u64) -> Result<Vec<crate::api::github::GitHubFile>> {
+    pub fn get_pr_files(&self, number: u64) -> Result<Vec<PrFile>> {
         let url = self.api_url(&format!(
             "/repos/{}/{}/pulls/{}/files?limit=100",
             self.owner, self.repo, number
@@ -369,7 +370,7 @@ impl ForgejoClient {
             let body = resp.text().unwrap_or_default();
             anyhow::bail!("Forgejo get_pr_files failed ({}): {}", status, body);
         }
-        let files: Vec<crate::api::github::GitHubFile> =
+        let files: Vec<PrFile> =
             resp.json().with_context(|| "Parsing Forgejo PR files")?;
         if files.len() == 100 {
             eprintln!(
@@ -424,12 +425,12 @@ impl ForgejoClient {
         Ok(all)
     }
 
-    /// Return all labels as `GitHubLabel` (without IDs).
-    pub fn list_repo_labels(&self) -> Result<Vec<crate::api::github::GitHubLabel>> {
+    /// Return all labels without IDs.
+    pub fn list_repo_labels(&self) -> Result<Vec<Label>> {
         let labels = self.list_repo_labels_with_id()?;
         Ok(labels
             .into_iter()
-            .map(|l| crate::api::github::GitHubLabel {
+            .map(|l| Label {
                 name: l.name,
                 color: l.color,
             })
@@ -582,7 +583,7 @@ impl ForgejoClient {
         &self,
         number: u64,
         n: usize,
-    ) -> Result<Vec<crate::api::github::GitHubComment>> {
+    ) -> Result<Vec<IssueComment>> {
         // Fetches the full comment history in order to return the last `n` entries.
         // For issues with many comments this performs multiple page fetches.
         // A reverse-pagination approach would be more efficient but requires
@@ -598,7 +599,7 @@ impl ForgejoClient {
     pub fn get_all_issue_comments(
         &self,
         number: u64,
-    ) -> Result<Vec<crate::api::github::GitHubComment>> {
+    ) -> Result<Vec<IssueComment>> {
         const MAX_PAGES: u32 = 1_000;
         let mut all = Vec::new();
         let mut page = 1u32;
@@ -622,7 +623,7 @@ impl ForgejoClient {
                     body
                 );
             }
-            let comments: Vec<crate::api::github::GitHubComment> = resp
+            let comments: Vec<IssueComment> = resp
                 .json()
                 .with_context(|| "Parsing Forgejo issue comments")?;
             if comments.is_empty() {
@@ -648,7 +649,7 @@ impl ForgejoClient {
         base: &str,
         head: &str,
         body: &str,
-    ) -> Result<crate::api::github::GitHubPR> {
+    ) -> Result<PullRequest> {
         let url = self.api_url(&format!("/repos/{}/{}/pulls", self.owner, self.repo));
         let req_body = CreateForgejoPrBody {
             title: title.to_string(),
@@ -668,7 +669,7 @@ impl ForgejoClient {
             let body = resp.text().unwrap_or_default();
             anyhow::bail!("Forgejo create_pr failed ({}): {}", status, body);
         }
-        let pr: crate::api::github::GitHubPR =
+        let pr: PullRequest =
             resp.json().with_context(|| "Parsing created Forgejo PR")?;
         Ok(pr)
     }
@@ -701,7 +702,7 @@ impl ForgejoClient {
     pub fn list_review_comments(
         &self,
         pr_number: u64,
-    ) -> Result<Vec<crate::api::github::GitHubReviewComment>> {
+    ) -> Result<Vec<ReviewComment>> {
         let _ = pr_number;
         Err(anyhow::anyhow!(
             "Inline review comments are not yet implemented for Forgejo"
@@ -733,7 +734,7 @@ pub struct ForgejoTicket {
     /// Prefix that marks metadata lines in comments (from config).
     pub comment_field_prefix: String,
     data: std::sync::OnceLock<ForgejoIssue>,
-    comments: std::sync::OnceLock<Vec<crate::api::github::GitHubComment>>,
+    comments: std::sync::OnceLock<Vec<IssueComment>>,
 }
 
 impl ForgejoTicket {
@@ -764,7 +765,7 @@ impl ForgejoTicket {
             .expect("OnceLock was just set above; this is a logic error if None"))
     }
 
-    fn load_comments(&self) -> Result<&[crate::api::github::GitHubComment]> {
+    fn load_comments(&self) -> Result<&[IssueComment]> {
         if let Some(c) = self.comments.get() {
             return Ok(c);
         }
