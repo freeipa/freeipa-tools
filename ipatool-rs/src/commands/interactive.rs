@@ -1551,12 +1551,24 @@ fn open_review_comment_form(
                 let body = s
                     .call_on_name("rc_body", |v: &mut TextArea| v.get_content().to_string())
                     .unwrap_or_default();
-                let line: u64 = line_str.trim().parse().unwrap_or(0);
-                if path.trim().is_empty() || line == 0 || body.trim().is_empty() {
-                    show_error(
-                        s,
-                        "File path, line number (≥1), and comment text are all required.",
-                    );
+                let trimmed_line = line_str.trim().to_string();
+                let line: u64 = match trimmed_line.parse() {
+                    Ok(n) if n > 0 => n,
+                    Ok(_) => {
+                        show_error(s, "Line number must be a positive integer.");
+                        return;
+                    }
+                    Err(_) if trimmed_line.is_empty() => {
+                        show_error(s, "Line number is required.");
+                        return;
+                    }
+                    Err(_) => {
+                        show_error(s, "Line number must be a positive integer.");
+                        return;
+                    }
+                };
+                if path.trim().is_empty() || body.trim().is_empty() {
+                    show_error(s, "File path and comment text are required.");
                     return;
                 }
                 let (offline, provider) = tui_offline_and_provider(s);
