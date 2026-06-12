@@ -100,9 +100,13 @@ impl Color {
 
 pub fn prompt(msg: &str) -> String {
     print!("{}", msg);
-    io::stdout().flush().unwrap();
+    io::stdout()
+        .flush()
+        .expect("failed to flush stdout in user prompt");
     let mut line = String::new();
-    io::stdin().read_line(&mut line).unwrap();
+    io::stdin()
+        .read_line(&mut line)
+        .expect("failed to read user input from stdin");
     line.trim().to_string()
 }
 
