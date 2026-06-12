@@ -263,6 +263,7 @@ When `pr-source: forgejo` is active:
 When `issue-tracker: github` is active:
 - Issue operations (comment, close) use the GitHub Issues API.
 - GitHub Issues have no `reviewer` or `rhbz` custom fields; those are treated as absent.
+- Forgejo issues also have no custom fields; ipatool reads them from issue comments (see [Forgejo comment-based custom fields](#forgejo-comment-based-custom-fields)).
 
 ## Global flags
 
@@ -956,7 +957,9 @@ with `--no-pagure` or `--no-forgejo`.
 ### Jira
 
 Used as a secondary tracker.  Jira ticket keys are read from the `rhbz` custom
-field of each Pagure/Forgejo issue.  After a push, ipatool optionally:
+field of each Pagure issue, or from issue comments for Forgejo (see
+[Forgejo comment-based custom fields](#forgejo-comment-based-custom-fields)).
+After a push, ipatool optionally:
 
 - posts a commit-info comment (`update-jira`),
 - transitions the issue (`close-jira`, using the `jira-close-transition` name).
@@ -1052,6 +1055,58 @@ Activate the Codeberg workflow with:
 
 ```
 ipatool --profile codeberg pr-push 8309 -r abbra
+```
+
+### Forgejo comment-based custom fields
+
+Pagure issues supported **custom fields** — in particular `rhbz` (downstream
+Bugzilla/Jira links) and `reviewer` (the assigned reviewer login).  Forgejo has
+no equivalent.  ipatool recovers this information by scanning issue comments for
+specially formatted lines.
+
+#### Comment format
+
+Each metadata line placed anywhere in any issue comment must follow the pattern:
+
+```
+<prefix><fieldname>: <value>
+```
+
+**With `forgejo-comment-field-prefix: "ipatool:"`:**
+
+```
+ipatool:rhbz: https://bugzilla.redhat.com/show_bug.cgi?id=12345
+ipatool:rhbz: https://issues.redhat.com/browse/RHEL-99
+ipatool:reviewer: abbra
+```
+
+Multiple `rhbz:` lines are merged so that both the Bugzilla and Jira URLs are
+visible to the downstream-update logic (which already extracts several URLs from
+a single `rhbz` value).
+
+**With an empty prefix (the default):**
+
+```
+rhbz: https://bugzilla.redhat.com/show_bug.cgi?id=12345
+reviewer: abbra
+```
+
+#### Configuration
+
+```yaml
+# Optional prefix prepended to field names in comments.
+# Leave empty (or omit) to match bare "rhbz: …" / "reviewer: …" lines.
+forgejo-comment-field-prefix: "ipatool:"
+```
+
+The prefix can also be overridden per profile:
+
+```yaml
+profiles:
+  codeberg:
+    pr-source: forgejo
+    issue-tracker: forgejo
+    forgejo-comment-field-prefix: "ipatool:"
 ```
 
 ---
