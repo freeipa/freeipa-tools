@@ -922,7 +922,9 @@ fn fetch_pr_details_in_background(siv: &mut Cursive, gh: Arc<PrClient>, pr: GitH
                 status_urls: cached_urls,
             };
             let updated_at = pr.updated_at.as_deref();
-            let _ = db.cache_pr_details(&profile, pr_number, &cached, updated_at);
+            if let Err(e) = db.cache_pr_details(&profile, pr_number, &cached, updated_at) {
+                eprintln!("Warning: failed to cache PR details: {}", e);
+            }
         }
 
         let ci_statuses = statuses.clone();
