@@ -2138,7 +2138,7 @@ fn sync_queued_actions(siv: &mut Cursive) {
     {
         Some(g) => g,
         None => {
-            show_error(siv, "No GitHub client available.");
+            show_error(siv, "No PR client configured.");
             return;
         }
     };
@@ -2172,13 +2172,26 @@ fn sync_queued_actions(siv: &mut Cursive) {
         for pa in actions {
             let result = match pa.provider_action.provider {
                 crate::db::Provider::GitHub => apply_github_action(&gh, &pa.provider_action.action),
-                crate::db::Provider::Forgejo => apply_github_action(&gh, &pa.provider_action.action),
+                crate::db::Provider::Forgejo => {
+                    // PrClient already routes to the correct forge backend internally;
+                    // no Forgejo-specific dispatch is needed here.
+                    apply_github_action(&gh, &pa.provider_action.action)
+                }
+                crate::db::Provider::Pagure => Err(anyhow::anyhow!(
+                    "Pagure provider is not yet supported for offline sync."
+                )),
             };
             if let Err(e) = result {
                 errors.push(format!("{:?}: {}", pa.provider_action.action, e));
                 break; // stop on first error to preserve ordering
+            } else if let Err(e) = db.delete_action(pa.id) {
+                eprintln!(
+                    "Warning: action applied but failed to delete from queue (id={}): {}. \
+                     Manual cleanup of the offline queue may be required.",
+                    pa.id, e
+                );
+                break;
             } else {
-                let _ = db.delete_action(pa.id);
                 ok += 1;
             }
         }
