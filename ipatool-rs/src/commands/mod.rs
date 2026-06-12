@@ -498,6 +498,11 @@ pub fn apply_patches_to_branch(
 }
 
 /// Cleanup git state after push attempt
+///
+/// Note: `am_abort`, `reset_hard`, `checkout_branch`, and `clean_fxd` all return `()` —
+/// they silently discard `run_process` results internally.  Failure logging for each
+/// individual git step would require changing those function signatures to return `Result`.
+/// For now, cleanup failures will be visible only via git's own stderr output.
 pub fn git_cleanup(ctx: &Ctx, old_branch: &str) {
     println!("Cleaning up");
     crate::git::am_abort(&ctx.git_env);
