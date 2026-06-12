@@ -415,8 +415,8 @@ impl ForgejoClient {
             page += 1;
             if page > MAX_PAGES {
                 eprintln!(
-                    "Warning: pagination in {} exceeded {} pages; results may be incomplete.",
-                    "list_repo_labels_with_id", MAX_PAGES
+                    "Warning: pagination in list_repo_labels_with_id exceeded {} pages; results may be incomplete.",
+                    MAX_PAGES
                 );
                 break;
             }
@@ -632,8 +632,8 @@ impl ForgejoClient {
             page += 1;
             if page > MAX_PAGES {
                 eprintln!(
-                    "Warning: pagination in {} exceeded {} pages; results may be incomplete.",
-                    "get_all_issue_comments", MAX_PAGES
+                    "Warning: pagination in get_all_issue_comments exceeded {} pages; results may be incomplete.",
+                    MAX_PAGES
                 );
                 break;
             }
