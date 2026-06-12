@@ -25,13 +25,18 @@ pub struct Patch {
 }
 
 impl Patch {
-    pub fn from_file(path: &Path, ticket_url: &str) -> Result<Self> {
+    pub fn from_file(path: &Path, ticket_url: &str, legacy_ticket_url: &str) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("Cannot read patch {}: {}", path.display(), e))?;
-        Self::from_content(path.to_path_buf(), &content, ticket_url)
+        Self::from_content(path.to_path_buf(), &content, ticket_url, legacy_ticket_url)
     }
 
-    pub fn from_content(filename: PathBuf, content: &str, ticket_url: &str) -> Result<Self> {
+    pub fn from_content(
+        filename: PathBuf,
+        content: &str,
+        ticket_url: &str,
+        legacy_ticket_url: &str,
+    ) -> Result<Self> {
         if content.is_empty() {
             bail!("Empty patch: {}", filename.display());
         }
@@ -75,10 +80,16 @@ impl Patch {
             }
         }
 
-        // Extract ticket numbers from head lines (skip removed/context lines)
+        // Extract ticket numbers from head lines (skip removed/context lines).
+        // Both the primary ticket_url and the legacy_ticket_url are scanned so
+        // that commits written against the old pagure tracker are still picked up
+        // when the active tracker has moved to Codeberg.
         let mut ticket_numbers = Vec::new();
-        if !ticket_url.is_empty() {
-            let escaped = regex::escape(ticket_url);
+        for url in [ticket_url, legacy_ticket_url] {
+            if url.is_empty() {
+                continue;
+            }
+            let escaped = regex::escape(url);
             if let Ok(ticket_re) = Regex::new(&format!(r"{}(\d+)", escaped)) {
                 for line in &head_lines {
                     if line.starts_with('-') || line.starts_with(' ') {
@@ -104,6 +115,20 @@ impl Patch {
             head_lines,
             patch_lines,
         })
+    }
+
+    /// Replace every occurrence of `old_prefix` with `new_prefix` in the patch
+    /// header (head_lines).  Used to update pagure issue URLs to Codeberg URLs
+    /// in commit messages before `git am` writes them into history.
+    pub fn rewrite_urls(&mut self, old_prefix: &str, new_prefix: &str) {
+        if old_prefix.is_empty() || new_prefix.is_empty() || old_prefix == new_prefix {
+            return;
+        }
+        for line in &mut self.head_lines {
+            if line.contains(old_prefix) {
+                *line = line.replace(old_prefix, new_prefix);
+            }
+        }
     }
 
     pub fn add_reviewer(&mut self, reviewer: &str) {
@@ -132,8 +157,16 @@ impl Patch {
     }
 }
 
-/// Get all patches from a list of paths (files or directories)
-pub fn collect_patches(paths: &[String], patchdir: &Path, ticket_url: &str) -> Result<Vec<Patch>> {
+/// Get all patches from a list of paths (files or directories).
+///
+/// `legacy_ticket_url` is an optional second URL prefix (e.g. the old pagure
+/// URL) whose issue numbers are included alongside those from `ticket_url`.
+pub fn collect_patches(
+    paths: &[String],
+    patchdir: &Path,
+    ticket_url: &str,
+    legacy_ticket_url: &str,
+) -> Result<Vec<Patch>> {
     let effective_paths: Vec<String> = if paths.is_empty() {
         vec![patchdir.to_string_lossy().to_string()]
     } else {
@@ -152,10 +185,10 @@ pub fn collect_patches(paths: &[String], patchdir: &Path, ticket_url: &str) -> R
                 .collect();
             entries.sort();
             for entry in entries {
-                patches.push(Patch::from_file(&entry, ticket_url)?);
+                patches.push(Patch::from_file(&entry, ticket_url, legacy_ticket_url)?);
             }
         } else {
-            patches.push(Patch::from_file(&path, ticket_url)?);
+            patches.push(Patch::from_file(&path, ticket_url, legacy_ticket_url)?);
         }
     }
     Ok(patches)
@@ -193,6 +226,7 @@ mod tests {
             PathBuf::from("test.patch"),
             content,
             "https://pagure.io/freeipa/issue/",
+            "",
         )
     }
 
@@ -281,7 +315,7 @@ diff --git a/x b/x
 -a
 +b
 ";
-        let patch = Patch::from_content(PathBuf::from("0001.patch"), content, "").unwrap();
+        let patch = Patch::from_content(PathBuf::from("0001.patch"), content, "", "").unwrap();
         assert_eq!(patch.subject, "Refactor the module");
     }
 
@@ -298,7 +332,7 @@ diff --git a/y b/y
 -a
 +b
 ";
-        let patch = Patch::from_content(PathBuf::from("0002.patch"), content, "").unwrap();
+        let patch = Patch::from_content(PathBuf::from("0002.patch"), content, "", "").unwrap();
         assert_eq!(patch.subject, "Add new feature");
     }
 
@@ -394,6 +428,7 @@ diff --git a/x b/x
             PathBuf::from("test.patch"),
             content,
             "https://pagure.io/freeipa/issue/",
+            "",
         )
         .unwrap();
         assert!(patch.ticket_numbers.contains(&9000));
@@ -420,6 +455,7 @@ diff --git a/x b/x
             PathBuf::from("test.patch"),
             content,
             "https://pagure.io/freeipa/issue/",
+            "",
         )
         .unwrap();
         assert_eq!(
@@ -430,7 +466,7 @@ diff --git a/x b/x
 
     #[test]
     fn test_no_ticket_url_gives_empty() {
-        let patch = Patch::from_content(PathBuf::from("test.patch"), SIMPLE_PATCH, "").unwrap();
+        let patch = Patch::from_content(PathBuf::from("test.patch"), SIMPLE_PATCH, "", "").unwrap();
         assert!(patch.ticket_numbers.is_empty());
     }
 
@@ -452,10 +488,150 @@ diff --git a/x b/x
             PathBuf::from("test.patch"),
             content,
             "https://pagure.io/freeipa/issue/",
+            "",
         )
         .unwrap();
         // Diff lines are in patch_lines, not head_lines, so no extraction
         assert!(patch.ticket_numbers.is_empty());
+    }
+
+    // ── Legacy ticket URL extraction ──────────────────────────────────────────
+
+    #[test]
+    fn test_legacy_ticket_url_extraction() {
+        let content = "\
+From abc Mon Sep 17 00:00:00 2001
+Subject: Fix issue
+
+Fixes: https://pagure.io/freeipa/issue/9000
+---
+diff --git a/x b/x
+--- a/x
++++ b/x
+@@ -1 +1 @@
+-a
++b
+";
+        // primary ticket_url is Codeberg; legacy is pagure
+        let patch = Patch::from_content(
+            PathBuf::from("test.patch"),
+            content,
+            "https://codeberg.org/freeipa/freeipa/issues/",
+            "https://pagure.io/freeipa/issue/",
+        )
+        .unwrap();
+        assert!(
+            patch.ticket_numbers.contains(&9000),
+            "pagure number found via legacy URL"
+        );
+    }
+
+    #[test]
+    fn test_legacy_ticket_url_deduplicates_with_primary() {
+        let content = "\
+From abc Mon Sep 17 00:00:00 2001
+Subject: Fix issue
+
+Fixes: https://pagure.io/freeipa/issue/42
+Also: https://codeberg.org/freeipa/freeipa/issues/42
+---
+diff --git a/x b/x
+--- a/x
++++ b/x
+@@ -1 +1 @@
+-a
++b
+";
+        let patch = Patch::from_content(
+            PathBuf::from("test.patch"),
+            content,
+            "https://codeberg.org/freeipa/freeipa/issues/",
+            "https://pagure.io/freeipa/issue/",
+        )
+        .unwrap();
+        assert_eq!(
+            patch.ticket_numbers.iter().filter(|&&n| n == 42).count(),
+            1,
+            "number 42 should appear exactly once even if both URLs match"
+        );
+    }
+
+    // ── Patch::rewrite_urls ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_rewrite_urls_replaces_prefix() {
+        let content = "\
+From abc Mon Sep 17 00:00:00 2001
+Subject: Fix issue
+
+Fixes: https://pagure.io/freeipa/issue/9000
+See: https://pagure.io/freeipa/issue/8999
+---
+diff --git a/x b/x
+--- a/x
++++ b/x
+@@ -1 +1 @@
+-a
++b
+";
+        let mut patch = from_str(content).unwrap();
+        patch.rewrite_urls(
+            "https://pagure.io/freeipa/issue/",
+            "https://codeberg.org/freeipa/freeipa/issues/",
+        );
+        let c = patch.content();
+        assert!(c.contains("https://codeberg.org/freeipa/freeipa/issues/9000"));
+        assert!(c.contains("https://codeberg.org/freeipa/freeipa/issues/8999"));
+        assert!(!c.contains("pagure.io"), "old URL should be gone");
+    }
+
+    #[test]
+    fn test_rewrite_urls_does_not_touch_diff() {
+        let content = "\
+From abc Mon Sep 17 00:00:00 2001
+Subject: Fix issue
+
+Fixes: https://pagure.io/freeipa/issue/9000
+---
+diff --git a/x b/x
+--- a/x
++++ b/x
+@@ -1 +1 @@
+-https://pagure.io/freeipa/issue/9000
++https://pagure.io/freeipa/issue/9000
+";
+        let mut patch = from_str(content).unwrap();
+        patch.rewrite_urls(
+            "https://pagure.io/freeipa/issue/",
+            "https://codeberg.org/freeipa/freeipa/issues/",
+        );
+        let c = patch.content();
+        // diff body still has the old URL (only head_lines are rewritten)
+        assert!(c.contains("-https://pagure.io/freeipa/issue/9000"));
+        assert!(c.contains("+https://pagure.io/freeipa/issue/9000"));
+    }
+
+    #[test]
+    fn test_rewrite_urls_noop_when_empty_prefix() {
+        let content = "\
+From abc Mon Sep 17 00:00:00 2001
+Subject: Fix
+
+Fixes: https://pagure.io/freeipa/issue/1
+---
+diff --git a/x b/x
+--- a/x
++++ b/x
+@@ -1 +1 @@
+-a
++b
+";
+        let mut patch = from_str(content).unwrap();
+        let before = patch.content();
+        patch.rewrite_urls("", "https://codeberg.org/freeipa/freeipa/issues/");
+        assert_eq!(patch.content(), before, "empty old_prefix is a no-op");
+        patch.rewrite_urls("https://pagure.io/freeipa/issue/", "");
+        assert_eq!(patch.content(), before, "empty new_prefix is a no-op");
     }
 
     // ── delete_patches ────────────────────────────────────────────────────────
