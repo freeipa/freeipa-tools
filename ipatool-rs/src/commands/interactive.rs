@@ -2356,14 +2356,17 @@ fn loading_dialog(msg: &str) -> impl cursive::View {
 }
 
 fn open_browser(url: &str) {
-    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
+        eprintln!("Warning: could not open browser ({}): {}", url, e);
+    }
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {
     let mut chars = s.chars();
-    let collected: String = chars.by_ref().take(max_chars).collect();
+    let mut collected: String = chars.by_ref().take(max_chars).collect();
     if chars.next().is_some() {
-        format!("{}…", &collected[..collected.len().saturating_sub(1)])
+        collected.pop(); // remove last char to make room for ellipsis
+        format!("{}…", collected)
     } else {
         collected
     }
