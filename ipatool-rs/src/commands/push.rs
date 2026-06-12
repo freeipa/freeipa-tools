@@ -19,7 +19,15 @@ pub fn run(
 ) -> Result<()> {
     let patchdir = ctx.config.patchdir_expanded();
     let ticket_url = ctx.config.ticket_url.clone();
-    let mut patches = collect_patches(patch_paths, &patchdir, &ticket_url)?;
+    let legacy_ticket_url = ctx.config.legacy_ticket_url.clone();
+    let mut patches = collect_patches(patch_paths, &patchdir, &ticket_url, &legacy_ticket_url)?;
+
+    // Rewrite legacy ticket URLs in commit messages before git-am writes them into history.
+    if ctx.config.rewrite_ticket_urls && !legacy_ticket_url.is_empty() && !ticket_url.is_empty() {
+        for patch in &mut patches {
+            patch.rewrite_urls(&legacy_ticket_url, &ticket_url);
+        }
+    }
 
     if patches.is_empty() {
         bail!("No patches to push");
@@ -32,10 +40,15 @@ pub fn run(
 
     crate::git::ensure_clean(&ctx.git_env, ctx.verbosity)?;
 
-    // Collect ticket numbers from patches
+    // Collect ticket numbers from patches, then apply issue_number_map so that
+    // legacy pagure numbers are translated to the corresponding Codeberg numbers
+    // when the migration did not preserve the original numbering.
     let mut ticket_numbers: HashSet<u64> = HashSet::new();
     for patch in &patches {
-        ticket_numbers.extend(&patch.ticket_numbers);
+        for &n in &patch.ticket_numbers {
+            let mapped = ctx.config.issue_number_map.get(&n).copied().unwrap_or(n);
+            ticket_numbers.insert(mapped);
+        }
     }
 
     // Make ticket objects
