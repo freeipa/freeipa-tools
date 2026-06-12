@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use regex::Regex;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::api::{
     forgejo::{ForgejoClient, ForgejoTicket},
@@ -25,7 +25,17 @@ pub mod push;
 pub mod queue_submit;
 pub mod start_review;
 
+/// Fallback expected remote server when no forge-specific URL is configured.
 pub const GIT_REMOTE_SERVER: &str = "codeberg.org";
+
+static REVIEWER_RE: OnceLock<Regex> = OnceLock::new();
+
+fn get_reviewer_re() -> &'static Regex {
+    REVIEWER_RE.get_or_init(|| {
+        Regex::new(r"^\w+ [^<]+ <.*@.*\..*>$")
+            .expect("REVIEWER_RE pattern is valid; this is a bug if it fails")
+    })
+}
 
 /// Milestone to branches mapping (regex → list of branches)
 pub fn milestone_branches(milestone: &str) -> Option<Vec<String>> {
@@ -353,18 +363,16 @@ impl Ctx {
 /// Resolve reviewer name to full "Name <email>" format
 pub fn normalize_reviewer(ctx: &Ctx, reviewer: &str) -> Result<String> {
     // If already full format, use as-is
-    if let Ok(re) = Regex::new(r"^\w+ [^<]+ <.*@.*\..*>$") {
-        if re.is_match(reviewer) {
-            return Ok(reviewer.to_string());
-        }
+    if get_reviewer_re().is_match(reviewer) {
+        return Ok(reviewer.to_string());
     }
     let remote_master = format!("{}/master", ctx.config.remote);
     let names = crate::git::shortlog_sen(&remote_master, &ctx.git_env, ctx.verbosity)?;
-    let name_re = Regex::new(r"^\w+ [^<]+ <.*@.*\..*>$").unwrap();
+    let re = get_reviewer_re();
     let reviewer_lower = reviewer.to_lowercase();
     let matches: Vec<String> = names
         .into_iter()
-        .filter(|n| name_re.is_match(n) && n.to_lowercase().contains(&reviewer_lower))
+        .filter(|n| re.is_match(n) && n.to_lowercase().contains(&reviewer_lower))
         .collect();
 
     match matches.len() {
