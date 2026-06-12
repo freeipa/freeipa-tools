@@ -60,14 +60,48 @@ pub fn run(ctx: &Ctx, state: &str) -> Result<()> {
         let _ = std::io::stderr().flush();
 
         // most_recent_statuses() returns HashMap<String, CiJobStatus>.
-        let statuses = prc.most_recent_statuses(&pr.head.sha).unwrap_or_default();
-        let comments = prc.get_all_issue_comments(pr.number).unwrap_or_default();
-        let files = prc.get_pr_files(pr.number).unwrap_or_default();
-        let commits = prc
-            .get_pr_commits(pr.number)
-            .ok()
-            .and_then(|c| sorted_commits(c).ok())
-            .unwrap_or_default();
+        let statuses = prc.most_recent_statuses(&pr.head.sha).unwrap_or_else(|e| {
+            eprint!("\r\x1b[K");
+            eprintln!(
+                "Warning: failed to fetch CI statuses for PR #{}: {}",
+                pr.number, e
+            );
+            Default::default()
+        });
+        let comments = prc.get_all_issue_comments(pr.number).unwrap_or_else(|e| {
+            eprint!("\r\x1b[K");
+            eprintln!(
+                "Warning: failed to fetch comments for PR #{}: {}",
+                pr.number, e
+            );
+            vec![]
+        });
+        let files = prc.get_pr_files(pr.number).unwrap_or_else(|e| {
+            eprint!("\r\x1b[K");
+            eprintln!(
+                "Warning: failed to fetch files for PR #{}: {}",
+                pr.number, e
+            );
+            vec![]
+        });
+        let commits = match prc.get_pr_commits(pr.number) {
+            Ok(raw) => sorted_commits(raw).unwrap_or_else(|e| {
+                eprint!("\r\x1b[K");
+                eprintln!(
+                    "Warning: failed to sort commits for PR #{}: {}",
+                    pr.number, e
+                );
+                vec![]
+            }),
+            Err(e) => {
+                eprint!("\r\x1b[K");
+                eprintln!(
+                    "Warning: failed to fetch commits for PR #{}: {}",
+                    pr.number, e
+                );
+                vec![]
+            }
+        };
 
         // Split CiJobStatus into separate state and URL maps for storage.
         let cached_states: HashMap<String, String> = statuses
