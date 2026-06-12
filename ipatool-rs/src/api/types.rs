@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Label {
@@ -122,6 +122,10 @@ pub struct CiStatus {
 
 /// Sort commits topologically (linear chain, no merges).
 pub fn sorted_commits(commits: Vec<Commit>) -> Result<Vec<Commit>> {
+    if commits.is_empty() {
+        return Ok(vec![]);
+    }
+
     for c in &commits {
         if c.parents.len() != 1 {
             anyhow::bail!(
@@ -132,26 +136,39 @@ pub fn sorted_commits(commits: Vec<Commit>) -> Result<Vec<Commit>> {
         }
     }
 
-    let commit_ids: HashSet<&str> = commits.iter().map(|c| c.sha.as_str()).collect();
+    // Check for duplicate SHAs up front to avoid infinite loops.
+    let mut seen_shas: HashSet<&str> = HashSet::with_capacity(commits.len());
+    for c in &commits {
+        if !seen_shas.insert(c.sha.as_str()) {
+            anyhow::bail!("Duplicate SHA {} in commit list", c.sha);
+        }
+    }
 
-    // Find root commit (parent not in set)
+    // Build a map from parent_sha -> Commit for O(n) traversal.
+    let by_parent: HashMap<&str, &Commit> = commits
+        .iter()
+        .map(|c| (c.parents[0].sha.as_str(), c))
+        .collect();
+
+    // The set of all SHAs; root commit's parent is not in this set.
+    let commit_shas: HashSet<&str> = commits.iter().map(|c| c.sha.as_str()).collect();
+
+    // Find root: the commit whose parent SHA is not in our set.
     let first = commits
         .iter()
-        .find(|c| !commit_ids.contains(c.parents[0].sha.as_str()))
-        .ok_or_else(|| anyhow::anyhow!("No first commit found in chain"))?;
+        .find(|c| !commit_shas.contains(c.parents[0].sha.as_str()))
+        .ok_or_else(|| anyhow::anyhow!("No root commit found in chain (possible cycle)"))?;
 
-    let mut result = vec![first.clone()];
-    let mut parent_id = first.sha.clone();
+    let mut result = Vec::with_capacity(commits.len());
+    result.push(first.clone());
+    let mut current_sha = first.sha.as_str();
 
     while result.len() < commits.len() {
-        let next = commits
-            .iter()
-            .find(|c| c.parents[0].sha == parent_id)
-            .ok_or_else(|| {
-                anyhow::anyhow!("Commit {} should have child but none found", parent_id)
-            })?;
-        parent_id = next.sha.clone();
-        result.push(next.clone());
+        let next = by_parent.get(current_sha).ok_or_else(|| {
+            anyhow::anyhow!("Commit {} should have child but none found", current_sha)
+        })?;
+        current_sha = next.sha.as_str();
+        result.push((*next).clone());
     }
 
     Ok(result)
@@ -162,10 +179,10 @@ pub fn labels_colorize(labels: &[Label], color_enabled: bool) -> String {
     let parts: Vec<String> = labels
         .iter()
         .map(|l| {
-            if color_enabled && l.color.len() >= 6 {
-                if let Ok(r) = u8::from_str_radix(&l.color[0..2], 16) {
-                    if let Ok(g) = u8::from_str_radix(&l.color[2..4], 16) {
-                        if let Ok(b) = u8::from_str_radix(&l.color[4..6], 16) {
+            if color_enabled {
+                if let Ok(r) = u8::from_str_radix(l.color.get(0..2).unwrap_or("00"), 16) {
+                    if let Ok(g) = u8::from_str_radix(l.color.get(2..4).unwrap_or("00"), 16) {
+                        if let Ok(b) = u8::from_str_radix(l.color.get(4..6).unwrap_or("00"), 16) {
                             return format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, l.name);
                         }
                     }
