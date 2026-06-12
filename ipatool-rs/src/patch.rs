@@ -211,7 +211,9 @@ pub fn delete_patches(dir: &Path) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().map(|e| e == "patch").unwrap_or(false) {
-                let _ = std::fs::remove_file(&path);
+                if let Err(e) = std::fs::remove_file(&path) {
+                    eprintln!("Warning: could not delete patch {}: {}", path.display(), e);
+                }
             }
         }
     }
