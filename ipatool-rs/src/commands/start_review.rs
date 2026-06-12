@@ -17,6 +17,7 @@ pub fn run(
 
     let patchdir = ctx.config.patchdir_expanded();
     let ticket_url = ctx.config.ticket_url.clone();
+    let legacy_ticket_url = ctx.config.legacy_ticket_url.clone();
 
     let mut ticket_numbers: Vec<u64> = ticket_args.to_vec();
 
@@ -24,7 +25,7 @@ pub fn run(
         if ticket_numbers.is_empty() {
             println!("\x1b[33mUsing patches from {}\x1b[0m", patchdir.display());
         }
-        collect_patches(patch_paths, &patchdir, &ticket_url)?
+        collect_patches(patch_paths, &patchdir, &ticket_url, &legacy_ticket_url)?
     } else {
         vec![]
     };
