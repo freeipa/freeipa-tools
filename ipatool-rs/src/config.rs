@@ -265,6 +265,15 @@ impl Config {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found in config", name))?;
 
+        // Profile-overrideable fields (keep this list in sync with ProfileConfig):
+        // - gh_token, gh_repo, gh_fork_remote
+        // - pagure_repository, pagure_token
+        // - forgejo_url, forgejo_repo, forgejo_token, forgejo_comment_field_prefix
+        // - ticket_url, commit_url, legacy_ticket_url
+        // - db_path
+        // Note: pr_source and issue_tracker are handled separately (see NOTE below).
+        // When adding a new ProfileConfig field, add its merge logic below AND update this list.
+
         // NOTE: `pr_source` and `issue_tracker` from the profile are intentionally
         // NOT merged into `self` here.  `Config` has no top-level `pr_source` /
         // `issue_tracker` fields; these values live only in `ProfileConfig` and are
