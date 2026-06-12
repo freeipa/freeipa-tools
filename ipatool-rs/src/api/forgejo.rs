@@ -756,12 +756,12 @@ impl ForgejoTicket {
                 let rest = if prefix.is_empty() {
                     line
                 } else {
-                    match line.strip_prefix(prefix.as_str()) {
+                    match line.strip_prefix(&**prefix) {
                         Some(r) => r.trim_start(),
                         None => continue,
                     }
                 };
-                if let Some(val) = rest.strip_prefix(needle.as_str()) {
+                if let Some(val) = rest.strip_prefix(&*needle) {
                     let v = val.trim();
                     if !v.is_empty() {
                         values.push(v.to_string());
