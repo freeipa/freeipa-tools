@@ -670,8 +670,11 @@ impl ForgejoClient {
         &self,
         pr_number: u64,
     ) -> Result<Vec<crate::api::github::GitHubReviewComment>> {
-        // Forgejo PR review comment shape is different; return empty for now.
+        // Forgejo PR review comment shape is different; not yet implemented.
         let _ = pr_number;
+        eprintln!(
+            "Warning: list_review_comments is not yet implemented for Forgejo; returning empty list"
+        );
         Ok(vec![])
     }
 
