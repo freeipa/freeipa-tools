@@ -20,6 +20,7 @@ pub struct CustomField {
 pub struct PagureIssue {
     pub title: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub content: String,
     pub status: String,
     #[serde(default)]

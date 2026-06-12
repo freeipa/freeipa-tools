@@ -59,6 +59,7 @@ impl Output {
         self.print_colored(msg, Color::Yellow);
     }
 
+    #[allow(dead_code)]
     pub fn print_blue(&self, msg: &str) {
         self.print_colored(msg, Color::Blue);
     }
@@ -78,6 +79,7 @@ pub enum Color {
     Red,
     Green,
     Yellow,
+    #[allow(dead_code)]
     Blue,
     Cyan,
     Rgb(u8, u8, u8),
