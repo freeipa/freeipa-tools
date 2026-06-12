@@ -59,6 +59,9 @@ pub struct ProfileConfig {
     pub ticket_url: Option<String>,
     pub commit_url: Option<String>,
     pub db_path: Option<String>,
+
+    // Migration overrides
+    pub legacy_ticket_url: Option<String>,
 }
 
 // ── Main Config ───────────────────────────────────────────────────────────────
@@ -134,6 +137,24 @@ pub struct Config {
     // Named profiles (see --profile flag)
     #[serde(default)]
     pub profiles: HashMap<String, ProfileConfig>,
+
+    // ── Issue tracker migration support ───────────────────────────────────────
+    /// Legacy ticket URL prefix to recognise in old commit messages.
+    /// When set, commits referencing this prefix (e.g. https://pagure.io/freeipa/issue/)
+    /// will have their issue numbers extracted in addition to those found via ticket-url.
+    #[serde(default)]
+    pub legacy_ticket_url: String,
+
+    /// When true, legacy_ticket_url references in commit messages are rewritten
+    /// to ticket_url before `git am` is applied, updating the history on push/backport.
+    #[serde(default)]
+    pub rewrite_ticket_urls: bool,
+
+    /// Optional mapping from old (e.g. pagure) issue numbers to new (e.g. Codeberg)
+    /// issue numbers when the migration did not preserve the original numbering.
+    /// Numbers not present in the map are used as-is.
+    #[serde(default)]
+    pub issue_number_map: HashMap<u64, u64>,
 }
 
 fn default_remote() -> String {
@@ -260,6 +281,9 @@ impl Config {
         }
         if let Some(v) = profile.db_path {
             self.db_path = v;
+        }
+        if let Some(v) = profile.legacy_ticket_url {
+            self.legacy_ticket_url = v;
         }
 
         Ok(())
