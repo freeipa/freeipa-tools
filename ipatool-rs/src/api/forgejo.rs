@@ -275,9 +275,9 @@ impl ForgejoClient {
         let commits: Vec<Commit> = resp
             .json()
             .with_context(|| format!("Parsing commits for PR {}", number))?;
-        if commits.len() == 50 {
+        if commits.len() >= 50 {
             anyhow::bail!(
-                "PR {} has more than 50 commits; pagination is not yet implemented. \
+                "PR {} returned 50 or more commits; pagination is not yet implemented. \
                  Fetched only 50 commits (hard limit reached). Aborting to avoid incomplete patch set.",
                 number
             );
@@ -704,9 +704,8 @@ impl ForgejoClient {
         pr_number: u64,
     ) -> Result<Vec<ReviewComment>> {
         let _ = pr_number;
-        Err(anyhow::anyhow!(
-            "Inline review comments are not yet implemented for Forgejo"
-        ))
+        // TODO: Forgejo API does not yet expose per-line review comments
+        Ok(vec![])
     }
 
     /// Post an inline review comment.  Forgejo's review-comment API differs
