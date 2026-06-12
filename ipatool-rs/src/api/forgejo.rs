@@ -274,9 +274,9 @@ impl ForgejoClient {
             .json()
             .with_context(|| format!("Parsing commits for PR {}", number))?;
         if commits.len() == 50 {
-            eprintln!(
-                "Warning: get_pr_commits returned exactly 50 commits for PR {}; \
-                 results may be truncated (hard limit reached)",
+            anyhow::bail!(
+                "PR {} has more than 50 commits; pagination is not yet implemented. \
+                 Fetched only 50 commits (hard limit reached). Aborting to avoid incomplete patch set.",
                 number
             );
         }
@@ -702,12 +702,10 @@ impl ForgejoClient {
         &self,
         pr_number: u64,
     ) -> Result<Vec<crate::api::github::GitHubReviewComment>> {
-        // Forgejo PR review comment shape is different; not yet implemented.
         let _ = pr_number;
-        eprintln!(
-            "Warning: list_review_comments is not yet implemented for Forgejo; returning empty list"
-        );
-        Ok(vec![])
+        Err(anyhow::anyhow!(
+            "Inline review comments are not yet implemented for Forgejo"
+        ))
     }
 
     /// Post an inline review comment.  Forgejo's review-comment API differs
@@ -720,7 +718,11 @@ impl ForgejoClient {
         _line: u64,
         body: &str,
     ) -> Result<()> {
-        let text = format!("**{}**\n\n{}", path, body);
+        // Forgejo inline review API is not yet implemented; post as a plain issue comment.
+        let text = format!(
+            "**Review comment on `{}`** _(posted as issue comment — Forgejo inline review not yet supported)_\n\n{}",
+            path, body
+        );
         self.comment_issue(pr_number, &text)
     }
 }
@@ -762,7 +764,7 @@ impl ForgejoTicket {
             .expect("OnceLock was just set above; this is a logic error if None"))
     }
 
-    fn load_comments(&self) -> Result<&Vec<crate::api::github::GitHubComment>> {
+    fn load_comments(&self) -> Result<&[crate::api::github::GitHubComment]> {
         if let Some(c) = self.comments.get() {
             return Ok(c);
         }
