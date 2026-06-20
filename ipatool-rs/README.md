@@ -2,8 +2,8 @@
 
 A Rust port of the FreeIPA development workflow tool.  It automates the
 repetitive parts of reviewing and landing patches: fetching patches, applying
-them, pushing upstream, updating issue trackers (Pagure, Forgejo, Jira), and
-managing GitHub pull requests.
+them, pushing upstream, updating issue trackers (Pagure, Forgejo, Jira),
+managing GitHub pull requests, and generating release notes.
 
 ## Building
 
@@ -135,6 +135,14 @@ db-path: ~/.ipa/ipatool-cache.db
 
 # rewrite-ticket-urls: false
 
+# ── Comment-based custom fields (Forgejo and GitHub) ─────────────────────────
+# Neither Forgejo/Codeberg nor GitHub have issue custom fields.  ipatool
+# derives the 'reviewer' and 'rhbz' values from the issue body and comments
+# instead.  Set a prefix to avoid false matches in normal prose.
+
+# forgejo-comment-field-prefix: "ipatool:"
+# github-comment-field-prefix: "ipatool:"
+
 # ── Named profiles ────────────────────────────────────────────────────────────
 # A profile overrides selected top-level fields and sets the PR source and
 # issue tracker.  Activate with --profile <name>.
@@ -228,6 +236,8 @@ ipatool --profile gh-issues pr-list    # GitHub PRs, GitHub issues (no Pagure)
 | `forgejo-url`, `forgejo-repo`, `forgejo-token` | strings | Override Forgejo/Codeberg settings |
 | `ticket-url`, `commit-url`, `db-path` | strings | Override URL templates and cache path |
 | `legacy-ticket-url` | string | Old ticket URL prefix to recognise in existing commits (migration) |
+| `forgejo-comment-field-prefix` | string | Prefix for custom-field lines in Forgejo issue comments |
+| `github-comment-field-prefix` | string | Prefix for custom-field lines in GitHub issue bodies/comments |
 
 Profile field values replace their top-level counterparts when the profile is
 active; omitted fields fall through to the top-level values.
@@ -262,8 +272,7 @@ When `pr-source: forgejo` is active:
 
 When `issue-tracker: github` is active:
 - Issue operations (comment, close) use the GitHub Issues API.
-- GitHub Issues have no `reviewer` or `rhbz` custom fields; those are treated as absent.
-- Forgejo issues also have no custom fields; ipatool reads them from issue comments (see [Forgejo comment-based custom fields](#forgejo-comment-based-custom-fields)).
+- GitHub Issues have no `reviewer` or `rhbz` custom fields; ipatool reads them from issue bodies and comments (see [Comment-based custom fields](#comment-based-custom-fields)).
 
 ## Global flags
 
@@ -333,6 +342,10 @@ The `trac-username-map` config key provides explicit overrides.
 ---
 
 ### `start-review`
+
+**Note:** The reviewer-assignment part of this command is not yet implemented
+and will exit with an error.  The `--am` flag (applying patches via
+`am-command`) works independently via the `am` subcommand.
 
 Set yourself as the reviewer on one or more Pagure/Forgejo tickets and
 optionally apply the patches to a development VM.
@@ -821,6 +834,96 @@ Actions that can be queued and submitted:
 
 ---
 
+### `release-notes`
+
+Generate release notes from the git log and issue tracker.  Parses commits in
+a given revision range, extracts ticket references and `RN:` (release note)
+lines from commit messages, fetches ticket metadata from the configured issue
+tracker, and produces a formatted release-notes document on stdout.
+
+Tickets are categorised automatically:
+
+| Category | Source |
+|----------|--------|
+| Enhancement | Issue has the `rfe` label/tag, or title contains `[RFE]` |
+| Known issue | Issue has the `knownissue` label/tag or custom field |
+| Bug fix | Everything else |
+
+Changelog text is read from the `changelog` custom field (Pagure) or a
+`changelog:` line in the issue body (GitHub/Forgejo).
+
+```
+ipatool release-notes 4.12.0 2024-10-15 4.11.2 4.12 \
+    release-4-11-2..ipa-4-12 "FreeIPA 4.12.0"
+
+ipatool release-notes --links --wiki 4.12.0 2024-10-15 4.11.2 4.12 \
+    release-4-11-2..ipa-4-12 "FreeIPA 4.12.0" \
+    -m "FreeIPA 4.12.1" -m "FreeIPA 4.12.2"
+
+ipatool release-notes --no-milestones --repo ~/dev/freeipa \
+    4.12.0 2024-10-15 4.11.2 4.12 \
+    release-4-11-2..ipa-4-12 "FreeIPA 4.12.0"
+```
+
+**Positional arguments** (all required)
+
+| Argument | Description |
+|----------|-------------|
+| `version` | Version being released (e.g. `4.12.0`) |
+| `release_date` | Release date (e.g. `2024-10-15`) |
+| `prev_version` | Previous version for changelog comparison (e.g. `4.11.2`) |
+| `major_version` | Major version series (e.g. `4.12`) |
+| `revision_range` | Git revision range (e.g. `release-4-11-2..ipa-4-12`) |
+| `milestone` | Primary milestone name (e.g. `FreeIPA 4.12.0`) |
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `-m`, `--milestone <name>` | Additional milestone(s) to include (repeatable).  Tickets from additional milestones are included only if they also appear in the git log. |
+| `--links` | Include hyperlinks to tickets and commits in the output |
+| `--wiki` | Output MediaWiki format instead of Markdown (default) |
+| `--repo <path>` | Path to the git repository (overrides `clean-repo-path` from config) |
+| `--no-milestones` | Skip milestone queries against the issue tracker; only use tickets found in commit messages |
+
+**Output format**
+
+By default the output is Markdown with sections: Highlights, Enhancements,
+Known Issues, Bug Fixes, Upgrading, Feedback, Resolved Tickets, and Detailed
+Changelog (grouped by author).  With `--wiki`, the same content is emitted in
+MediaWiki markup.
+
+When `--links` is given, ticket numbers become clickable links using
+`ticket-url` from the config, commit hashes link via `commit-url`, and
+Bugzilla/RHBZ references are linked via `bugzilla-bug-url`.
+
+**Configuration keys used**
+
+| Key | Purpose |
+|-----|---------|
+| `clean-repo-path` | Default git repository path (overridden by `--repo`) |
+| `ticket-url` | Base URL for ticket links in output |
+| `legacy-ticket-url` | Old ticket URL prefix; commits referencing this are also recognised |
+| `commit-url` | Base URL for commit links in output |
+| `bugzilla-bug-url` | Base URL for Bugzilla bug links in output |
+
+The issue tracker configured via `--profile` (or the default) is used to fetch
+milestone tickets.  All three backends are supported: Pagure (`list_issues`
+with milestone filter), GitHub (`list_issues_by_milestone`), and Forgejo
+(`list_issues_by_milestone`).
+
+**Commit message conventions**
+
+The git log parser recognises the following patterns in commit messages:
+
+| Pattern | Meaning |
+|---------|---------|
+| `RN: <text>` | Release note line; included in the Highlights section |
+| `Reviewed-By: Name <email>` | Reviewer attribution; appears in the Detailed Changelog |
+| `Fixes: <ticket-url><number>` | Ticket reference; links the commit to an issue |
+
+---
+
 ## Offline mode
 
 Run `ipatool --offline <subcommand>` to work without network access.
@@ -957,8 +1060,8 @@ with `--no-pagure` or `--no-forgejo`.
 ### Jira
 
 Used as a secondary tracker.  Jira ticket keys are read from the `rhbz` custom
-field of each Pagure issue, or from issue comments for Forgejo (see
-[Forgejo comment-based custom fields](#forgejo-comment-based-custom-fields)).
+field of each Pagure issue, or from issue bodies/comments for Forgejo and
+GitHub (see [Comment-based custom fields](#comment-based-custom-fields)).
 After a push, ipatool optionally:
 
 - posts a commit-info comment (`update-jira`),
@@ -1057,22 +1160,23 @@ Activate the Codeberg workflow with:
 ipatool --profile codeberg pr-push 8309 -r abbra
 ```
 
-### Forgejo comment-based custom fields
+### Comment-based custom fields
 
 Pagure issues supported **custom fields** — in particular `rhbz` (downstream
-Bugzilla/Jira links) and `reviewer` (the assigned reviewer login).  Forgejo has
-no equivalent.  ipatool recovers this information by scanning issue comments for
-specially formatted lines.
+Bugzilla/Jira links) and `reviewer` (the assigned reviewer login).  Neither
+Forgejo/Codeberg nor GitHub Issues have an equivalent.  ipatool recovers this
+information by scanning issue bodies and comments for specially formatted lines.
 
 #### Comment format
 
-Each metadata line placed anywhere in any issue comment must follow the pattern:
+Each metadata line placed anywhere in the issue body or any comment must follow
+the pattern:
 
 ```
 <prefix><fieldname>: <value>
 ```
 
-**With `forgejo-comment-field-prefix: "ipatool:"`:**
+**With a prefix (e.g. `"ipatool:"`):**
 
 ```
 ipatool:rhbz: https://bugzilla.redhat.com/show_bug.cgi?id=12345
@@ -1093,13 +1197,18 @@ reviewer: abbra
 
 #### Configuration
 
+Each forge has its own prefix setting:
+
 ```yaml
-# Optional prefix prepended to field names in comments.
+# Forgejo/Codeberg: prefix for custom-field lines in issue comments.
 # Leave empty (or omit) to match bare "rhbz: …" / "reviewer: …" lines.
 forgejo-comment-field-prefix: "ipatool:"
+
+# GitHub Issues: same semantics as above.
+github-comment-field-prefix: "ipatool:"
 ```
 
-The prefix can also be overridden per profile:
+Both prefixes can also be overridden per profile:
 
 ```yaml
 profiles:
@@ -1107,6 +1216,10 @@ profiles:
     pr-source: forgejo
     issue-tracker: forgejo
     forgejo-comment-field-prefix: "ipatool:"
+  gh-issues:
+    pr-source: github
+    issue-tracker: github
+    github-comment-field-prefix: "ipatool:"
 ```
 
 ---
@@ -1146,6 +1259,28 @@ ipatool backport 8309 -b ipa-4-12
 ```
 
 All of steps 2–5 can also be done entirely inside the TUI (`ipatool tui`).
+
+### Release notes workflow
+
+```bash
+# Generate Markdown release notes for FreeIPA 4.12.0
+ipatool release-notes 4.12.0 2024-10-15 4.11.2 4.12 \
+    release-4-11-2..ipa-4-12 "FreeIPA 4.12.0" > release-notes-4.12.0.md
+
+# Include tickets from additional milestones (e.g. cherry-picks)
+ipatool release-notes 4.12.0 2024-10-15 4.11.2 4.12 \
+    release-4-11-2..ipa-4-12 "FreeIPA 4.12.0" \
+    -m "FreeIPA 4.12 backports" > release-notes-4.12.0.md
+
+# Generate MediaWiki format with hyperlinks for the project wiki
+ipatool release-notes --links --wiki 4.12.0 2024-10-15 4.11.2 4.12 \
+    release-4-11-2..ipa-4-12 "FreeIPA 4.12.0"
+
+# Skip tracker queries entirely (useful when no API token is available)
+ipatool release-notes --no-milestones --repo ~/dev/freeipa \
+    4.12.0 2024-10-15 4.11.2 4.12 \
+    release-4-11-2..ipa-4-12 "FreeIPA 4.12.0"
+```
 
 ### Offline review workflow
 
