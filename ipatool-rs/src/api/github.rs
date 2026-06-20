@@ -2,7 +2,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::api::types::{CiStatus, Commit, IssueComment, Label, PrFile, PullRequest, ReviewComment, TicketOps};
+use crate::api::types::{
+    scan_comment_fields, CiStatus, Commit, IssueComment, Label, PrFile, PullRequest, ReviewComment,
+    TicketOps,
+};
 use std::sync::{Arc, OnceLock};
 
 pub struct GitHubClient {
@@ -92,8 +95,16 @@ fn encode_path_segment(s: &str) -> String {
             }
             other => {
                 out.push('%');
-                out.push(char::from_digit((other >> 4) as u32, 16).unwrap().to_ascii_uppercase());
-                out.push(char::from_digit((other & 0xf) as u32, 16).unwrap().to_ascii_uppercase());
+                out.push(
+                    char::from_digit((other >> 4) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                out.push(
+                    char::from_digit((other & 0xf) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
             }
         }
     }
@@ -143,7 +154,12 @@ impl GitHubClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().unwrap_or_default();
-            anyhow::bail!("GitHub API error {} fetching PR {}: {}", status, number, body);
+            anyhow::bail!(
+                "GitHub API error {} fetching PR {}: {}",
+                status,
+                number,
+                body
+            );
         }
         let pr: PullRequest = resp
             .json()
@@ -221,9 +237,8 @@ impl GitHubClient {
                 let body = resp.text().unwrap_or_default();
                 anyhow::bail!("GitHub list milestones failed ({}): {}", status, body);
             }
-            let milestones: Vec<MilestoneInfo> = resp
-                .json()
-                .context("Parsing GitHub milestones")?;
+            let milestones: Vec<MilestoneInfo> =
+                resp.json().context("Parsing GitHub milestones")?;
             if milestones.is_empty() {
                 break;
             }
@@ -276,9 +291,7 @@ impl GitHubClient {
                 let body = resp.text().unwrap_or_default();
                 anyhow::bail!("GitHub list issues failed ({}): {}", status, body);
             }
-            let issues: Vec<GitHubIssue> = resp
-                .json()
-                .context("Parsing GitHub issues")?;
+            let issues: Vec<GitHubIssue> = resp.json().context("Parsing GitHub issues")?;
             if issues.is_empty() {
                 break;
             }
@@ -316,9 +329,17 @@ impl GitHubClient {
         limit: usize,
         mut on_page: impl FnMut(u32, usize),
     ) -> Result<Vec<PullRequest>> {
+        const MAX_PAGES: u32 = 1_000;
         let mut all_prs = Vec::new();
         let mut page = 1u32;
         loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: list_prs_limited pagination exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
             let url = self.api_url(&format!(
                 "/pulls?state={}&per_page=100&page={}",
                 state, page
@@ -330,6 +351,11 @@ impl GitHubClient {
                 .header("Accept", "application/vnd.github.v3+json")
                 .send()
                 .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("GitHub list_prs_limited failed ({}): {}", status, body);
+            }
             let prs: Vec<PullRequest> = resp.json().with_context(|| "Parsing PR list")?;
             if prs.is_empty() {
                 break;
@@ -346,9 +372,17 @@ impl GitHubClient {
     }
 
     pub fn get_pr_commits(&self, number: u64) -> Result<Vec<Commit>> {
+        const MAX_PAGES: u32 = 1_000;
         let mut all_commits = Vec::new();
         let mut page = 1u32;
         loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: get_pr_commits pagination exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
             let url = self.api_url(&format!(
                 "/pulls/{}/commits?per_page=100&page={}",
                 number, page
@@ -360,6 +394,11 @@ impl GitHubClient {
                 .header("Accept", "application/vnd.github.v3+json")
                 .send()
                 .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("GitHub get_pr_commits failed ({}): {}", status, body);
+            }
             let commits: Vec<Commit> = resp
                 .json()
                 .with_context(|| format!("Parsing commits for PR {}", number))?;
@@ -381,6 +420,11 @@ impl GitHubClient {
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("GitHub get_commit_statuses failed ({}): {}", status, body);
+        }
         let statuses: Vec<CommitStatus> = resp
             .json()
             .with_context(|| format!("Parsing statuses for {}", sha))?;
@@ -409,6 +453,11 @@ impl GitHubClient {
             .header("Accept", "application/vnd.github.v3.patch")
             .send()
             .with_context(|| format!("GET patch for {}", sha))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("GitHub get_commit_patch failed ({}): {}", status, body);
+        }
         Ok(resp.bytes()?.to_vec())
     }
 
@@ -496,7 +545,13 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub fn create_pr(&self, title: &str, base: &str, head: &str, body: &str) -> Result<PullRequest> {
+    pub fn create_pr(
+        &self,
+        title: &str,
+        base: &str,
+        head: &str,
+        body: &str,
+    ) -> Result<PullRequest> {
         let url = self.api_url("/pulls");
         let req_body = CreatePRBody {
             title: title.to_string(),
@@ -530,6 +585,13 @@ impl GitHubClient {
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .with_context(|| "GET /user")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            anyhow::bail!(
+                "GitHub authentication failed ({}): check your github-token",
+                status
+            );
+        }
         let user: serde_json::Value = resp.json().with_context(|| "Parsing /user")?;
         user["login"]
             .as_str()
@@ -551,6 +613,15 @@ impl GitHubClient {
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!(
+                "GitHub get_last_issue_comments failed ({}): {}",
+                status,
+                body
+            );
+        }
         let mut comments: Vec<IssueComment> =
             resp.json().with_context(|| "Parsing issue comments")?;
         comments.reverse(); // chronological order (oldest of the last-N first)
@@ -559,9 +630,17 @@ impl GitHubClient {
 
     /// Return all issue comments in chronological order, paging automatically.
     pub fn get_all_issue_comments(&self, number: u64) -> Result<Vec<IssueComment>> {
+        const MAX_PAGES: u32 = 1_000;
         let mut all = Vec::new();
         let mut page = 1u32;
         loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: get_all_issue_comments pagination exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
             let url = self.api_url(&format!(
                 "/issues/{}/comments?sort=created&direction=asc&per_page=100&page={}",
                 number, page
@@ -573,6 +652,15 @@ impl GitHubClient {
                 .header("Accept", "application/vnd.github.v3+json")
                 .send()
                 .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!(
+                    "GitHub get_all_issue_comments failed ({}): {}",
+                    status,
+                    body
+                );
+            }
             let comments: Vec<IssueComment> = resp
                 .json()
                 .with_context(|| format!("Parsing comments for issue {}", number))?;
@@ -596,6 +684,11 @@ impl GitHubClient {
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .with_context(|| format!("GET {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("GitHub get_pr_files failed ({}): {}", status, body);
+        }
         let files: Vec<PrFile> = resp
             .json()
             .with_context(|| format!("Parsing files for PR {}", number))?;
@@ -604,9 +697,17 @@ impl GitHubClient {
 
     /// Return all labels defined in the repository.
     pub fn list_repo_labels(&self) -> Result<Vec<Label>> {
+        const MAX_PAGES: u32 = 1_000;
         let mut all = Vec::new();
         let mut page = 1u32;
         loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: list_repo_labels pagination exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
             let url = self.api_url(&format!("/labels?per_page=100&page={}", page));
             let resp = self
                 .http
@@ -615,6 +716,11 @@ impl GitHubClient {
                 .header("Accept", "application/vnd.github.v3+json")
                 .send()
                 .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("GitHub list_repo_labels failed ({}): {}", status, body);
+            }
             let labels: Vec<Label> = resp.json().with_context(|| "Parsing repo labels")?;
             if labels.is_empty() {
                 break;
@@ -627,9 +733,17 @@ impl GitHubClient {
 
     /// Return all inline review comments for a PR.
     pub fn list_review_comments(&self, pr_number: u64) -> Result<Vec<ReviewComment>> {
+        const MAX_PAGES: u32 = 1_000;
         let mut all = Vec::new();
         let mut page = 1u32;
         loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: list_review_comments pagination exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
             let url = self.api_url(&format!(
                 "/pulls/{}/comments?per_page=100&page={}",
                 pr_number, page
@@ -641,6 +755,11 @@ impl GitHubClient {
                 .header("Accept", "application/vnd.github.v3+json")
                 .send()
                 .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("GitHub list_review_comments failed ({}): {}", status, body);
+            }
             let comments: Vec<ReviewComment> =
                 resp.json().with_context(|| "Parsing review comments")?;
             if comments.is_empty() {
@@ -732,66 +851,63 @@ impl GitHubTicket {
             .expect("OnceLock was just set above; this is a logic error if None"))
     }
 
-    /// Scan the issue body and all comments for a line of the form
-    /// `<prefix><name>: <value>` and return the joined values.
     fn comment_field(&self, name: &str) -> Result<Option<String>> {
-        let prefix = &self.comment_field_prefix;
-        let needle = format!("{}:", name);
-        let mut values: Vec<String> = Vec::new();
-
-        let mut scan = |text: &str| {
-            for line in text.lines() {
-                let rest = if prefix.is_empty() {
-                    line
-                } else {
-                    match line.strip_prefix(prefix.as_str()) {
-                        Some(r) => r.trim_start(),
-                        None => continue,
-                    }
-                };
-                if let Some(val) = rest.strip_prefix(&*needle) {
-                    let v = val.trim();
-                    if !v.is_empty() {
-                        values.push(v.to_string());
-                    }
-                }
-            }
-        };
-
         let issue = self.data()?;
-        if let Some(ref body) = issue.body {
-            scan(body);
-        }
-        for comment in self.load_comments()? {
-            scan(&comment.body);
-        }
-
-        if values.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(values.join(" ")))
-        }
+        let comments = self.load_comments()?;
+        Ok(scan_comment_fields(
+            issue.body.as_deref(),
+            comments,
+            &self.comment_field_prefix,
+            name,
+        ))
     }
 
-    pub fn reviewer(&self) -> Result<Option<String>> { self.comment_field("reviewer") }
-    pub fn rhbz(&self) -> Result<Option<String>> { self.comment_field("rhbz") }
-    pub fn title(&self) -> Result<String> { Ok(self.data()?.title.clone()) }
-    pub fn is_closed(&self) -> Result<bool> { Ok(self.data()?.is_closed()) }
-    pub fn comment(&self, text: &str) -> Result<()> { self.client.create_comment(self.number, text) }
-    pub fn close(&self) -> Result<()> { self.client.close_issue(self.number) }
+    pub fn reviewer(&self) -> Result<Option<String>> {
+        self.comment_field("reviewer")
+    }
+    pub fn rhbz(&self) -> Result<Option<String>> {
+        self.comment_field("rhbz")
+    }
+    pub fn title(&self) -> Result<String> {
+        Ok(self.data()?.title.clone())
+    }
+    pub fn is_closed(&self) -> Result<bool> {
+        Ok(self.data()?.is_closed())
+    }
+    pub fn comment(&self, text: &str) -> Result<()> {
+        self.client.create_comment(self.number, text)
+    }
+    pub fn close(&self) -> Result<()> {
+        self.client.close_issue(self.number)
+    }
     pub fn milestone(&self) -> Result<Option<String>> {
         Ok(self.data()?.milestone.as_ref().map(|m| m.title.clone()))
     }
 }
 
 impl TicketOps for GitHubTicket {
-    fn number(&self) -> u64 { self.number }
-    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
-    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
-    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
-    fn title(&self) -> Result<String> { self.title() }
-    fn is_closed(&self) -> Result<bool> { self.is_closed() }
-    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
-    fn close(&self) -> Result<()> { self.close() }
+    fn number(&self) -> u64 {
+        self.number
+    }
+    fn reviewer(&self) -> Result<Option<String>> {
+        self.reviewer()
+    }
+    fn rhbz(&self) -> Result<Option<String>> {
+        self.rhbz()
+    }
+    fn milestone(&self) -> Result<Option<String>> {
+        self.milestone()
+    }
+    fn title(&self) -> Result<String> {
+        self.title()
+    }
+    fn is_closed(&self) -> Result<bool> {
+        self.is_closed()
+    }
+    fn comment(&self, text: &str) -> Result<()> {
+        self.comment(text)
+    }
+    fn close(&self) -> Result<()> {
+        self.close()
+    }
 }
-
