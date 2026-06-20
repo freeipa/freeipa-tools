@@ -1,0 +1,147 @@
+# Spec for the ipatool Rust workspace.
+#
+# DO NOT edit ipatool.spec directly — it is generated from this file by
+# 'make srpm'.  Edit ipatool.spec.in and run 'make srpm' to regenerate.
+#
+# Source tarball ('make tarball'):
+#   git archive --prefix=ipatool-{version}/ HEAD -- ipatool-rs/ \
+#       | tar --transform 's,^ipatool-[^/]*/ipatool-rs/,ipatool-{version}/,' \
+#             -czf ipatool-{version}.tar.gz --files-from=-
+#
+# Vendor tarball ('make vendor'):
+#   cd ipatool-rs && cargo vendor --versioned-dirs vendor/
+#   tar czf ipatool-{version}-vendor.tar.gz -C ipatool-rs vendor/ Cargo.lock
+#
+# Crates in the vendor tarball absent from Fedora or at incompatible versions:
+#   reqwest 0.13      — Fedora version may differ; vendored for compatibility
+#   cursive 0.21      — not packaged in Fedora
+#   rusqlite 0.38     — Fedora may ship a different version
+#   pulldown-cmark 0.13 — Fedora may ship a different version
+#
+# rust2rpm is used to validate rust2rpm.toml (which is the canonical record of
+# all package metadata and build requirements) before each spec/SRPM build.
+# Full spec generation via rust2rpm is not possible for workspace crates that
+# are not published on crates.io — rust2rpm requires a .crate archive and
+# rejects workspace Cargo.toml files.  The spec template (ipatool.spec.in) is
+# therefore maintained alongside rust2rpm.toml; both must be kept in sync.
+
+# Snapshot release identifiers — substituted by 'make srpm' via sed.
+# Do not edit these lines manually; the sed pattern matches the whole line.
+%global snapdate    0
+%global snapcommit  0000000
+
+%bcond check 1
+
+# Force --locked for all cargo invocations.  Without it, cargo resolves the
+# dependency graph from scratch in the offline build environment and fails to
+# locate the vendored crates.  --locked tells cargo to use Cargo.lock as-is.
+%global __cargo_common_opts %{?_smp_mflags} -Z avoid-dev-deps --locked
+
+# prevent library files from being installed
+%global cargo_install_lib 0
+
+%global crate ipatool
+
+Name:           %{crate}
+Version:        0.1.0
+Release:        1.%{snapdate}.git%{snapcommit}%{?dist}
+Summary:        FreeIPA developer workflow tool — review, push, and TUI for patch management
+
+License:        GPL-3.0-or-later
+URL:            https://github.com/freeipa/freeipa-tools
+Source0:        %{crate}-%{version}.tar.gz
+# Full vendor tarball — contains all Cargo dependencies vendored with
+# --versioned-dirs.  See the generation instructions at the top of this spec.
+Source1:        %{crate}-%{version}-vendor.tar.gz
+
+ExclusiveArch:  %{rust_arches}
+
+BuildRequires:  cargo-rpm-macros >= 26
+BuildRequires:  pkgconfig(sqlite3)
+
+%global _description %{expand:
+ipatool is a command-line and terminal-UI tool for FreeIPA project
+contributors.  It automates the repetitive parts of reviewing and landing
+patches: fetching patches, applying them, pushing to upstream git, updating
+issue trackers (Pagure, Forgejo, Jira), and managing GitHub/Forgejo pull
+requests.
+
+The interactive TUI (ipatool tui) lets contributors browse open pull requests,
+inspect CI results, ACK or reject patches, and run the push pipeline, all from
+the terminal.  An offline mode stores a local SQLite cache for disconnected
+work and queues mutations for replay when connectivity is restored.}
+
+%description %{_description}
+
+
+%prep
+# Unpack the source tarball; -a1 unpacks Source1 (vendor/) inside the build dir.
+%autosetup -n %{crate}-%{version} -p1 -a1
+
+# Set up the cargo build environment using the full vendor tree.
+# %%cargo_prep -v vendor configures .cargo/config.toml to redirect all
+# crates-io lookups to vendor/.
+%cargo_prep -v vendor
+
+# Strip executable bits from all vendored source files.
+# Some vendored crates ship scripts with shebangs that confuse
+# brp-mangle-shebangs during debuginfo extraction.
+find vendor/ -type f -exec chmod -x {} \;
+
+
+%generate_buildrequires
+# The full vendor tarball (Source1) bundles every Rust crate dependency.
+#
+# %%cargo_generate_buildrequires is intentionally omitted: it runs before
+# %%prep (before the vendor tarball is unpacked) and emits crate() BuildRequires
+# for every dependency, including dev-deps that may not be packaged in Fedora.
+# All non-crate build requirements (system libraries, Rust toolchain) are
+# declared statically in the BuildRequires: lines above.
+
+
+%build
+%cargo_build -- --workspace
+%{cargo_license_summary}
+%{cargo_license} > LICENSE.dependencies
+%{cargo_vendor_manifest}
+# cargo_vendor_manifest is generated with --target=all, which pulls in
+# platform-specific crates never compiled on Linux.  Remove them so that
+# the bundled(crate()) Provides reflect what is actually linked.
+sed -i -E \
+    -e '/^windows[-_]/d' \
+    -e '/^(schannel|ipconfig|widestring|find-msvc-tools) /d' \
+    -e '/^core-foundation/d' \
+    -e '/^security-framework/d' \
+    -e '/^(js-sys|web-sys) /d' \
+    -e '/^wasm-bindgen/d' \
+    -e '/^wit-bindgen/d' \
+    -e '/^(wasi|wasip2|wasip3|wasite) /d' \
+    -e '/^(redox_syscall|libredox|r-efi) /d' \
+    -e '/^hermit-abi /d' \
+    -e '/^winapi/d' \
+    -e '/^(wasm-encoder|wasm-metadata|wasmparser) /d' \
+    cargo-vendor.txt
+
+
+%install
+# Per Fedora Rust packaging guidelines for workspace projects, %%cargo_install
+# SHOULD NOT be used; copy executables explicitly from target/rpm/.
+install -Dpm 0755 target/rpm/ipatool %{buildroot}%{_bindir}/ipatool
+
+
+%if %{with check}
+%check
+# Binary-only crate: there is no lib target and therefore no doc-tests.
+%cargo_test -- --workspace --bins
+%endif
+
+
+%files
+%license LICENSE LICENSE.dependencies
+%license cargo-vendor.txt
+%doc README.md
+%{_bindir}/ipatool
+
+
+%changelog
+%autochangelog
