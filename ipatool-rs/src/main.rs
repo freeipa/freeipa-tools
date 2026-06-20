@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod db;
 mod git;
+mod git_log;
 mod md_render;
 mod output;
 mod patch;
@@ -334,6 +335,47 @@ enum Command {
 
     /// Submit all pending offline review actions to GitHub
     QueueSubmit,
+
+    /// Generate release notes from git log and issue tracker
+    ReleaseNotes {
+        /// Version being released (e.g. "4.12.0")
+        version: String,
+
+        /// Release date (e.g. "2024-10-15")
+        release_date: String,
+
+        /// Previous version for changelog comparison (e.g. "4.11.2")
+        prev_version: String,
+
+        /// Major version series (e.g. "4.12")
+        major_version: String,
+
+        /// Git revision range (e.g. "release-4-11-2..ipa-4-12")
+        revision_range: String,
+
+        /// Primary milestone name (e.g. "FreeIPA 4.12.0")
+        milestone: String,
+
+        /// Additional milestones to include
+        #[arg(short = 'm', long = "milestone")]
+        milestones: Vec<String>,
+
+        /// Include links to tickets and commits in output
+        #[arg(long)]
+        links: bool,
+
+        /// Output MediaWiki format instead of Markdown
+        #[arg(long)]
+        wiki: bool,
+
+        /// Path to git repository (overrides clean-repo-path from config)
+        #[arg(long = "repo")]
+        repo: Option<String>,
+
+        /// Skip milestone queries; only use tickets found in commits
+        #[arg(long)]
+        no_milestones: bool,
+    },
 }
 
 fn build_ctx(cli: &Cli) -> Result<Ctx> {
@@ -558,5 +600,34 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
         Command::QueueList => commands::queue_submit::run_list(ctx),
 
         Command::QueueSubmit => commands::queue_submit::run_submit(ctx),
+
+        Command::ReleaseNotes {
+            version,
+            release_date,
+            prev_version,
+            major_version,
+            revision_range,
+            milestone,
+            milestones,
+            links,
+            wiki,
+            repo,
+            no_milestones,
+        } => {
+            let params = commands::release_notes::ReleaseNotesParams {
+                version,
+                release_date,
+                prev_version,
+                major_version,
+                revision_range,
+                milestone,
+                additional_milestones: milestones,
+                links: *links,
+                wiki: *wiki,
+                no_milestones: *no_milestones,
+                repo_path: repo.as_deref(),
+            };
+            commands::release_notes::run(&*ctx, &params)
+        }
     }
 }
