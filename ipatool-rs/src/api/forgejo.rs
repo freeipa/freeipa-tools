@@ -2,7 +2,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::api::types::{CiStatus, Commit, IssueComment, Label, PrFile, PullRequest, ReviewComment, TicketOps};
+use crate::api::types::{
+    scan_comment_fields, CiStatus, Commit, IssueComment, Label, PrFile, PullRequest, ReviewComment,
+    TicketOps,
+};
 
 pub struct ForgejoClient {
     pub http: reqwest::blocking::Client,
@@ -55,11 +58,15 @@ pub struct ForgejoMilestone {
 
 #[derive(Debug, Deserialize)]
 pub struct ForgejoIssue {
+    #[serde(default)]
+    pub number: u64,
     pub title: String,
     #[serde(default)]
     pub body: Option<String>,
     pub state: String,
     pub milestone: Option<ForgejoMilestone>,
+    #[serde(default)]
+    pub labels: Vec<Label>,
 }
 
 impl ForgejoIssue {
@@ -173,6 +180,61 @@ impl ForgejoClient {
         Ok(())
     }
 
+    pub fn list_issues_by_milestone(
+        &self,
+        state: &str,
+        milestone_title: &str,
+    ) -> Result<Vec<ForgejoIssue>> {
+        const MAX_PAGES: u32 = 1_000;
+        let mut all_issues = Vec::new();
+        let mut page = 1u32;
+        loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: pagination in list_issues_by_milestone exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
+            let base = self.api_url(&format!("/repos/{}/{}/issues", self.owner, self.repo));
+            let url = reqwest::Url::parse_with_params(
+                &base,
+                &[
+                    ("state", state),
+                    ("milestones", milestone_title),
+                    ("type", "issues"),
+                    ("limit", "50"),
+                    ("page", &page.to_string()),
+                ],
+            )
+            .with_context(|| {
+                format!(
+                    "building issue list URL for milestone '{}'",
+                    milestone_title
+                )
+            })?;
+            let url = url.to_string();
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", format!("token {}", self.token))
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("Forgejo list_issues failed ({}): {}", status, body);
+            }
+            let issues: Vec<ForgejoIssue> = resp.json().context("Parsing Forgejo issues")?;
+            if issues.is_empty() {
+                break;
+            }
+            all_issues.extend(issues);
+            page += 1;
+        }
+        Ok(all_issues)
+    }
+
     // ── Pull-request methods ───────────────────────────────────────────────────
 
     /// List pull requests.  `state` is one of "open", "closed", "all".
@@ -210,8 +272,7 @@ impl ForgejoClient {
                 let body = resp.text().unwrap_or_default();
                 anyhow::bail!("Forgejo list_prs failed ({}): {}", status, body);
             }
-            let prs: Vec<PullRequest> =
-                resp.json().with_context(|| "Parsing Forgejo PR list")?;
+            let prs: Vec<PullRequest> = resp.json().with_context(|| "Parsing Forgejo PR list")?;
             if prs.is_empty() {
                 break;
             }
@@ -308,10 +369,7 @@ impl ForgejoClient {
     }
 
     /// CI status check: maps Forgejo statuses to a `CiStatus` for the caller.
-    pub fn most_recent_statuses(
-        &self,
-        sha: &str,
-    ) -> Result<HashMap<String, CiStatus>> {
+    pub fn most_recent_statuses(&self, sha: &str) -> Result<HashMap<String, CiStatus>> {
         #[derive(Deserialize)]
         struct ForgejoStatus {
             state: String,
@@ -344,12 +402,10 @@ impl ForgejoClient {
         }
         let mut result = HashMap::new();
         for s in statuses {
-            result
-                .entry(s.context)
-                .or_insert(CiStatus {
-                    state: s.state,
-                    url: s.target_url,
-                });
+            result.entry(s.context).or_insert(CiStatus {
+                state: s.state,
+                url: s.target_url,
+            });
         }
         Ok(result)
     }
@@ -370,8 +426,7 @@ impl ForgejoClient {
             let body = resp.text().unwrap_or_default();
             anyhow::bail!("Forgejo get_pr_files failed ({}): {}", status, body);
         }
-        let files: Vec<PrFile> =
-            resp.json().with_context(|| "Parsing Forgejo PR files")?;
+        let files: Vec<PrFile> = resp.json().with_context(|| "Parsing Forgejo PR files")?;
         if files.len() == 100 {
             eprintln!(
                 "Warning: get_pr_files returned exactly 100 files for PR {}; \
@@ -579,11 +634,7 @@ impl ForgejoClient {
     }
 
     /// Return the last `n` issue comments, newest-last.
-    pub fn get_last_issue_comments(
-        &self,
-        number: u64,
-        n: usize,
-    ) -> Result<Vec<IssueComment>> {
+    pub fn get_last_issue_comments(&self, number: u64, n: usize) -> Result<Vec<IssueComment>> {
         // Fetches the full comment history in order to return the last `n` entries.
         // For issues with many comments this performs multiple page fetches.
         // A reverse-pagination approach would be more efficient but requires
@@ -596,10 +647,7 @@ impl ForgejoClient {
     }
 
     /// Return all issue comments in chronological order.
-    pub fn get_all_issue_comments(
-        &self,
-        number: u64,
-    ) -> Result<Vec<IssueComment>> {
+    pub fn get_all_issue_comments(&self, number: u64) -> Result<Vec<IssueComment>> {
         const MAX_PAGES: u32 = 1_000;
         let mut all = Vec::new();
         let mut page = 1u32;
@@ -669,8 +717,7 @@ impl ForgejoClient {
             let body = resp.text().unwrap_or_default();
             anyhow::bail!("Forgejo create_pr failed ({}): {}", status, body);
         }
-        let pr: PullRequest =
-            resp.json().with_context(|| "Parsing created Forgejo PR")?;
+        let pr: PullRequest = resp.json().with_context(|| "Parsing created Forgejo PR")?;
         Ok(pr)
     }
 
@@ -699,12 +746,11 @@ impl ForgejoClient {
     /// Return inline review comments for a PR.
     /// Forgejo organises these differently (via reviews); returns regular issue
     /// comments as a best-effort fallback.
-    pub fn list_review_comments(
-        &self,
-        pr_number: u64,
-    ) -> Result<Vec<ReviewComment>> {
+    pub fn list_review_comments(&self, pr_number: u64) -> Result<Vec<ReviewComment>> {
         let _ = pr_number;
-        // TODO: Forgejo API does not yet expose per-line review comments
+        eprintln!(
+            "Warning: Forgejo does not yet support inline review comments; returning empty list"
+        );
         Ok(vec![])
     }
 
@@ -719,6 +765,7 @@ impl ForgejoClient {
         body: &str,
     ) -> Result<()> {
         // Forgejo inline review API is not yet implemented; post as a plain issue comment.
+        eprintln!("Warning: Forgejo inline review not supported; posting as plain issue comment");
         let text = format!(
             "**Review comment on `{}`** _(posted as issue comment — Forgejo inline review not yet supported)_\n\n{}",
             path, body
@@ -776,48 +823,15 @@ impl ForgejoTicket {
             .expect("OnceLock was just set above; this is a logic error if None"))
     }
 
-    /// Collect all comment lines matching `<prefix><fieldname>: <value>` and
-    /// join them with a space.  Multiple matching lines (e.g. one Bugzilla URL
-    /// and one Jira URL on separate lines) are merged so both are visible to
-    /// the regex scanners in push.rs.
     fn comment_field(&self, name: &str) -> Result<Option<String>> {
-        let prefix = &self.comment_field_prefix;
-        let needle = format!("{}:", name);
-        let mut values: Vec<String> = Vec::new();
-
-        let mut scan = |text: &str| {
-            for line in text.lines() {
-                let rest = if prefix.is_empty() {
-                    line
-                } else {
-                    match line.strip_prefix(&**prefix) {
-                        Some(r) => r.trim_start(),
-                        None => continue,
-                    }
-                };
-                if let Some(val) = rest.strip_prefix(&*needle) {
-                    let v = val.trim();
-                    if !v.is_empty() {
-                        values.push(v.to_string());
-                    }
-                }
-            }
-        };
-
-        // Scan the issue body first, then all comments.
         let issue = self.data()?;
-        if let Some(ref body) = issue.body {
-            scan(body);
-        }
-        for comment in self.load_comments()? {
-            scan(&comment.body);
-        }
-
-        if values.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(values.join(" ")))
-        }
+        let comments = self.load_comments()?;
+        Ok(scan_comment_fields(
+            issue.body.as_deref(),
+            comments,
+            &self.comment_field_prefix,
+            name,
+        ))
     }
 
     pub fn reviewer(&self) -> Result<Option<String>> {
@@ -850,12 +864,28 @@ impl ForgejoTicket {
 }
 
 impl TicketOps for ForgejoTicket {
-    fn number(&self) -> u64 { self.number }
-    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
-    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
-    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
-    fn title(&self) -> Result<String> { self.title() }
-    fn is_closed(&self) -> Result<bool> { self.is_closed() }
-    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
-    fn close(&self) -> Result<()> { self.close() }
+    fn number(&self) -> u64 {
+        self.number
+    }
+    fn reviewer(&self) -> Result<Option<String>> {
+        self.reviewer()
+    }
+    fn rhbz(&self) -> Result<Option<String>> {
+        self.rhbz()
+    }
+    fn milestone(&self) -> Result<Option<String>> {
+        self.milestone()
+    }
+    fn title(&self) -> Result<String> {
+        self.title()
+    }
+    fn is_closed(&self) -> Result<bool> {
+        self.is_closed()
+    }
+    fn comment(&self, text: &str) -> Result<()> {
+        self.comment(text)
+    }
+    fn close(&self) -> Result<()> {
+        self.close()
+    }
 }
