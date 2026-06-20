@@ -20,13 +20,19 @@ pub struct CustomField {
 
 #[derive(Debug, Deserialize)]
 pub struct PagureIssue {
+    #[serde(default)]
+    pub id: u64,
     pub title: String,
     #[serde(default)]
     #[allow(dead_code)]
     pub content: String,
     pub status: String,
     #[serde(default)]
+    pub close_status: Option<String>,
+    #[serde(default)]
     pub milestone: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(default)]
     pub custom_fields: Vec<CustomField>,
 }
@@ -89,6 +95,67 @@ impl PagureClient {
             .json()
             .with_context(|| format!("Parsing pagure issue {}", number))?;
         Ok(issue)
+    }
+
+    pub fn list_issues(&self, status: &str, milestones: &[&str]) -> Result<Vec<PagureIssue>> {
+        #[derive(Deserialize)]
+        struct IssueList {
+            issues: Vec<PagureIssue>,
+            #[allow(dead_code)]
+            total_issues: u64,
+        }
+
+        const MAX_PAGES: u32 = 1_000;
+        let milestones_param = milestones.join(",");
+        let mut all_issues = Vec::new();
+        let mut page = 1u32;
+        loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: pagination in list_issues exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
+            let base = format!("{}/{}/issues", self.base_url, self.repository);
+            let url = reqwest::Url::parse_with_params(
+                &base,
+                &[
+                    ("status", status),
+                    ("milestones", &milestones_param),
+                    ("per_page", "100"),
+                    ("page", &page.to_string()),
+                ],
+            )
+            .with_context(|| {
+                format!(
+                    "building Pagure issue list URL for milestone(s) '{}'",
+                    milestones_param
+                )
+            })?;
+            let url = url.to_string();
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", format!("token {}", self.token))
+                .header("Accept", "*/*")
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status_code = resp.status();
+                let body = resp.text().unwrap_or_default();
+                bail!("Pagure list_issues failed ({}): {}", status_code, body);
+            }
+            let list: IssueList = resp
+                .json()
+                .with_context(|| format!("Parsing pagure issue list page {}", page))?;
+            if list.issues.is_empty() {
+                break;
+            }
+            all_issues.extend(list.issues);
+            page += 1;
+        }
+        Ok(all_issues)
     }
 
     pub fn create_issue(&self, title: &str, body: &str) -> Result<u64> {
@@ -225,12 +292,28 @@ impl PagureTicket {
 }
 
 impl TicketOps for PagureTicket {
-    fn number(&self) -> u64 { self.number }
-    fn reviewer(&self) -> Result<Option<String>> { self.reviewer() }
-    fn rhbz(&self) -> Result<Option<String>> { self.rhbz() }
-    fn milestone(&self) -> Result<Option<String>> { self.milestone() }
-    fn title(&self) -> Result<String> { self.title() }
-    fn is_closed(&self) -> Result<bool> { self.is_closed() }
-    fn comment(&self, text: &str) -> Result<()> { self.comment(text) }
-    fn close(&self) -> Result<()> { self.close() }
+    fn number(&self) -> u64 {
+        self.number
+    }
+    fn reviewer(&self) -> Result<Option<String>> {
+        self.reviewer()
+    }
+    fn rhbz(&self) -> Result<Option<String>> {
+        self.rhbz()
+    }
+    fn milestone(&self) -> Result<Option<String>> {
+        self.milestone()
+    }
+    fn title(&self) -> Result<String> {
+        self.title()
+    }
+    fn is_closed(&self) -> Result<bool> {
+        self.is_closed()
+    }
+    fn comment(&self, text: &str) -> Result<()> {
+        self.comment(text)
+    }
+    fn close(&self) -> Result<()> {
+        self.close()
+    }
 }

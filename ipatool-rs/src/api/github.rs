@@ -15,6 +15,8 @@ pub struct GitHubClient {
 /// GitHub issue fields (GitHub-specific: includes milestone, state, labels).
 #[derive(Debug, Deserialize, Clone)]
 pub struct GitHubIssue {
+    #[serde(default)]
+    pub number: u64,
     pub state: String,
     pub labels: Vec<Label>,
     #[serde(default)]
@@ -23,6 +25,8 @@ pub struct GitHubIssue {
     pub body: Option<String>,
     #[serde(default)]
     pub milestone: Option<GitHubMilestone>,
+    #[serde(default)]
+    pub pull_request: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -170,6 +174,122 @@ impl GitHubClient {
             .json()
             .with_context(|| format!("Parsing issue {}", number))?;
         Ok(issue)
+    }
+
+    pub fn list_issues_by_milestone(
+        &self,
+        state: &str,
+        milestone_title: &str,
+    ) -> Result<Vec<GitHubIssue>> {
+        #[derive(Debug, Deserialize)]
+        struct MilestoneInfo {
+            number: u64,
+            title: String,
+        }
+
+        const MAX_PAGES: u32 = 1_000;
+        let mut milestone_number = None;
+        let mut page = 1u32;
+        let milestones_base = self.api_url("/milestones");
+        'outer: loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: milestone pagination exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
+            let url = reqwest::Url::parse_with_params(
+                &milestones_base,
+                &[
+                    ("state", "all"),
+                    ("per_page", "100"),
+                    ("page", &page.to_string()),
+                ],
+            )
+            .context("building GitHub milestones URL")?;
+            let url = url.to_string();
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", self.auth_header())
+                .header("Accept", "application/vnd.github.v3+json")
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("GitHub list milestones failed ({}): {}", status, body);
+            }
+            let milestones: Vec<MilestoneInfo> = resp
+                .json()
+                .context("Parsing GitHub milestones")?;
+            if milestones.is_empty() {
+                break;
+            }
+            for m in &milestones {
+                if m.title == milestone_title {
+                    milestone_number = Some(m.number);
+                    break 'outer;
+                }
+            }
+            page += 1;
+        }
+
+        let milestone_num = match milestone_number {
+            Some(n) => n,
+            None => anyhow::bail!("Milestone '{}' not found on GitHub", milestone_title),
+        };
+
+        let issues_base = self.api_url("/issues");
+        let milestone_str = milestone_num.to_string();
+        let mut all_issues = Vec::new();
+        page = 1;
+        loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: issue pagination exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
+            let url = reqwest::Url::parse_with_params(
+                &issues_base,
+                &[
+                    ("state", state),
+                    ("milestone", milestone_str.as_str()),
+                    ("per_page", "100"),
+                    ("page", &page.to_string()),
+                ],
+            )
+            .context("building GitHub issues URL")?;
+            let url = url.to_string();
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", self.auth_header())
+                .header("Accept", "application/vnd.github.v3+json")
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("GitHub list issues failed ({}): {}", status, body);
+            }
+            let issues: Vec<GitHubIssue> = resp
+                .json()
+                .context("Parsing GitHub issues")?;
+            if issues.is_empty() {
+                break;
+            }
+            let filtered: Vec<GitHubIssue> = issues
+                .into_iter()
+                .filter(|i| i.pull_request.is_none())
+                .collect();
+            all_issues.extend(filtered);
+            page += 1;
+        }
+        Ok(all_issues)
     }
 
     pub fn is_pr_merged(&self, number: u64) -> Result<bool> {
