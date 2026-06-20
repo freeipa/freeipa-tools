@@ -17,6 +17,41 @@ cargo build --release
 # binary at target/release/ipatool
 ```
 
+## Building RPMs
+
+The `contrib/packages/` directory contains a full RPM packaging setup for
+Fedora.  ipatool is not published to crates.io; all Rust dependencies are
+vendored into a tarball for offline builds.
+
+```sh
+cd contrib/packages
+
+# Create source and vendor tarballs (vendor needs network)
+make sources
+
+# Validate metadata and generate ipatool.spec from the template
+make spec
+
+# Build an SRPM (no ~/rpmbuild needed)
+make srpm
+
+# Rebuild in a clean mock chroot
+make mock
+
+# Submit to COPR
+make copr-build COPR=@mygroup/ipatool
+```
+
+Override `GIT_REF` to build from a specific commit or tag:
+
+```sh
+make sources GIT_REF=v0.1.0
+```
+
+The spec template (`ipatool.spec.in`) and `rust2rpm.toml` must be kept in
+sync.  `rust2rpm.toml` is validated automatically before every spec/SRPM
+build.  See `make help` for all available targets.
+
 ## Configuration
 
 On first run, generate a commented sample configuration:
