@@ -1,0 +1,48 @@
+[package]
+url = "https://github.com/freeipa/freeipa-tools"
+
+summary = "FreeIPA developer workflow tool — review, push, and TUI for patch management"
+
+description = """
+ipatool is a command-line and terminal-UI tool for FreeIPA project
+contributors.  It automates the repetitive parts of reviewing and landing
+patches: fetching patches, applying them, pushing to upstream git, updating
+issue trackers (Pagure, Forgejo, Jira), and managing GitHub/Forgejo pull
+requests.
+
+The interactive TUI (ipatool tui) lets contributors browse open pull requests,
+inspect CI results, ACK or reject patches, and run the push pipeline, all from
+the terminal.  An offline mode stores a local SQLite cache for disconnected
+work and queues mutations for replay when connectivity is restored.
+
+The workspace produces one binary package (ipatool) from the root crate.
+
+Workspace crates (bundled, not separately packaged):
+  (none yet — workspace layout is prepared for future sub-crate extraction)
+"""
+
+# Binaries are installed explicitly from target/rpm/ in %install.
+# The workspace layout means %cargo_install would only reach the root crate
+# and cannot handle sub-crate binaries without extra flags.  Per Fedora Rust
+# packaging guidelines for workspace projects, %cargo_install SHOULD NOT be
+# used.
+cargo-install-bin = false
+cargo-install-lib = false
+
+doc-files = ["README.md"]
+
+
+[requires]
+build = [
+    "cargo-rpm-macros >= 26",
+    # SQLite — rusqlite links against system libsqlite3.
+    "pkgconfig(sqlite3)",
+]
+
+
+[tests]
+# Binary-only crate: no library doc-tests exist.
+skip = ["doc"]
+comments = [
+    "Binary-only crate: no library doc-tests exist.",
+]
