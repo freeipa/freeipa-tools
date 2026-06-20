@@ -25,6 +25,7 @@ pub mod pr_push;
 pub mod pr_reject;
 pub mod push;
 pub mod queue_submit;
+pub mod release_notes;
 pub mod start_review;
 
 /// Fallback expected remote server when no forge-specific URL is configured.
@@ -157,25 +158,53 @@ impl TicketOps for Ticket {
         }
     }
     fn reviewer(&self) -> Result<Option<String>> {
-        match self { Ticket::Pagure(t) => t.reviewer(), Ticket::Forgejo(t) => t.reviewer(), Ticket::GitHub(t) => t.reviewer() }
+        match self {
+            Ticket::Pagure(t) => t.reviewer(),
+            Ticket::Forgejo(t) => t.reviewer(),
+            Ticket::GitHub(t) => t.reviewer(),
+        }
     }
     fn rhbz(&self) -> Result<Option<String>> {
-        match self { Ticket::Pagure(t) => t.rhbz(), Ticket::Forgejo(t) => t.rhbz(), Ticket::GitHub(t) => t.rhbz() }
+        match self {
+            Ticket::Pagure(t) => t.rhbz(),
+            Ticket::Forgejo(t) => t.rhbz(),
+            Ticket::GitHub(t) => t.rhbz(),
+        }
     }
     fn milestone(&self) -> Result<Option<String>> {
-        match self { Ticket::Pagure(t) => t.milestone(), Ticket::Forgejo(t) => t.milestone(), Ticket::GitHub(t) => t.milestone() }
+        match self {
+            Ticket::Pagure(t) => t.milestone(),
+            Ticket::Forgejo(t) => t.milestone(),
+            Ticket::GitHub(t) => t.milestone(),
+        }
     }
     fn title(&self) -> Result<String> {
-        match self { Ticket::Pagure(t) => t.title(), Ticket::Forgejo(t) => t.title(), Ticket::GitHub(t) => t.title() }
+        match self {
+            Ticket::Pagure(t) => t.title(),
+            Ticket::Forgejo(t) => t.title(),
+            Ticket::GitHub(t) => t.title(),
+        }
     }
     fn is_closed(&self) -> Result<bool> {
-        match self { Ticket::Pagure(t) => t.is_closed(), Ticket::Forgejo(t) => t.is_closed(), Ticket::GitHub(t) => t.is_closed() }
+        match self {
+            Ticket::Pagure(t) => t.is_closed(),
+            Ticket::Forgejo(t) => t.is_closed(),
+            Ticket::GitHub(t) => t.is_closed(),
+        }
     }
     fn comment(&self, text: &str) -> Result<()> {
-        match self { Ticket::Pagure(t) => t.comment(text), Ticket::Forgejo(t) => t.comment(text), Ticket::GitHub(t) => t.comment(text) }
+        match self {
+            Ticket::Pagure(t) => t.comment(text),
+            Ticket::Forgejo(t) => t.comment(text),
+            Ticket::GitHub(t) => t.comment(text),
+        }
     }
     fn close(&self) -> Result<()> {
-        match self { Ticket::Pagure(t) => t.close(), Ticket::Forgejo(t) => t.close(), Ticket::GitHub(t) => t.close() }
+        match self {
+            Ticket::Pagure(t) => t.close(),
+            Ticket::Forgejo(t) => t.close(),
+            Ticket::GitHub(t) => t.close(),
+        }
     }
 }
 
