@@ -3,7 +3,7 @@
 A Rust port of the FreeIPA development workflow tool.  It automates the
 repetitive parts of reviewing and landing patches: fetching patches, applying
 them, pushing upstream, updating issue trackers (Pagure, Forgejo, Jira),
-managing GitHub pull requests, and generating release notes.
+managing pull requests (GitHub and Forgejo), and generating release notes.
 
 ## Building
 
@@ -182,7 +182,7 @@ db-path: ~/.ipa/ipatool-cache.db
 # A profile overrides selected top-level fields and sets the PR source and
 # issue tracker.  Activate with --profile <name>.
 #
-# pr-source     : github | forgejo | pagure  (default: github)
+# pr-source     : github | forgejo | pagure  (default: github; pagure not yet implemented)
 # issue-tracker : pagure | forgejo | github  (default: pagure)
 #
 # Any connection field (gh-*, pagure-*, forgejo-*, ticket-url, commit-url,
@@ -264,7 +264,7 @@ ipatool --profile gh-issues pr-list    # GitHub PRs, GitHub issues (no Pagure)
 
 | Field | Values | Description |
 |-------|--------|-------------|
-| `pr-source` | `github`, `forgejo`, `pagure` | Where pull requests are fetched from |
+| `pr-source` | `github`, `forgejo`, `pagure` | Where pull requests are fetched from (`pagure` is accepted but not yet implemented) |
 | `issue-tracker` | `pagure`, `forgejo`, `github` | Which tracker holds linked tickets |
 | `gh-token`, `gh-repo`, `gh-fork-remote` | strings | Override GitHub settings |
 | `pagure-repository`, `pagure-token` | strings | Override Pagure settings |
@@ -348,14 +348,22 @@ Apply one or more patch files (or directories of patch files) to the local
 clean repository and push them upstream.  For each branch the reviewer trailer
 is added, the patch is applied with `git am`, and pushed via `git push`.
 
+Ticket numbers are extracted from commit messages by scanning for both
+`ticket-url` and `legacy-ticket-url` patterns.  When `issue-number-map` is
+configured, extracted numbers are translated before any tracker API call is
+made.  When `rewrite-ticket-urls` is `true`, legacy URLs in commit messages
+are replaced with the current `ticket-url` before `git am` writes them into
+the target branch.
+
 After a successful push, ipatool can optionally:
-- post a comment on the linked Pagure/Forgejo issue,
-- close that issue,
+- post a comment on the linked Pagure/Forgejo/GitHub issue,
+- close that issue (skipped when backport branches are also being pushed),
 - post a comment on the linked Jira issue,
 - transition that Jira issue.
 
 Interactive prompts are controlled by `update-issue`, `close-issue`,
-`update-jira`, and `close-jira` in the config.
+`update-jira`, and `close-jira` in the config.  Each accepts `yes` (always do
+it), `no` (never), or `ask` (prompt interactively each time).
 
 ```
 ipatool push -b master -r abbra ~/patches/0001-fix-something.patch
@@ -378,9 +386,9 @@ The `trac-username-map` config key provides explicit overrides.
 
 ### `start-review`
 
-**Note:** The reviewer-assignment part of this command is not yet implemented
-and will exit with an error.  The `--am` flag (applying patches via
-`am-command`) works independently via the `am` subcommand.
+**Note:** This command is not yet implemented and will exit with an error.
+Use the `am` subcommand to apply patches to a development VM, and set the
+reviewer manually via the issue tracker.
 
 Set yourself as the reviewer on one or more Pagure/Forgejo tickets and
 optionally apply the patches to a development VM.
@@ -417,7 +425,8 @@ ipatool am ~/patches/
 
 ### `pr-list`
 
-List GitHub pull requests with optional state and label filters.  After
+List pull requests (from GitHub or Forgejo, depending on the active profile)
+with optional state and label filters.  After
 listing, also scans the last 100 recently-updated PRs for common mistakes
 (merged without `pushed` label, pushed without `ack` label).
 
@@ -444,8 +453,8 @@ Output columns (tab-separated): `number  title  labels  URL  CI-statuses`
 
 ### `pr-ack`
 
-Add the `ack` label to a PR, remove `rejected` if present, and optionally
-post a comment.
+Add the `ack` label to a PR and optionally post a comment.  Fails if the PR
+is already closed or has the `rejected` label.
 
 ```
 ipatool pr-ack 8309
@@ -488,10 +497,10 @@ ipatool --offline pr-reject 8309 -c "Needs rebase"   # queued
 
 ### `pr-push`
 
-Full push pipeline for a GitHub PR:
+Full push pipeline for a PR (GitHub or Forgejo):
 
-1. Validates the PR (ACKed, not rejected, not already pushed, CI green,
-   mergeable).
+1. Validates the PR (not closed, ACKed, not rejected, not already pushed,
+   mergeable, CI passed with no pending jobs).
 2. Downloads commits as patch files into `patchdir`.
 3. Runs the `push` pipeline (apply + push to `base` branch of the PR).
 4. Adds the `pushed` label, posts a push-summary comment, and closes the PR.
@@ -542,9 +551,9 @@ continues with the remaining branches.
 
 ### `tui`
 
-Interactive terminal UI for browsing, reviewing, and acting on GitHub pull
-requests.  The TUI remains open between operations — after a push or backport
-it returns you to the PR list showing the updated state.
+Interactive terminal UI for browsing, reviewing, and acting on pull requests
+(GitHub or Forgejo).  The TUI remains open between operations — after a push
+or backport it returns you to the PR list showing the updated state.
 
 ```
 ipatool tui                  # open PRs (default)
@@ -562,7 +571,7 @@ ipatool --offline tui        # use cached data (no network)
 #### Startup behaviour
 
 - **Online, no cache:** a loading spinner is shown while PRs are fetched from
-  GitHub.
+  the forge.
 - **Online, cache available:** cached PRs are displayed immediately so the TUI
   is interactive at once.  A background thread fetches fresh data and swaps the
   list in silently when it arrives.  On network error the cached view stays and
@@ -650,8 +659,8 @@ All keys listed below are the defaults.  Every key can be remapped in
 | `c` | Open diff review for selected PR |
 | `b` | Open PR in browser |
 | `i` | Open CI job results viewer (only available for PRs with completed CI jobs) |
-| `r` | Refresh PR list from GitHub |
-| `s` | Sync queued offline actions to GitHub |
+| `r` | Refresh PR list from the forge |
+| `s` | Sync queued offline actions to the forge |
 | `q` | Quit |
 
 #### Action menu (`Enter`)
@@ -850,7 +859,8 @@ dispatches to the correct API.
 
 ### `queue-submit`
 
-Replay all queued offline actions against the live GitHub API, in the order
+Replay all queued offline actions against the live forge API (GitHub or
+Forgejo, depending on which was active when each action was queued), in the order
 they were recorded.  Successfully applied actions are removed from the queue.
 The first failure halts the queue so ordering is preserved.
 
@@ -955,7 +965,8 @@ The git log parser recognises the following patterns in commit messages:
 |---------|---------|
 | `RN: <text>` | Release note line; included in the Highlights section |
 | `Reviewed-By: Name <email>` | Reviewer attribution; appears in the Detailed Changelog |
-| `Fixes: <ticket-url><number>` | Ticket reference; links the commit to an issue |
+| `<ticket-url><number>` | Ticket reference; links the commit to an issue (matched anywhere in the message, commonly after `Fixes:` or `Relates:`) |
+| `<legacy-ticket-url><number>` | Same as above; recognised when `legacy-ticket-url` is set (see [Issue tracker migration](#issue-tracker-migration-pagure--codeberg)) |
 
 ---
 
@@ -985,7 +996,7 @@ revisiting them offline shows the full information.
 
 ### Syncing queued actions
 
-In the TUI, press `s` to replay the queue against GitHub.  From the command
+In the TUI, press `s` to replay the queue against the forge.  From the command
 line, use `queue-submit` (or inspect the queue first with `queue-list`).
 
 Actions are replayed in order; the first failure halts the queue so ordering
@@ -1081,16 +1092,18 @@ Any missing field falls back to the compiled-in default shown above.
 
 ## Tracker integration
 
-### Pagure / Forgejo
+### Pagure / Forgejo / GitHub Issues
 
 Used as the primary issue tracker.  After a push, ipatool reads `ticket-url`
-links from commit messages to identify associated issues, then optionally:
+and `legacy-ticket-url` links from commit messages to identify associated
+issues, then optionally:
 
 - posts a comment with the push summary (controlled by `update-issue`),
 - closes the issue (controlled by `close-issue`).
 
-Only one tracker (Pagure or Forgejo) is active at a time.  Disable the other
-with `--no-pagure` or `--no-forgejo`.
+Only one tracker (Pagure, Forgejo, or GitHub) is active at a time, selected
+by the `issue-tracker` profile field.  Disable individual backends with
+`--no-pagure`, `--no-forgejo`, or by omitting credentials.
 
 ### Jira
 
