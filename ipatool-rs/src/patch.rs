@@ -20,6 +20,41 @@ fn reviewer_line_re() -> &'static Regex {
     })
 }
 
+/// Scan `text` for ticket URL patterns and return deduplicated ticket numbers.
+///
+/// Both `ticket_url` (the primary/current tracker) and `legacy_ticket_url`
+/// (the old tracker, e.g. Pagure when migrating to Codeberg) are matched.
+/// Empty URL strings are silently skipped.
+pub fn extract_ticket_numbers(text: &str, ticket_url: &str, legacy_ticket_url: &str) -> Vec<u64> {
+    let mut numbers = Vec::new();
+    for url in [ticket_url, legacy_ticket_url] {
+        if url.is_empty() {
+            continue;
+        }
+        let escaped = regex::escape(url);
+        let re = match Regex::new(&format!(r"{}(\d+)", escaped)) {
+            Ok(re) => re,
+            Err(e) => {
+                eprintln!(
+                    "Warning: failed to compile ticket regex for URL '{}': {}",
+                    url, e
+                );
+                continue;
+            }
+        };
+        for cap in re.captures_iter(text) {
+            if let Some(m) = cap.get(1) {
+                if let Ok(n) = m.as_str().parse::<u64>() {
+                    if !numbers.contains(&n) {
+                        numbers.push(n);
+                    }
+                }
+            }
+        }
+    }
+    numbers
+}
+
 /// A sanitized patch ready for application
 pub struct Patch {
     pub filename: PathBuf,
@@ -89,29 +124,13 @@ impl Patch {
         // Both the primary ticket_url and the legacy_ticket_url are scanned so
         // that commits written against the old pagure tracker are still picked up
         // when the active tracker has moved to Codeberg.
-        let mut ticket_numbers = Vec::new();
-        for url in [ticket_url, legacy_ticket_url] {
-            if url.is_empty() {
-                continue;
-            }
-            let escaped = regex::escape(url);
-            if let Ok(ticket_re) = Regex::new(&format!(r"{}(\d+)", escaped)) {
-                for line in &head_lines {
-                    if line.starts_with('-') || line.starts_with(' ') {
-                        continue;
-                    }
-                    for cap in ticket_re.captures_iter(line) {
-                        if let Some(m) = cap.get(1) {
-                            if let Ok(n) = m.as_str().parse::<u64>() {
-                                if !ticket_numbers.contains(&n) {
-                                    ticket_numbers.push(n);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let scannable: String = head_lines
+            .iter()
+            .filter(|l| !l.starts_with('-') && !l.starts_with(' '))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("");
+        let ticket_numbers = extract_ticket_numbers(&scannable, ticket_url, legacy_ticket_url);
 
         Ok(Patch {
             filename,
@@ -676,5 +695,110 @@ diff --git a/x b/x
         let dir = tempfile::tempdir().unwrap();
         // Should not panic on empty directory
         delete_patches(dir.path());
+    }
+
+    // ── extract_ticket_numbers ───────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_ticket_numbers_primary_url() {
+        let nums = extract_ticket_numbers(
+            "Fixes: https://pagure.io/freeipa/issue/9995\nSigned-off-by: Dev",
+            "https://pagure.io/freeipa/issue/",
+            "",
+        );
+        assert_eq!(nums, vec![9995]);
+    }
+
+    #[test]
+    fn test_extract_ticket_numbers_legacy_url() {
+        let nums = extract_ticket_numbers(
+            "Fixes: https://pagure.io/freeipa/issue/9995",
+            "https://codeberg.org/freeipa/freeipa/issues/",
+            "https://pagure.io/freeipa/issue/",
+        );
+        assert_eq!(nums, vec![9995]);
+    }
+
+    #[test]
+    fn test_extract_ticket_numbers_both_urls() {
+        let text = "Fixes: https://pagure.io/freeipa/issue/9995\n\
+                    Also: https://codeberg.org/freeipa/freeipa/issues/1234";
+        let nums = extract_ticket_numbers(
+            text,
+            "https://codeberg.org/freeipa/freeipa/issues/",
+            "https://pagure.io/freeipa/issue/",
+        );
+        assert!(nums.contains(&1234));
+        assert!(nums.contains(&9995));
+        assert_eq!(nums.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_ticket_numbers_dedup_across_urls() {
+        let text = "Fixes: https://pagure.io/freeipa/issue/42\n\
+                    Also: https://codeberg.org/freeipa/freeipa/issues/42";
+        let nums = extract_ticket_numbers(
+            text,
+            "https://codeberg.org/freeipa/freeipa/issues/",
+            "https://pagure.io/freeipa/issue/",
+        );
+        assert_eq!(nums, vec![42]);
+    }
+
+    #[test]
+    fn test_extract_ticket_numbers_empty_urls() {
+        let nums = extract_ticket_numbers("Fixes: https://pagure.io/freeipa/issue/9995", "", "");
+        assert!(nums.is_empty());
+    }
+
+    #[test]
+    fn test_extract_ticket_numbers_no_match() {
+        let nums = extract_ticket_numbers(
+            "Just some text without ticket references",
+            "https://pagure.io/freeipa/issue/",
+            "",
+        );
+        assert!(nums.is_empty());
+    }
+
+    #[test]
+    fn test_extract_ticket_numbers_multiple_in_same_line() {
+        let nums = extract_ticket_numbers(
+            "Fixes: https://pagure.io/freeipa/issue/100 and https://pagure.io/freeipa/issue/200",
+            "https://pagure.io/freeipa/issue/",
+            "",
+        );
+        assert_eq!(nums, vec![100, 200]);
+    }
+
+    // ── Migration scenario: patch with old URL, config with new URL ──────────
+
+    #[test]
+    fn test_patch_migration_legacy_url_finds_tickets() {
+        let content = "\
+From abc Mon Sep 17 00:00:00 2001
+Subject: Fix migration issue
+
+Fixes: https://pagure.io/freeipa/issue/9995
+Signed-off-by: Dev <dev@example.com>
+---
+diff --git a/x b/x
+--- a/x
++++ b/x
+@@ -1 +1 @@
+-a
++b
+";
+        let patch = Patch::from_content(
+            PathBuf::from("test.patch"),
+            content,
+            "https://codeberg.org/freeipa/freeipa/issues/",
+            "https://pagure.io/freeipa/issue/",
+        )
+        .unwrap();
+        assert!(
+            patch.ticket_numbers.contains(&9995),
+            "ticket from legacy pagure URL should be found when primary is codeberg"
+        );
     }
 }
