@@ -60,7 +60,7 @@ forgejo-token: "0123456789abcdef0123456789abcdef01234567"
 # Issue tracker operations (apply to both Pagure and Forgejo)
 # update-issue options: yes/no/ask
 update-issue: ask
-# close-issue options: no/ask
+# close-issue options: yes/no/ask
 close-issue: ask
 
 # Jira configuration (secondary tracker; ticket keys come from the 'rhbz'
@@ -81,9 +81,6 @@ trac-username-map:
 # Command to run "git am" on the development tree (as argv list)
 am-command: ["ssh", "ipa-devel-vm.local", "cd ~/freeipa/ ; git am -3"]
 
-# Currently unused :(
-browser: firefox
-
 # GitHub configuration
 # for the token, we require at least the 'repo', 'admin:org' group permissions
 # and the 'user:email' and 'read:user' permissions
@@ -91,11 +88,14 @@ gh-token: "YOUR_GITHUB_TOKEN_HERE"
 gh-repo: "freeipa/freeipa"
 gh-fork-remote: "mygh"
 
+# Local cache database used for offline mode (default: ~/.ipa/ipatool-cache.db)
+# db-path: ~/.ipa/ipatool-cache.db
+
 # Named profiles — select with --profile <name>
 # Each profile can override the pr-source, issue-tracker, and/or any
 # connection settings.  Unset fields fall back to the top-level values.
 #
-# pr-source:     github | forgejo | pagure   (default: github)
+# pr-source:     github | forgejo | pagure   (default: github; pagure not yet implemented)
 # issue-tracker: pagure | forgejo | github   (default: pagure)
 #
 # profiles:
@@ -257,7 +257,7 @@ enum Command {
         patches: Vec<String>,
     },
 
-    /// List GitHub pull requests
+    /// List pull requests (GitHub or Forgejo, depending on profile)
     PrList {
         /// Filter by state: open, closed, all (prefix with - to exclude)
         #[arg(short = 's', long = "state")]
@@ -316,14 +316,14 @@ enum Command {
         branches: Vec<String>,
     },
 
-    /// Interactive TUI: browse PRs, inspect details, ACK/reject
+    /// Interactive TUI: browse PRs, inspect details, ACK/reject (GitHub or Forgejo)
     Tui {
         /// Which PRs to load: open, closed, or all
         #[arg(long, default_value = "open")]
         state: String,
     },
 
-    /// Fetch PRs from GitHub and store them in the local cache for offline use
+    /// Fetch PRs and store them in the local cache for offline use
     CacheUpdate {
         /// Which PRs to cache: open, closed, or all
         #[arg(long, default_value = "open")]
@@ -333,7 +333,7 @@ enum Command {
     /// List pending offline review actions without submitting them
     QueueList,
 
-    /// Submit all pending offline review actions to GitHub
+    /// Submit all pending offline review actions to the forge (GitHub or Forgejo)
     QueueSubmit,
 
     /// Generate release notes from git log and issue tracker
@@ -565,7 +565,7 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
             branches,
             reviewers,
             patches,
-        } => commands::push::run(ctx, patches, branches, reviewers, false, &[]),
+        } => commands::push::run(ctx, patches, branches, reviewers, false, &[], &[]),
 
         Command::StartReview {
             force,

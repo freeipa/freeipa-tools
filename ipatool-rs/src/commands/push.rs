@@ -16,6 +16,7 @@ pub fn run(
     reviewer_args: &[String],
     autobackport: bool,
     backport_branches: &[String],
+    extra_ticket_numbers: &[u64],
 ) -> Result<()> {
     let patchdir = ctx.config.patchdir_expanded();
     let ticket_url = &ctx.config.ticket_url;
@@ -40,15 +41,20 @@ pub fn run(
 
     crate::git::ensure_clean(&ctx.git_env, ctx.verbosity)?;
 
-    // Collect ticket numbers from patches, then apply issue_number_map so that
-    // legacy pagure numbers are translated to the corresponding Codeberg numbers
-    // when the migration did not preserve the original numbering.
+    // Collect ticket numbers from patches and any caller-supplied extras,
+    // then apply issue_number_map so that legacy pagure numbers are translated
+    // to the corresponding Codeberg numbers when the migration did not preserve
+    // the original numbering.
     let mut ticket_numbers: HashSet<u64> = HashSet::new();
     for patch in &patches {
         for &n in &patch.ticket_numbers {
             let mapped = ctx.config.issue_number_map.get(&n).copied().unwrap_or(n);
             ticket_numbers.insert(mapped);
         }
+    }
+    for &n in extra_ticket_numbers {
+        let mapped = ctx.config.issue_number_map.get(&n).copied().unwrap_or(n);
+        ticket_numbers.insert(mapped);
     }
 
     // Make ticket objects
@@ -96,10 +102,7 @@ pub fn run(
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    eprintln!(
-                        "Warning: could not retrieve milestone from ticket: {}",
-                        e
-                    );
+                    eprintln!("Warning: could not retrieve milestone from ticket: {}", e);
                 }
             }
         }

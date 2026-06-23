@@ -68,6 +68,7 @@ pub fn run(
         reviewer_args,
         autobackport,
         backport_branches,
+        &[],
     );
 
     // Post-push actions
