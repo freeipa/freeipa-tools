@@ -365,11 +365,11 @@ enum Command {
         links: bool,
 
         /// Output MediaWiki format instead of Markdown
-        #[arg(long)]
+        #[arg(long, conflicts_with = "rst")]
         wiki: bool,
 
         /// Output reStructuredText format instead of Markdown
-        #[arg(long)]
+        #[arg(long, conflicts_with = "wiki")]
         rst: bool,
 
         /// Path to git repository (overrides clean-repo-path from config)
