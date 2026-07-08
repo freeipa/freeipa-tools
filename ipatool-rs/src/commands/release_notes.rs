@@ -41,6 +41,7 @@ pub struct ReleaseNotesParams<'a> {
     pub additional_milestones: &'a [String],
     pub links: bool,
     pub wiki: bool,
+    pub rst: bool,
     pub no_milestones: bool,
     pub repo_path: Option<&'a str>,
 }
@@ -135,6 +136,8 @@ pub fn run(ctx: &Ctx, params: &ReleaseNotesParams<'_>) -> Result<()> {
 
     if params.wiki {
         print_wiki(&sorted_tickets, &bugs, &git, params, &fmt);
+    } else if params.rst {
+        print_rst(&sorted_tickets, &bugs, &git, params, &fmt);
     } else {
         print_markdown(&sorted_tickets, &bugs, &git, params, &fmt);
     }
@@ -696,6 +699,195 @@ fn print_commit_wiki(commit: &git_log::GitCommit, fmt: &FormatConfig<'_>) {
     println!("{}", line);
 }
 
+// ── reStructuredText output ──────────────────────────────────────────────────
+
+fn rst_title(text: &str) {
+    let underline = "=".repeat(text.len());
+    println!("{}", underline);
+    println!("{}", text);
+    println!("{}", underline);
+}
+
+fn rst_heading(text: &str, ch: char) {
+    let underline: String = std::iter::repeat_n(ch, text.len()).collect();
+    println!("{}", text);
+    println!("{}", underline);
+}
+
+fn print_rst(
+    tickets: &[ReleaseTicket],
+    bugs: &[&ReleaseTicket],
+    git: &GitLogResult,
+    params: &ReleaseNotesParams<'_>,
+    fmt: &FormatConfig<'_>,
+) {
+    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets);
+
+    let title = format!("FreeIPA {} Release Notes", params.version);
+    rst_title(&title);
+    println!();
+    println!("**Release date**: {}", params.release_date);
+    println!();
+    println!(
+        "The FreeIPA team would like to announce FreeIPA {} release!",
+        params.version
+    );
+    println!();
+    println!("It can be downloaded from http://www.freeipa.org/page/Downloads. Builds for");
+    println!("Fedora distributions will be available from the official repository soon.");
+    println!();
+
+    let heading = format!("Highlights in {}", params.version);
+    rst_heading(&heading, '-');
+    println!();
+    if !release_notes.is_empty() {
+        println!(".. TODO:: put release notes to proper categories");
+        println!();
+        for note in &release_notes {
+            println!("{}", note);
+        }
+        println!();
+    }
+
+    rst_heading("Enhancements", '-');
+    println!();
+    if enhancements.is_empty() {
+        println!("*none*");
+    } else {
+        for note in &enhancements {
+            println!("{}", note);
+        }
+    }
+    println!();
+
+    rst_heading("Known Issues", '-');
+    println!();
+    if known_issues.is_empty() {
+        println!("*none*");
+    } else {
+        for note in &known_issues {
+            println!("{}", note);
+        }
+    }
+    println!();
+
+    rst_heading("Bug Fixes", '-');
+    println!();
+    println!(
+        "FreeIPA {} is a stabilization release for the features delivered as a\n\
+         part of {} version series.",
+        params.version, params.major_version
+    );
+    println!();
+    println!(
+        "There are {} bug-fixes since FreeIPA {} release.\n\
+         Details of the bug-fixes can be seen in the list of resolved tickets below.",
+        approximate_bug_count(bugs),
+        params.prev_version
+    );
+    println!();
+
+    rst_heading("Upgrading", '-');
+    println!();
+    println!(
+        "Upgrade instructions are available on the `Upgrade <https://www.freeipa.org/page/Upgrade>`__ page."
+    );
+    println!();
+
+    rst_heading("Feedback", '-');
+    println!();
+    println!("Please provide comments, bugs and other feedback via the freeipa-users mailing");
+    println!("list (https://lists.fedoraproject.org/archives/list/freeipa-users@lists.fedorahosted.org/)");
+    println!("or #freeipa channel on libera.chat.");
+    println!();
+
+    rst_heading("Resolved Tickets", '-');
+    println!();
+    for ticket in tickets {
+        print_ticket_rst(ticket, fmt);
+    }
+    println!();
+
+    let heading = format!("Detailed Changelog since {}", params.prev_version);
+    rst_heading(&heading, '-');
+    println!();
+    print_changelog_rst(git, fmt);
+}
+
+fn print_ticket_rst(ticket: &ReleaseTicket, fmt: &FormatConfig<'_>) {
+    if fmt.links && !fmt.ticket_url.is_empty() {
+        let mut line = format!(
+            "* `#{} <{}{}>`__ {}",
+            ticket.number, fmt.ticket_url, ticket.number, ticket.title
+        );
+        if let Some(ref rhbz) = ticket.rhbz {
+            let bz_links = format_rhbz_links_rst(rhbz, fmt.bugzilla_bug_url);
+            if !bz_links.is_empty() {
+                line = format!("{} ({})", line, bz_links);
+            }
+        }
+        println!("{}", line);
+    } else {
+        println!("* #{} {}", ticket.number, ticket.title);
+    }
+}
+
+fn format_rhbz_links_rst(rhbz: &str, bugzilla_bug_url: &str) -> String {
+    let mut links = Vec::new();
+    for part in rhbz.split(',') {
+        let part = part.trim();
+        if let Some(caps) = rhbz_re().captures(part) {
+            if let Some(id) = caps.get(1) {
+                links.push(format!("`rhbz#{} <{}>`__", id.as_str(), part));
+                continue;
+            }
+        }
+        if !part.is_empty() && !bugzilla_bug_url.is_empty() && part.starts_with(bugzilla_bug_url) {
+            let id = part.trim_start_matches(bugzilla_bug_url);
+            links.push(format!("`rhbz#{} <{}>`__", id, part));
+        }
+    }
+    links.join(", ")
+}
+
+fn print_changelog_rst(git: &GitLogResult, fmt: &FormatConfig<'_>) {
+    for author in git.authors.values() {
+        if author.commit_indices.is_empty() {
+            continue;
+        }
+        let heading = format!("{} ({})", author.name, author.commit_indices.len());
+        rst_heading(&heading, '~');
+        println!();
+        for &idx in &author.commit_indices {
+            let commit = &git.commits[idx];
+            print_commit_rst(commit, fmt);
+        }
+        println!();
+    }
+}
+
+fn print_commit_rst(commit: &git_log::GitCommit, fmt: &FormatConfig<'_>) {
+    let mut line = format!("* {}", commit.summary.trim());
+    if fmt.links {
+        if !fmt.commit_url.is_empty() {
+            line = format!("{} `commit <{}{}>`__", line, fmt.commit_url, commit.hash);
+        }
+        if !fmt.ticket_url.is_empty() {
+            let ticket_links: Vec<String> = commit
+                .tickets
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .map(|t| format!("`#{} <{}{}>`__", t, fmt.ticket_url, t))
+                .collect();
+            if !ticket_links.is_empty() {
+                line = format!("{} {}", line, ticket_links.join(" "));
+            }
+        }
+    }
+    println!("{}", line);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1019,5 +1211,36 @@ mod tests {
             rhbz,
             Some("https://bugzilla.redhat.com/show_bug.cgi?id=999".to_string())
         );
+    }
+
+    // ── format_rhbz_links_rst ──────────────────────────────────────────────
+
+    #[test]
+    fn test_rhbz_rst_full_url() {
+        let result =
+            format_rhbz_links_rst("https://bugzilla.redhat.com/show_bug.cgi?id=12345", "");
+        assert_eq!(
+            result,
+            "`rhbz#12345 <https://bugzilla.redhat.com/show_bug.cgi?id=12345>`__"
+        );
+    }
+
+    #[test]
+    fn test_rhbz_rst_bugzilla_bug_url_match() {
+        let result =
+            format_rhbz_links_rst("https://bz.example.com/67890", "https://bz.example.com/");
+        assert_eq!(result, "`rhbz#67890 <https://bz.example.com/67890>`__");
+    }
+
+    #[test]
+    fn test_rhbz_rst_empty() {
+        let result = format_rhbz_links_rst("", "");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_rhbz_rst_no_match() {
+        let result = format_rhbz_links_rst("not a url", "https://bz.example.com/");
+        assert_eq!(result, "");
     }
 }

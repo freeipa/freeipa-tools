@@ -368,6 +368,10 @@ enum Command {
         #[arg(long)]
         wiki: bool,
 
+        /// Output reStructuredText format instead of Markdown
+        #[arg(long)]
+        rst: bool,
+
         /// Path to git repository (overrides clean-repo-path from config)
         #[arg(long = "repo")]
         repo: Option<String>,
@@ -611,6 +615,7 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
             milestones,
             links,
             wiki,
+            rst,
             repo,
             no_milestones,
         } => {
@@ -624,6 +629,7 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
                 additional_milestones: milestones,
                 links: *links,
                 wiki: *wiki,
+                rst: *rst,
                 no_milestones: *no_milestones,
                 repo_path: repo.as_deref(),
             };
