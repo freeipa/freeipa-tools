@@ -703,6 +703,19 @@ fn print_commit_wiki(commit: &git_log::GitCommit, fmt: &FormatConfig<'_>) {
 
 // ── reStructuredText output ──────────────────────────────────────────────────
 
+fn rst_label(text: &str) -> String {
+    text.chars()
+        .flat_map(|c| c.to_lowercase())
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 fn rst_heading(text: &str, ch: char) {
     let underline: String = std::iter::repeat_n(ch, text.len()).collect();
     println!("{}", text);
@@ -735,6 +748,9 @@ fn print_rst(
     println!("soon.");
     println!();
 
+    let label = rst_label(&format!("highlights_in_{}", params.version));
+    println!(".. _{}:", label);
+    println!();
     let heading = format!("Highlights in {}", params.version);
     rst_heading(&heading, '-');
     println!();
@@ -760,6 +776,8 @@ fn print_rst(
     }
     println!();
 
+    println!(".. _known_issues:");
+    println!();
     rst_heading("Known Issues", '~');
     println!();
     if known_issues.is_empty() {
@@ -771,6 +789,8 @@ fn print_rst(
     }
     println!();
 
+    println!(".. _bug_fixes:");
+    println!();
     rst_heading("Bug fixes", '~');
     println!();
     println!(
@@ -801,6 +821,8 @@ fn print_rst(
     println!("or #freeipa channel on libera.chat.");
     println!();
 
+    println!(".. _resolved_tickets:");
+    println!();
     rst_heading("Resolved tickets", '-');
     println!();
     for ticket in tickets {
@@ -808,6 +830,9 @@ fn print_rst(
     }
     println!();
 
+    let label = rst_label(&format!("detailed_changelog_since_{}", params.prev_version));
+    println!(".. _{}:", label);
+    println!();
     let heading = format!("Detailed changelog since {}", params.prev_version);
     rst_heading(&heading, '-');
     println!();
@@ -855,6 +880,12 @@ fn print_changelog_rst(git: &GitLogResult, fmt: &FormatConfig<'_>) {
         if author.commit_indices.is_empty() {
             continue;
         }
+        let label = rst_label(&format!(
+            "{}_{}",
+            author.name, author.commit_indices.len()
+        ));
+        println!(".. _{}:", label);
+        println!();
         let heading = format!("{} ({})", author.name, author.commit_indices.len());
         rst_heading(&heading, '~');
         println!();
