@@ -747,7 +747,9 @@ fn print_rst(
         println!();
     }
 
-    rst_heading("Enhancements", '-');
+    println!("--------------");
+    println!();
+    rst_heading("Enhancements", '~');
     println!();
     if enhancements.is_empty() {
         println!("*none*");
@@ -758,7 +760,7 @@ fn print_rst(
     }
     println!();
 
-    rst_heading("Known Issues", '-');
+    rst_heading("Known Issues", '~');
     println!();
     if known_issues.is_empty() {
         println!("*none*");
@@ -769,44 +771,44 @@ fn print_rst(
     }
     println!();
 
-    rst_heading("Bug Fixes", '-');
+    rst_heading("Bug fixes", '~');
     println!();
     println!(
-        "FreeIPA {} is a stabilization release for the features delivered as a\n\
-         part of {} version series.",
-        params.version, params.major_version
+        "FreeIPA {} is a stabilization release for the features delivered as a",
+        params.version
     );
+    println!("part of {} version series.", params.major_version);
     println!();
     println!(
-        "There are {} bug-fixes since FreeIPA {} release.\n\
-         Details of the bug-fixes can be seen in the list of resolved tickets below.",
+        "There are {} bug-fixes since FreeIPA {} release. Details",
         approximate_bug_count(bugs),
         params.prev_version
     );
+    println!("of the bug-fixes can be seen in the list of resolved tickets below.");
     println!();
 
     rst_heading("Upgrading", '-');
     println!();
-    println!(
-        "Upgrade instructions are available on the `Upgrade <https://www.freeipa.org/page/Upgrade>`__ page."
-    );
+    println!("Upgrade instructions are available on");
+    println!("`Upgrade <https://www.freeipa.org/page/Upgrade>`__ page.");
     println!();
 
     rst_heading("Feedback", '-');
     println!();
-    println!("Please provide comments, bugs and other feedback via the freeipa-users mailing");
-    println!("list (https://lists.fedoraproject.org/archives/list/freeipa-users@lists.fedorahosted.org/)");
+    println!("Please provide comments, bugs and other feedback via the freeipa-users");
+    println!("mailing list");
+    println!("(https://lists.fedoraproject.org/archives/list/freeipa-users@lists.fedorahosted.org/)");
     println!("or #freeipa channel on libera.chat.");
     println!();
 
-    rst_heading("Resolved Tickets", '-');
+    rst_heading("Resolved tickets", '-');
     println!();
     for ticket in tickets {
         print_ticket_rst(ticket, fmt);
     }
     println!();
 
-    let heading = format!("Detailed Changelog since {}", params.prev_version);
+    let heading = format!("Detailed changelog since {}", params.prev_version);
     rst_heading(&heading, '-');
     println!();
     print_changelog_rst(git, fmt);
