@@ -703,13 +703,6 @@ fn print_commit_wiki(commit: &git_log::GitCommit, fmt: &FormatConfig<'_>) {
 
 // ── reStructuredText output ──────────────────────────────────────────────────
 
-fn rst_title(text: &str) {
-    let underline = "=".repeat(text.len());
-    println!("{}", underline);
-    println!("{}", text);
-    println!("{}", underline);
-}
-
 fn rst_heading(text: &str, ch: char) {
     let underline: String = std::iter::repeat_n(ch, text.len()).collect();
     println!("{}", text);
@@ -725,18 +718,21 @@ fn print_rst(
 ) {
     let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets, "* ");
 
-    let title = format!("FreeIPA {} Release Notes", params.version);
-    rst_title(&title);
+    let title = format!("FreeIPA {}", params.version);
+    rst_heading(&title, '=');
     println!();
-    println!("**Release date**: {}", params.release_date);
+    println!(".. raw:: mediawiki");
+    println!();
+    println!("   {{{{ReleaseDate|{}}}}}", params.release_date);
     println!();
     println!(
         "The FreeIPA team would like to announce FreeIPA {} release!",
         params.version
     );
     println!();
-    println!("It can be downloaded from http://www.freeipa.org/page/Downloads. Builds for");
-    println!("Fedora distributions will be available from the official repository soon.");
+    println!("It can be downloaded from http://www.freeipa.org/page/Downloads. Builds");
+    println!("for Fedora distributions will be available from the official repository");
+    println!("soon.");
     println!();
 
     let heading = format!("Highlights in {}", params.version);
