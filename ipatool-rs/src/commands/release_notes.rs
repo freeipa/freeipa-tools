@@ -729,7 +729,8 @@ fn print_rst(
     params: &ReleaseNotesParams<'_>,
     fmt: &FormatConfig<'_>,
 ) {
-    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets, "* ");
+    let (release_notes, enhancements, known_issues) =
+        release_notes_and_categories(tickets, "-  ");
 
     let title = format!("FreeIPA {}", params.version);
     rst_heading(&title, '=');
@@ -842,7 +843,7 @@ fn print_rst(
 fn print_ticket_rst(ticket: &ReleaseTicket, fmt: &FormatConfig<'_>) {
     if fmt.links && !fmt.ticket_url.is_empty() {
         let mut line = format!(
-            "* `#{} <{}{}>`__ {}",
+            "-  `#{} <{}{}>`__ {}",
             ticket.number, fmt.ticket_url, ticket.number, ticket.title
         );
         if let Some(ref rhbz) = ticket.rhbz {
@@ -853,7 +854,7 @@ fn print_ticket_rst(ticket: &ReleaseTicket, fmt: &FormatConfig<'_>) {
         }
         println!("{}", line);
     } else {
-        println!("* #{} {}", ticket.number, ticket.title);
+        println!("-  #{} {}", ticket.number, ticket.title);
     }
 }
 
@@ -898,25 +899,22 @@ fn print_changelog_rst(git: &GitLogResult, fmt: &FormatConfig<'_>) {
 }
 
 fn print_commit_rst(commit: &git_log::GitCommit, fmt: &FormatConfig<'_>) {
-    let mut line = format!("* {}", commit.summary.trim());
+    let summary = commit.summary.trim();
     if fmt.links {
+        println!("-  {}", summary);
         if !fmt.commit_url.is_empty() {
-            line = format!("{} `commit <{}{}>`__", line, fmt.commit_url, commit.hash);
+            println!("   `commit <{}{}>`__", fmt.commit_url, commit.hash);
         }
         if !fmt.ticket_url.is_empty() {
-            let ticket_links: Vec<String> = commit
-                .tickets
-                .iter()
-                .collect::<std::collections::BTreeSet<_>>()
-                .into_iter()
-                .map(|t| format!("`#{} <{}{}>`__", t, fmt.ticket_url, t))
-                .collect();
-            if !ticket_links.is_empty() {
-                line = format!("{} {}", line, ticket_links.join(" "));
+            let mut sorted_tickets: Vec<_> = commit.tickets.iter().collect();
+            sorted_tickets.sort();
+            for t in sorted_tickets {
+                println!("   `#{} <{}{}>`__", t, fmt.ticket_url, t);
             }
         }
+    } else {
+        println!("-  {}", summary);
     }
-    println!("{}", line);
 }
 
 #[cfg(test)]
