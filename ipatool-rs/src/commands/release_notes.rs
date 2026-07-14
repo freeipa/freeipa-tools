@@ -325,7 +325,9 @@ fn scan_body_for_field(body: Option<&str>, field_name: &str) -> Vec<String> {
 
 fn release_notes_and_categories(
     tickets: &[ReleaseTicket],
+    bullet: &str,
 ) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let indent: String = " ".repeat(bullet.len());
     let mut release_notes = Vec::new();
     let mut enhancements = Vec::new();
     let mut known_issues = Vec::new();
@@ -342,11 +344,11 @@ fn release_notes_and_categories(
         };
 
         let note = if changelog_text.is_empty() {
-            format!("* #{}: {}", ticket.number, ticket.title)
+            format!("{}#{}: {}", bullet, ticket.number, ticket.title)
         } else {
             format!(
-                "* #{}: {}\n  {}",
-                ticket.number, ticket.title, changelog_text
+                "{}#{}: {}\n{}{}",
+                bullet, ticket.number, ticket.title, indent, changelog_text
             )
         };
 
@@ -385,7 +387,7 @@ fn print_markdown(
     params: &ReleaseNotesParams<'_>,
     fmt: &FormatConfig<'_>,
 ) {
-    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets);
+    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets, "* ");
 
     println!("# FreeIPA {} Release Notes", params.version);
     println!();
@@ -555,7 +557,7 @@ fn print_wiki(
     params: &ReleaseNotesParams<'_>,
     fmt: &FormatConfig<'_>,
 ) {
-    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets);
+    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets, "* ");
 
     println!("{{{{ReleaseDate|{}}}}}", params.release_date);
     println!(
@@ -721,7 +723,7 @@ fn print_rst(
     params: &ReleaseNotesParams<'_>,
     fmt: &FormatConfig<'_>,
 ) {
-    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets);
+    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets, "* ");
 
     let title = format!("FreeIPA {} Release Notes", params.version);
     rst_title(&title);
@@ -1102,7 +1104,7 @@ mod tests {
             changelog: vec!["Fixed a crash".to_string()],
             rhbz: None,
         }];
-        let (notes, enhancements, known) = release_notes_and_categories(&tickets);
+        let (notes, enhancements, known) = release_notes_and_categories(&tickets, "* ");
         assert_eq!(notes.len(), 1);
         assert!(notes[0].contains("Fix crash"));
         assert!(enhancements.is_empty());
@@ -1118,7 +1120,7 @@ mod tests {
             changelog: vec!["Added widget support".to_string()],
             rhbz: None,
         }];
-        let (notes, enhancements, known) = release_notes_and_categories(&tickets);
+        let (notes, enhancements, known) = release_notes_and_categories(&tickets, "* ");
         assert_eq!(notes.len(), 1);
         assert_eq!(enhancements.len(), 1);
         assert!(known.is_empty());
@@ -1133,7 +1135,7 @@ mod tests {
             changelog: vec!["This is known".to_string()],
             rhbz: None,
         }];
-        let (notes, _enhancements, known) = release_notes_and_categories(&tickets);
+        let (notes, _enhancements, known) = release_notes_and_categories(&tickets, "* ");
         assert!(notes.is_empty());
         assert_eq!(known.len(), 1);
     }
@@ -1147,7 +1149,7 @@ mod tests {
             changelog: vec![],
             rhbz: None,
         }];
-        let (notes, enhancements, _known) = release_notes_and_categories(&tickets);
+        let (notes, enhancements, _known) = release_notes_and_categories(&tickets, "* ");
         assert_eq!(notes.len(), 1);
         assert_eq!(enhancements.len(), 1);
         // Must not have trailing whitespace
