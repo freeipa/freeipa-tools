@@ -53,6 +53,7 @@ struct CreateLabelBody<'a> {
 
 #[derive(Debug, Deserialize)]
 pub struct ForgejoMilestone {
+    pub id: u64,
     pub title: String,
 }
 
@@ -180,11 +181,74 @@ impl ForgejoClient {
         Ok(())
     }
 
+    pub fn list_milestones(&self) -> Result<Vec<ForgejoMilestone>> {
+        const MAX_PAGES: u32 = 1_000;
+        let mut all = Vec::new();
+        let mut page = 1u32;
+        let base = self.api_url(&format!("/repos/{}/{}/milestones", self.owner, self.repo));
+        loop {
+            if page > MAX_PAGES {
+                eprintln!(
+                    "Warning: milestone pagination exceeded {} pages, results may be incomplete",
+                    MAX_PAGES
+                );
+                break;
+            }
+            let url = reqwest::Url::parse_with_params(
+                &base,
+                &[
+                    ("state", "all"),
+                    ("limit", "50"),
+                    ("page", &page.to_string()),
+                ],
+            )
+            .context("building Forgejo milestones URL")?;
+            let url = url.to_string();
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", format!("token {}", self.token))
+                .send()
+                .with_context(|| format!("GET {}", url))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                anyhow::bail!("Forgejo list milestones failed ({}): {}", status, body);
+            }
+            let milestones: Vec<ForgejoMilestone> =
+                resp.json().context("Parsing Forgejo milestones")?;
+            if milestones.is_empty() {
+                break;
+            }
+            all.extend(milestones);
+            page += 1;
+        }
+        Ok(all)
+    }
+
     pub fn list_issues_by_milestone(
         &self,
         state: &str,
         milestone_title: &str,
     ) -> Result<Vec<ForgejoIssue>> {
+        let milestones = self.list_milestones()?;
+        let milestone = milestones
+            .iter()
+            .find(|m| m.title == milestone_title)
+            .ok_or_else(|| {
+                let available: Vec<&str> = milestones.iter().map(|m| m.title.as_str()).collect();
+                anyhow::anyhow!(
+                    "Milestone '{}' not found on Forgejo (available: {})",
+                    milestone_title,
+                    if available.is_empty() {
+                        "none".to_string()
+                    } else {
+                        available.join(", ")
+                    }
+                )
+            })?;
+        let milestone_id = milestone.id.to_string();
+
         const MAX_PAGES: u32 = 1_000;
         let mut all_issues = Vec::new();
         let mut page = 1u32;
@@ -201,7 +265,7 @@ impl ForgejoClient {
                 &base,
                 &[
                     ("state", state),
-                    ("milestones", milestone_title),
+                    ("milestone", milestone_id.as_str()),
                     ("type", "issues"),
                     ("limit", "50"),
                     ("page", &page.to_string()),
