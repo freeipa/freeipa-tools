@@ -75,6 +75,12 @@ pub fn run(ctx: &Ctx, params: &ReleaseNotesParams<'_>) -> Result<()> {
 
     if !params.no_milestones && ctx.has_tracker() {
         let primary = fetch_milestone_tickets(ctx, params.milestone)?;
+        if primary.is_empty() {
+            eprintln!(
+                "Warning: milestone '{}' returned 0 tickets",
+                params.milestone
+            );
+        }
         for t in primary {
             tickets.entry(t.number).or_insert(t);
         }
