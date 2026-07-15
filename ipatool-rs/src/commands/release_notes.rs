@@ -97,19 +97,28 @@ pub fn run(ctx: &Ctx, params: &ReleaseNotesParams<'_>) -> Result<()> {
         }
     }
 
-    if ctx.has_tracker() {
+    {
         let existing_ids: HashSet<u64> = tickets.keys().copied().collect();
         for commit in &git.commits {
             for &ticket_id in &commit.tickets {
                 if !existing_ids.contains(&ticket_id) {
-                    match fetch_single_ticket(ctx, ticket_id) {
-                        Ok(t) => {
-                            tickets.entry(t.number).or_insert(t);
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: could not fetch ticket #{}: {}", ticket_id, e);
+                    if ctx.has_tracker() {
+                        match fetch_single_ticket(ctx, ticket_id) {
+                            Ok(t) => {
+                                tickets.entry(t.number).or_insert(t);
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: could not fetch ticket #{}: {}", ticket_id, e);
+                            }
                         }
                     }
+                    tickets.entry(ticket_id).or_insert_with(|| ReleaseTicket {
+                        number: ticket_id,
+                        title: String::new(),
+                        category: TicketCategory::BugFix,
+                        changelog: Vec::new(),
+                        rhbz: None,
+                    });
                 }
             }
         }
