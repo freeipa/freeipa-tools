@@ -3,6 +3,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
+use crate::api::types::{scan_comment_fields, scan_comment_fields_vec, IssueComment};
 use crate::commands::Ctx;
 use crate::config::IssueTracker;
 use crate::git_log::{self, GitLogResult};
@@ -183,8 +184,13 @@ fn fetch_github_milestone(ctx: &Ctx, milestone: &str) -> Result<Vec<ReleaseTicke
         .github
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("GitHub client not configured"))?;
+    let prefix = &ctx.config.github_comment_field_prefix;
     let issues = github.list_issues_by_milestone("closed", milestone)?;
-    let tickets = issues.iter().map(github_issue_to_release_ticket).collect();
+    let mut tickets = Vec::new();
+    for issue in &issues {
+        let comments = github.get_all_issue_comments(issue.number)?;
+        tickets.push(github_issue_to_release_ticket(issue, &comments, prefix));
+    }
     Ok(tickets)
 }
 
@@ -193,8 +199,13 @@ fn fetch_forgejo_milestone(ctx: &Ctx, milestone: &str) -> Result<Vec<ReleaseTick
         .forgejo
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Forgejo client not configured"))?;
+    let prefix = &ctx.config.forgejo_comment_field_prefix;
     let issues = forgejo.list_issues_by_milestone("closed", milestone)?;
-    let tickets = issues.iter().map(forgejo_issue_to_release_ticket).collect();
+    let mut tickets = Vec::new();
+    for issue in &issues {
+        let comments = forgejo.get_all_issue_comments(issue.number)?;
+        tickets.push(forgejo_issue_to_release_ticket(issue, &comments, prefix));
+    }
     Ok(tickets)
 }
 
@@ -230,6 +241,8 @@ fn pagure_issue_to_release_ticket(issue: &crate::api::pagure::PagureIssue) -> Re
 fn labels_to_category(
     labels: &[crate::api::types::Label],
     body: Option<&str>,
+    comments: &[IssueComment],
+    prefix: &str,
 ) -> (TicketCategory, Vec<String>, Option<String>) {
     let has_rfe = labels.iter().any(|l| l.name.eq_ignore_ascii_case("rfe"));
     let is_known_issue = labels
@@ -244,14 +257,19 @@ fn labels_to_category(
         TicketCategory::BugFix
     };
 
-    let changelog = scan_body_for_field(body, "changelog");
-    let rhbz = scan_body_for_field(body, "rhbz").into_iter().next();
+    let changelog = scan_comment_fields_vec(body, comments, prefix, "changelog");
+    let rhbz = scan_comment_fields(body, comments, prefix, "rhbz");
 
     (category, changelog, rhbz)
 }
 
-fn github_issue_to_release_ticket(issue: &crate::api::github::GitHubIssue) -> ReleaseTicket {
-    let (category, changelog, rhbz) = labels_to_category(&issue.labels, issue.body.as_deref());
+fn github_issue_to_release_ticket(
+    issue: &crate::api::github::GitHubIssue,
+    comments: &[IssueComment],
+    prefix: &str,
+) -> ReleaseTicket {
+    let (category, changelog, rhbz) =
+        labels_to_category(&issue.labels, issue.body.as_deref(), comments, prefix);
     ReleaseTicket {
         number: issue.number,
         title: issue.title.clone(),
@@ -261,8 +279,13 @@ fn github_issue_to_release_ticket(issue: &crate::api::github::GitHubIssue) -> Re
     }
 }
 
-fn forgejo_issue_to_release_ticket(issue: &crate::api::forgejo::ForgejoIssue) -> ReleaseTicket {
-    let (category, changelog, rhbz) = labels_to_category(&issue.labels, issue.body.as_deref());
+fn forgejo_issue_to_release_ticket(
+    issue: &crate::api::forgejo::ForgejoIssue,
+    comments: &[IssueComment],
+    prefix: &str,
+) -> ReleaseTicket {
+    let (category, changelog, rhbz) =
+        labels_to_category(&issue.labels, issue.body.as_deref(), comments, prefix);
     ReleaseTicket {
         number: issue.number,
         title: issue.title.clone(),
@@ -288,7 +311,9 @@ fn fetch_single_ticket(ctx: &Ctx, number: u64) -> Result<ReleaseTicket> {
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("GitHub client not configured"))?;
             let issue = github.get_issue(number)?;
-            Ok(github_issue_to_release_ticket(&issue))
+            let comments = github.get_all_issue_comments(number)?;
+            let prefix = &ctx.config.github_comment_field_prefix;
+            Ok(github_issue_to_release_ticket(&issue, &comments, prefix))
         }
         IssueTracker::Forgejo => {
             let forgejo = ctx
@@ -296,29 +321,11 @@ fn fetch_single_ticket(ctx: &Ctx, number: u64) -> Result<ReleaseTicket> {
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Forgejo client not configured"))?;
             let issue = forgejo.get_issue(number)?;
-            Ok(forgejo_issue_to_release_ticket(&issue))
+            let comments = forgejo.get_all_issue_comments(number)?;
+            let prefix = &ctx.config.forgejo_comment_field_prefix;
+            Ok(forgejo_issue_to_release_ticket(&issue, &comments, prefix))
         }
     }
-}
-
-fn scan_body_for_field(body: Option<&str>, field_name: &str) -> Vec<String> {
-    let Some(body) = body else {
-        return Vec::new();
-    };
-    let needle = format!("{}:", field_name);
-    let mut values = Vec::new();
-    for line in body.lines() {
-        if let Some(prefix) = line.get(..needle.len()) {
-            if prefix.eq_ignore_ascii_case(&needle) {
-                let rest = &line[needle.len()..];
-                let v = rest.trim();
-                if !v.is_empty() {
-                    values.push(v.to_string());
-                }
-            }
-        }
-    }
-    values
 }
 
 // ── Release notes categorization helpers ─────────────────────────────────────
@@ -729,8 +736,7 @@ fn print_rst(
     params: &ReleaseNotesParams<'_>,
     fmt: &FormatConfig<'_>,
 ) {
-    let (release_notes, enhancements, known_issues) =
-        release_notes_and_categories(tickets, "-  ");
+    let (release_notes, enhancements, known_issues) = release_notes_and_categories(tickets, "-  ");
 
     let title = format!("FreeIPA {}", params.version);
     rst_heading(&title, '=');
@@ -818,7 +824,9 @@ fn print_rst(
     println!();
     println!("Please provide comments, bugs and other feedback via the freeipa-users");
     println!("mailing list");
-    println!("(https://lists.fedoraproject.org/archives/list/freeipa-users@lists.fedorahosted.org/)");
+    println!(
+        "(https://lists.fedoraproject.org/archives/list/freeipa-users@lists.fedorahosted.org/)"
+    );
     println!("or #freeipa channel on libera.chat.");
     println!();
 
@@ -881,10 +889,7 @@ fn print_changelog_rst(git: &GitLogResult, fmt: &FormatConfig<'_>) {
         if author.commit_indices.is_empty() {
             continue;
         }
-        let label = rst_label(&format!(
-            "{}_{}",
-            author.name, author.commit_indices.len()
-        ));
+        let label = rst_label(&format!("{}_{}", author.name, author.commit_indices.len()));
         println!(".. _{}:", label);
         println!();
         let heading = format!("{} ({})", author.name, author.commit_indices.len());
@@ -922,44 +927,50 @@ mod tests {
     use super::*;
     use crate::api::types::Label;
 
-    // ── scan_body_for_field ──────────────────────────────────────────────────
+    // ── comment field scanning ────────────────────────────────────────────────
 
     #[test]
-    fn test_scan_body_for_field_normal_case() {
+    fn test_labels_to_category_body_changelog() {
+        let labels = vec![make_label("rfe")];
         let body = "changelog: Fixed the widget\nrhbz: https://bugzilla.redhat.com/123";
-        let result = scan_body_for_field(Some(body), "changelog");
-        assert_eq!(result, vec!["Fixed the widget"]);
+        let (cat, changelog, _) = labels_to_category(&labels, Some(body), &[], "");
+        assert_eq!(cat, TicketCategory::Enhancement);
+        assert_eq!(changelog, vec!["Fixed the widget"]);
+    }
+
+    fn make_comment(body: &str) -> IssueComment {
+        IssueComment {
+            id: 0,
+            user: crate::api::types::User {
+                login: "test".to_string(),
+            },
+            body: body.to_string(),
+            created_at: String::new(),
+        }
     }
 
     #[test]
-    fn test_scan_body_for_field_case_insensitive() {
-        let body = "Changelog: Fixed the widget";
-        let result = scan_body_for_field(Some(body), "changelog");
-        assert_eq!(result, vec!["Fixed the widget"]);
-
-        let body2 = "CHANGELOG: Another fix";
-        let result2 = scan_body_for_field(Some(body2), "changelog");
-        assert_eq!(result2, vec!["Another fix"]);
+    fn test_labels_to_category_comment_changelog() {
+        let labels: Vec<Label> = vec![];
+        let comments = vec![make_comment("changelog: Fixed via comment")];
+        let (_, changelog, _) = labels_to_category(&labels, None, &comments, "");
+        assert_eq!(changelog, vec!["Fixed via comment"]);
     }
 
     #[test]
-    fn test_scan_body_for_field_empty_body() {
-        let result = scan_body_for_field(None, "changelog");
-        assert!(result.is_empty());
+    fn test_labels_to_category_prefixed_comment() {
+        let labels: Vec<Label> = vec![];
+        let comments = vec![make_comment("ipatool:changelog: Prefixed entry")];
+        let (_, changelog, _) = labels_to_category(&labels, None, &comments, "ipatool:");
+        assert_eq!(changelog, vec!["Prefixed entry"]);
     }
 
     #[test]
-    fn test_scan_body_for_field_no_match() {
-        let body = "This is a description\nNo fields here";
-        let result = scan_body_for_field(Some(body), "changelog");
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_scan_body_for_field_multi_line() {
+    fn test_labels_to_category_multi_changelog() {
+        let labels: Vec<Label> = vec![];
         let body = "changelog: First entry\nother stuff\nchangelog: Second entry";
-        let result = scan_body_for_field(Some(body), "changelog");
-        assert_eq!(result, vec!["First entry", "Second entry"]);
+        let (_, changelog, _) = labels_to_category(&labels, Some(body), &[], "");
+        assert_eq!(changelog, vec!["First entry", "Second entry"]);
     }
 
     // ── approximate_bug_count ───────────────────────────────────────────────
@@ -1202,28 +1213,28 @@ mod tests {
     #[test]
     fn test_labels_to_category_rfe() {
         let labels = vec![make_label("rfe")];
-        let (cat, _, _) = labels_to_category(&labels, None);
+        let (cat, _, _) = labels_to_category(&labels, None, &[], "");
         assert_eq!(cat, TicketCategory::Enhancement);
     }
 
     #[test]
     fn test_labels_to_category_knownissue() {
         let labels = vec![make_label("knownissue")];
-        let (cat, _, _) = labels_to_category(&labels, None);
+        let (cat, _, _) = labels_to_category(&labels, None, &[], "");
         assert_eq!(cat, TicketCategory::KnownIssue);
     }
 
     #[test]
     fn test_labels_to_category_no_label() {
         let labels: Vec<Label> = vec![];
-        let (cat, _, _) = labels_to_category(&labels, None);
+        let (cat, _, _) = labels_to_category(&labels, None, &[], "");
         assert_eq!(cat, TicketCategory::BugFix);
     }
 
     #[test]
     fn test_labels_to_category_both_labels() {
         let labels = vec![make_label("rfe"), make_label("knownissue")];
-        let (cat, _, _) = labels_to_category(&labels, None);
+        let (cat, _, _) = labels_to_category(&labels, None, &[], "");
         // knownissue takes priority
         assert_eq!(cat, TicketCategory::KnownIssue);
     }
@@ -1233,7 +1244,7 @@ mod tests {
         let labels = vec![make_label("rfe")];
         let body =
             "changelog: Added new feature\nrhbz: https://bugzilla.redhat.com/show_bug.cgi?id=999";
-        let (cat, changelog, rhbz) = labels_to_category(&labels, Some(body));
+        let (cat, changelog, rhbz) = labels_to_category(&labels, Some(body), &[], "");
         assert_eq!(cat, TicketCategory::Enhancement);
         assert_eq!(changelog, vec!["Added new feature"]);
         assert_eq!(
@@ -1246,8 +1257,7 @@ mod tests {
 
     #[test]
     fn test_rhbz_rst_full_url() {
-        let result =
-            format_rhbz_links_rst("https://bugzilla.redhat.com/show_bug.cgi?id=12345", "");
+        let result = format_rhbz_links_rst("https://bugzilla.redhat.com/show_bug.cgi?id=12345", "");
         assert_eq!(
             result,
             "`rhbz#12345 <https://bugzilla.redhat.com/show_bug.cgi?id=12345>`__"
