@@ -340,24 +340,17 @@ fn release_notes_and_categories(
     let mut known_issues = Vec::new();
 
     for ticket in tickets {
-        let changelog_text = if ticket.changelog.is_empty() {
-            if ticket.title.contains("[RFE]") {
-                String::new()
-            } else {
-                continue;
-            }
-        } else {
-            ticket.changelog.join(" ")
-        };
+        let has_changelog = !ticket.changelog.is_empty();
+        if !has_changelog && !ticket.title.contains("[RFE]") {
+            continue;
+        }
 
-        let note = if changelog_text.is_empty() {
-            format!("{}#{}: {}", bullet, ticket.number, ticket.title)
-        } else {
-            format!(
-                "{}#{}: {}\n{}{}",
-                bullet, ticket.number, ticket.title, indent, changelog_text
-            )
-        };
+        let mut note = format!("{}#{}: {}", bullet, ticket.number, ticket.title);
+        if has_changelog {
+            for entry in &ticket.changelog {
+                note.push_str(&format!("\n\n{}{}", indent, entry));
+            }
+        }
 
         match ticket.category {
             TicketCategory::KnownIssue => known_issues.push(note),
@@ -1199,6 +1192,33 @@ mod tests {
                 line
             );
         }
+    }
+
+    #[test]
+    fn test_changelog_paragraph_separation() {
+        let tickets = vec![ReleaseTicket {
+            number: 100,
+            title: "Fix auth".to_string(),
+            category: TicketCategory::BugFix,
+            changelog: vec![
+                "First paragraph".to_string(),
+                "Second paragraph".to_string(),
+            ],
+            rhbz: None,
+        }];
+        let (notes, _, _) = release_notes_and_categories(&tickets, "-  ");
+        assert_eq!(notes.len(), 1);
+        let note = &notes[0];
+        assert!(
+            note.contains("\n\n   First paragraph"),
+            "expected blank line before first changelog entry: {:?}",
+            note
+        );
+        assert!(
+            note.contains("\n\n   Second paragraph"),
+            "expected blank line before second changelog entry: {:?}",
+            note
+        );
     }
 
     // ── labels_to_category ──────────────────────────────────────────────────
