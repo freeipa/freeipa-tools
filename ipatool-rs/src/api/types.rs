@@ -197,13 +197,13 @@ pub fn labels_colorize(labels: &[Label], color_enabled: bool) -> String {
 // ── Shared comment-field scanning ────────────────────────────────────────────
 
 /// Scan issue body and comments for lines matching `<prefix><field_name>: <value>`
-/// and return the joined values.  Used by both ForgejoTicket and GitHubTicket.
-pub(crate) fn scan_comment_fields(
+/// and return each value as a separate entry.
+pub(crate) fn scan_comment_fields_vec(
     body: Option<&str>,
     comments: &[IssueComment],
     prefix: &str,
     field_name: &str,
-) -> Option<String> {
+) -> Vec<String> {
     let needle = format!("{}:", field_name);
     let mut values: Vec<String> = Vec::new();
 
@@ -233,6 +233,18 @@ pub(crate) fn scan_comment_fields(
         scan(&comment.body);
     }
 
+    values
+}
+
+/// Scan issue body and comments for lines matching `<prefix><field_name>: <value>`
+/// and return the joined values.  Used by both ForgejoTicket and GitHubTicket.
+pub(crate) fn scan_comment_fields(
+    body: Option<&str>,
+    comments: &[IssueComment],
+    prefix: &str,
+    field_name: &str,
+) -> Option<String> {
+    let values = scan_comment_fields_vec(body, comments, prefix, field_name);
     if values.is_empty() {
         None
     } else {
