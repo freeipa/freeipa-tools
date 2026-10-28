@@ -17,6 +17,7 @@ pub(crate) use crate::api::types::TicketOps;
 pub mod am;
 pub mod backport;
 pub mod cache_update;
+pub mod clone;
 pub mod interactive;
 pub mod pr_ack;
 pub mod pr_client;

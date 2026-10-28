@@ -394,6 +394,33 @@ enum Command {
         #[arg(long)]
         no_milestones: bool,
     },
+
+    /// Clone an issue into another tracker (e.g. a Bugzilla bug into Jira)
+    Clone {
+        /// Source issue: "bugzilla:1234", "jira:RHEL-99", "gh:42", a full
+        /// issue URL, or a bare number (the tracker from --profile/config)
+        issue: String,
+
+        /// Tracker to create the copy in
+        #[arg(
+            short = 't',
+            long = "to",
+            value_parser = ["jira", "bugzilla", "bz", "pagure", "forgejo", "codeberg", "github", "gh"]
+        )]
+        to: String,
+
+        /// Copy the last N comments of the source into the new issue body
+        #[arg(short = 'c', long = "comments", default_value_t = 0)]
+        comments: usize,
+
+        /// Title for the created issue (defaults to the source title)
+        #[arg(short = 'T', long = "title")]
+        title: Option<String>,
+
+        /// Create without asking
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
 }
 
 fn build_ctx(cli: &Cli) -> Result<Ctx> {
@@ -658,6 +685,26 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
                 repo_path: repo.as_deref(),
             };
             commands::release_notes::run(&*ctx, &params)
+        }
+
+        Command::Clone {
+            issue,
+            to,
+            comments,
+            title,
+            yes,
+        } => {
+            let to = commands::clone::Kind::parse(to)
+                .ok_or_else(|| anyhow::anyhow!("unknown target tracker '{to}'"))?;
+            let env = commands::clone::CloneEnv::from_ctx(ctx);
+            let params = commands::clone::CloneParams {
+                source: issue,
+                to,
+                comments: *comments,
+                title: title.as_deref(),
+                yes: *yes,
+            };
+            commands::clone::run(&env, &params)
         }
     }
 }

@@ -562,6 +562,49 @@ continues with the remaining branches.
 
 ---
 
+### `clone`
+
+Create an issue in one tracker as a copy of an issue in another — the usual
+flow is a Bugzilla bug → a Jira ticket, but every configured tracker can be a
+source or a target (Pagure, Forgejo/Codeberg, GitHub Issues, Bugzilla, Jira).
+The new issue gets the source title, a `Cloned from: <source URL>` header, the
+source description, and optionally the last N source comments.
+
+```
+ipatool clone bugzilla:123456 --to jira              # RHBZ → Jira (project from jira-ticket-url)
+ipatool clone jira:RHEL-99 --to bugzilla -c 3 -y     # Jira → Bugzilla, copy 3 comments
+ipatool clone https://issues.redhat.com/browse/RHEL-99 --to gh -n   # URL source, dry run
+ipatool clone 42 --to jira                           # bare number = configured issue-tracker
+```
+
+**Arguments:** `<issue>` (required) — one of
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| `<tracker>:<id>` | `bugzilla:123456`, `bz:1`, `rhbz:1`, `jira:RHEL-99`, `gh:42`, `github:42`, `codeberg:42`, `forgejo:42`, `pagure:42` | explicit tracker |
+| URL | `https://bugzilla.redhat.com/show_bug.cgi?id=123456` | classified against the configured `ticket-url` / `bugzilla-bug-url` / `jira-ticket-url` templates |
+| bare number | `123456` | the tracker selected by `issue-tracker` (or `--profile`) |
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `-t`, `--to <tracker>` | Target: `jira`, `bugzilla`/`bz`, `pagure`, `forgejo`/`codeberg`, `github`/`gh` (required) |
+| `-c`, `--comments <N>` | Append the last N comments of the source to the new body (default 0) |
+| `-T`, `--title <text>` | Override the title of the created issue |
+| `-y`, `--yes` | Create without asking |
+
+The target must be configured: Jira needs `jira-token` plus a `jira-ticket-url`
+of the form `…/browse/<PROJECT>-` (the project key is derived from it; the
+issue type comes from `jira-issuetype`, default `Bug`); Bugzilla needs
+`bugzilla-url`, `bugzilla-api-key` and `bugzilla-product`; the other trackers
+need their usual tokens.  `--no-bugzilla` / `--no-jira` / etc. disable a
+backend for the run.  `--dry-run` prints the rendered body without creating
+anything.  A source and target from the same tracker are rejected.
+
+
+---
+
 ### `tui`
 
 Interactive terminal UI for browsing, reviewing, and acting on pull requests
