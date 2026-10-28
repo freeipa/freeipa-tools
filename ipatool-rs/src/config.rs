@@ -96,6 +96,15 @@ pub struct Config {
     pub bugzilla_bug_url: String,
     #[serde(default)]
     pub jira_ticket_url: String,
+    #[serde(default)]
+    pub bugzilla_url: String,
+    #[serde(default)]
+    pub bugzilla_api_key: String,
+    /// Default Bugzilla product/component used when creating bugs.
+    #[serde(default)]
+    pub bugzilla_product: String,
+    #[serde(default)]
+    pub bugzilla_component: String,
 
     // Pagure
     #[serde(default)]
@@ -226,6 +235,10 @@ impl Config {
 
     pub fn has_github(&self) -> bool {
         !self.gh_token.is_empty() && !self.gh_repo.is_empty()
+    }
+
+    pub fn has_bugzilla(&self) -> bool {
+        !self.bugzilla_url.is_empty()
     }
 
     pub fn jira_server(&self) -> Option<String> {

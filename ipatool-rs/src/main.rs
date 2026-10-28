@@ -73,6 +73,13 @@ close-issue: ask
 # close-jira: no
 # Transition name to use when closing a Jira issue (default: Fixed)
 # jira-close-transition: Fixed
+# Issue type used when creating Jira issues with `ipatool clone --to jira` (default: Bug)
+# jira-issuetype: Bug
+# Create an API key at https://bugzilla.redhat.com/userprefs.cgi?tab=apikey
+# bugzilla-api-key: "YOUR_BUGZILLA_API_KEY_HERE"
+# Default product/component for bugs created by `ipatool clone --to bugzilla`
+# bugzilla-product: Red Hat Enterprise Linux
+# bugzilla-component:
 
 # Mapping of logins to Git-style author lines
 trac-username-map:
@@ -193,6 +200,10 @@ struct Cli {
     /// Do not contact Jira
     #[arg(long, global = true)]
     no_jira: bool,
+
+    /// Do not contact Bugzilla
+    #[arg(long, global = true)]
+    no_bugzilla: bool,
 
     /// Do not synchronize before pushing
     #[arg(long, global = true)]
@@ -457,6 +468,15 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         None
     };
 
+    let bugzilla = if !cli.no_bugzilla && config.has_bugzilla() {
+        Some(Arc::new(api::bugzilla::BugzillaClient::new(
+            &config.bugzilla_url,
+            &config.bugzilla_api_key,
+        )?))
+    } else {
+        None
+    };
+
     let github = if config.has_github() {
         let (owner, repo) = config.gh_owner_repo()?;
         Some(Arc::new(api::github::GitHubClient::new(
@@ -510,6 +530,7 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         pagure,
         forgejo,
         jira,
+        bugzilla,
         github,
         verbosity: cli.verbose,
         dry_run: cli.dry_run,
