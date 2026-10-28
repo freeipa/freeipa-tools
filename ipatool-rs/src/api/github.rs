@@ -191,6 +191,30 @@ impl GitHubClient {
             .with_context(|| format!("Parsing issue {}", number))?;
         Ok(issue)
     }
+    /// Create an issue; returns its number.
+    pub fn create_issue(&self, title: &str, body: &str) -> Result<u64> {
+        let url = self.api_url("/issues");
+        let payload = serde_json::json!({ "title": title, "body": body });
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", self.auth_header())
+            .header("Accept", "application/vnd.github.v3+json")
+            .json(&payload)
+            .send()
+            .with_context(|| format!("POST {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("GitHub create_issue failed ({}): {}", status, body);
+        }
+        let data: serde_json::Value = resp
+            .json()
+            .context("Parsing GitHub create_issue response")?;
+        data["number"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("GitHub create_issue response has no number"))
+    }
 
     pub fn list_issues_by_milestone(
         &self,
