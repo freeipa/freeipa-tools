@@ -1,3 +1,4 @@
+pub mod bugzilla;
 pub mod forgejo;
 pub mod github;
 pub mod jira;
