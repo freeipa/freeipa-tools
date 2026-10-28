@@ -124,6 +124,18 @@ close-issue:  ask   # close the issue after a successful push
 # close-jira:  no    # transition Jira issue (yes/no/ask)
 # jira-close-transition: Fixed   # transition name to use when closing
 
+# ── Bugzilla (clone source/target) ────────────────────────────────────────────
+# Only needed to clone bugs with `ipatool clone`; the REST API lives at
+# <bugzilla-url>/restapi/v1 and needs a key from userprefs.cgi?tab=apikey.
+# bugzilla-url: https://bugzilla.redhat.com
+# bugzilla-api-key: "YOUR_BUGZILLA_API_KEY_HERE"
+# Defaults for bugs created by `ipatool clone --to bugzilla`:
+# bugzilla-product: Red Hat Enterprise Linux
+# bugzilla-component:
+
+# Issue type used for `ipatool clone --to jira` (default: Bug)
+# jira-issuetype: Bug
+
 # ── GitHub pull requests ──────────────────────────────────────────────────────
 # Required token scopes: repo, admin:org, user:email, read:user
 
@@ -324,6 +336,7 @@ These flags apply to every subcommand.
 | `--no-pagure` | off | Disable all Pagure API calls |
 | `--no-forgejo` | off | Disable all Forgejo API calls |
 | `--no-jira` | off | Disable all Jira API calls |
+| `--no-bugzilla` | off | Disable all Bugzilla API calls |
 | `--color <mode>` | `auto` | Terminal color: `auto`, `always`, `never` |
 | `--offline` | off | Use local cache; queue mutations for later sync |
 
