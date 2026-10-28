@@ -639,7 +639,7 @@ ipatool --offline tui        # use cached data (no network)
 #### Layout
 
 ```
-  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  Tab:Focus  j/↓:Down  k/↑:Up  d/u:Scroll  i:Inspect  Enter:Actions
+  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  Tab:Focus  j/↓:Down  k/↑:Up  d/u:Scroll  i:Inspect  C:Clone  Enter:Actions
 ┌── 47 PRs ────────────────────┐┌── Details ──────────────────────────────────┐
 │ #8309 ○ Fix LDAP timeout  …  ││ PR #8309: Fix LDAP connection timeout        │
 │ #8308 ○ Add KDC support   …  ││                                              │
@@ -715,6 +715,7 @@ All keys listed below are the defaults.  Every key can be remapped in
 | `c` | Open diff review for selected PR |
 | `b` | Open PR in browser |
 | `i` | Open CI job results viewer (only available for PRs with completed CI jobs) |
+| `C` | Clone an issue from another tracker into a configured tracker (see [Clone dialog](#clone-dialog-c)) |
 | `r` | Refresh PR list from the forge |
 | `s` | Sync queued offline actions to the forge |
 | `q` | Quit |
@@ -778,6 +779,25 @@ returns you to the TUI afterwards.
 
 Collects target branches (comma-separated), then quits the TUI, runs the
 backport pipeline in the terminal, and returns.
+
+#### Clone dialog (`C`)
+
+Same operation as the [`clone` subcommand](#clone): creates a copy of an issue
+from another tracker.  Issue references found in the selected PR's body
+(`Resolves: https://bugzilla…id=123456`, Jira links, …) are extracted and the
+first one pre-fills the source field.  The target selector lists only the
+trackers the current configuration can create issues in, defaulting to Jira,
+then Bugzilla.
+
+| Button | Action |
+|--------|--------|
+| Preview | Fetch the source and show the exact title/body that would be created; nothing is created |
+| Create | Fetch and create the issue, then report the new id |
+| Cancel / `Esc` | Dismiss |
+
+Both fetch and create run in the background with a loading dialog.  Cloning
+always needs network access to the source tracker; it is not queued in offline
+mode.
 
 #### CI job results viewer (`i`)
 
@@ -1128,6 +1148,7 @@ down:        j
 up:          k
 scroll-down: d
 scroll-up:   u
+clone:       C
 
 # Code review diff view
 review-comment: c
