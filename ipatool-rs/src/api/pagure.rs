@@ -19,6 +19,12 @@ pub struct CustomField {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct PagureComment {
+    #[serde(default)]
+    pub comment: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PagureIssue {
     #[serde(default)]
     pub id: u64,
@@ -35,6 +41,9 @@ pub struct PagureIssue {
     pub tags: Vec<String>,
     #[serde(default)]
     pub custom_fields: Vec<CustomField>,
+    /// Pagure's get_issue response embeds the full comment list.
+    #[serde(default)]
+    pub comments: Vec<PagureComment>,
 }
 
 impl PagureIssue {
