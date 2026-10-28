@@ -75,6 +75,9 @@ close-issue: ask
 # jira-close-transition: Fixed
 # Issue type used when creating Jira issues with `ipatool clone --to jira` (default: Bug)
 # jira-issuetype: Bug
+
+# Bugzilla configuration (only needed to clone bugs with `ipatool clone`)
+# bugzilla-url: https://bugzilla.redhat.com
 # Create an API key at https://bugzilla.redhat.com/userprefs.cgi?tab=apikey
 # bugzilla-api-key: "YOUR_BUGZILLA_API_KEY_HERE"
 # Default product/component for bugs created by `ipatool clone --to bugzilla`

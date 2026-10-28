@@ -134,6 +134,9 @@ pub struct Config {
     pub close_jira: String,
     #[serde(default = "default_fixed")]
     pub jira_close_transition: String,
+    /// Default Jira issue type used when creating issues.
+    #[serde(default = "default_bug_issuetype")]
+    pub jira_issuetype: String,
 
     // git am
     #[serde(default)]
@@ -206,6 +209,9 @@ fn default_fixed() -> String {
 fn default_db_path() -> String {
     "~/.ipa/ipatool-cache.db".to_string()
 }
+fn default_bug_issuetype() -> String {
+    "Bug".to_string()
+}
 
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
@@ -239,6 +245,18 @@ impl Config {
 
     pub fn has_bugzilla(&self) -> bool {
         !self.bugzilla_url.is_empty()
+    }
+
+    /// Project key derived from jira-ticket-url, e.g.
+    /// "https://issues.redhat.com/browse/RHEL-" → "RHEL".
+    pub fn jira_project_key(&self) -> Option<String> {
+        let tail = self.jira_ticket_url.split("/browse/").nth(1)?;
+        let key = tail.trim_end_matches('-');
+        if key.is_empty() {
+            None
+        } else {
+            Some(key.to_string())
+        }
     }
 
     pub fn jira_server(&self) -> Option<String> {
