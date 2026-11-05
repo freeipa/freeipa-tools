@@ -19,7 +19,17 @@ pub fn run(
     reviewer_args: &[String],
     backport_branches: &[String],
     autobackport: bool,
+    fixed_urls: &[String],
 ) -> Result<()> {
+    for url in fixed_urls {
+        let parsed = reqwest::Url::parse(url);
+        if url.chars().any(|c| c.is_whitespace() || c.is_control())
+            || !matches!(&parsed, Ok(u) if matches!(u.scheme(), "http" | "https") && u.host_str().is_some())
+        {
+            bail!("Invalid issue URL: {}", url);
+        }
+    }
+
     let prc = ctx.pr_client_or_err()?.clone();
 
     let patchdir = ctx.config.patchdir_expanded();
@@ -68,7 +78,7 @@ pub fn run(
         reviewer_args,
         autobackport,
         backport_branches,
-        &[],
+        fixed_urls,
     );
 
     // Post-push actions

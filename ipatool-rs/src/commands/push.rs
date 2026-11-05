@@ -16,7 +16,7 @@ pub fn run(
     reviewer_args: &[String],
     autobackport: bool,
     backport_branches: &[String],
-    extra_ticket_numbers: &[u64],
+    fixed_urls: &[String],
 ) -> Result<()> {
     let patchdir = ctx.config.patchdir_expanded();
     let ticket_url = &ctx.config.ticket_url;
@@ -27,6 +27,12 @@ pub fn run(
     if ctx.config.rewrite_ticket_urls && !legacy_ticket_url.is_empty() && !ticket_url.is_empty() {
         for patch in &mut patches {
             patch.rewrite_urls(legacy_ticket_url, ticket_url);
+        }
+    }
+
+    for patch in &mut patches {
+        for url in fixed_urls {
+            patch.add_fixed(url, ticket_url, legacy_ticket_url);
         }
     }
 
@@ -41,20 +47,13 @@ pub fn run(
 
     crate::git::ensure_clean(&ctx.git_env, ctx.verbosity)?;
 
-    // Collect ticket numbers from patches and any caller-supplied extras,
-    // then apply issue_number_map so that legacy pagure numbers are translated
-    // to the corresponding Codeberg numbers when the migration did not preserve
-    // the original numbering.
+    // Translate legacy ticket numbers when the migration did not preserve them.
     let mut ticket_numbers: HashSet<u64> = HashSet::new();
     for patch in &patches {
         for &n in &patch.ticket_numbers {
             let mapped = ctx.config.issue_number_map.get(&n).copied().unwrap_or(n);
             ticket_numbers.insert(mapped);
         }
-    }
-    for &n in extra_ticket_numbers {
-        let mapped = ctx.config.issue_number_map.get(&n).copied().unwrap_or(n);
-        ticket_numbers.insert(mapped);
     }
 
     // Make ticket objects

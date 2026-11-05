@@ -311,6 +311,10 @@ enum Command {
         #[arg(short = 'r', long = "reviewer")]
         reviewers: Vec<String>,
 
+        /// Issue URL to add as a Fixed: trailer to each commit (repeatable)
+        #[arg(long = "fixed")]
+        fixed_urls: Vec<String>,
+
         /// Backport to branch (can be repeated)
         #[arg(short = 'B', long = "backport")]
         backport: Vec<String>,
@@ -640,9 +644,10 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
         Command::PrPush {
             pr_id,
             reviewers,
+            fixed_urls,
             backport,
             autobackport,
-        } => commands::pr_push::run(ctx, *pr_id, reviewers, backport, *autobackport),
+        } => commands::pr_push::run(ctx, *pr_id, reviewers, backport, *autobackport, fixed_urls),
 
         Command::Backport { pr_id, branches } => {
             commands::backport::run_backport_cmd(ctx, *pr_id, branches)

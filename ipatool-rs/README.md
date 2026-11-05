@@ -523,6 +523,7 @@ Full push pipeline for a PR (GitHub or Forgejo):
 ipatool pr-push 8309 -r abbra
 ipatool pr-push 8309 -r abbra -B ipa-4-12
 ipatool pr-push 8309 -r abbra --autobackport   # use labels like 'ipa-4-12'
+ipatool pr-push 8309 -r abbra --fixed https://pagure.io/freeipa/issue/9000 --fixed https://example.com/issues/42
 ```
 
 **Arguments:** `<pr_id>` (required)
@@ -532,8 +533,17 @@ ipatool pr-push 8309 -r abbra --autobackport   # use labels like 'ipa-4-12'
 | Flag | Description |
 |------|-------------|
 | `-r`, `--reviewer <name>` | Reviewer name (repeatable) |
+| `--fixed <url>` | Add a `Fixed: <url>` trailer to every PR commit (repeatable) |
 | `-B`, `--backport <branch>` | Backport target branch (repeatable) |
 | `--autobackport` | Auto-detect backport branches from PR labels matching `ipa-N-N` |
+
+The optional issue URLs are added to each commit applied to the PR's base branch,
+before any `Reviewed-By:` trailers, including when `--no-reviewer` is set. URLs
+matching the configured current or legacy ticket prefix are also processed like
+ticket references already in the patches: they can select reviewers and trigger
+the configured issue updates or closure. The TUI push dialog accepts the same
+URLs as a comma-separated list. Generated backport PRs use the original PR
+patches and do not receive these trailers.
 
 ---
 

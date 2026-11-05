@@ -43,6 +43,7 @@ enum PendingTuiAction {
     PrPush {
         pr_id: u64,
         reviewers: Vec<String>,
+        fixed_urls: Vec<String>,
         backport_branches: Vec<String>,
         autobackport: bool,
     },
@@ -88,12 +89,18 @@ pub fn run(ctx: &mut Ctx, state: &str) -> Result<()> {
             Some(PendingTuiAction::PrPush {
                 pr_id,
                 reviewers,
+                fixed_urls,
                 backport_branches,
                 autobackport,
             }) => {
-                if let Err(e) =
-                    super::pr_push::run(ctx, pr_id, &reviewers, &backport_branches, autobackport)
-                {
+                if let Err(e) = super::pr_push::run(
+                    ctx,
+                    pr_id,
+                    &reviewers,
+                    &backport_branches,
+                    autobackport,
+                    &fixed_urls,
+                ) {
                     eprintln!("\x1b[31mPush failed: {:#}\x1b[0m", e);
                 }
                 crate::output::prompt("Press Enter to return to the TUI…");
@@ -2132,6 +2139,9 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                     ))
                     .child(EditView::new().with_name("push_reviewer").min_width(64))
                     .child(TextView::new(""))
+                    .child(TextView::new("Fixed issue URLs — comma-separated:"))
+                    .child(EditView::new().with_name("push_fixed").min_width(64))
+                    .child(TextView::new(""))
                     .child(TextView::new(
                         "Backport to branches — comma-separated (e.g. ipa-4-12,ipa-4-11):",
                     ))
@@ -2149,6 +2159,9 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                         v.get_content().to_string()
                     })
                     .unwrap_or_default();
+                let fixed_str = s
+                    .call_on_name("push_fixed", |v: &mut EditView| v.get_content().to_string())
+                    .unwrap_or_default();
                 let backport_str = s
                     .call_on_name("push_backport", |v: &mut EditView| {
                         v.get_content().to_string()
@@ -2163,6 +2176,11 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                     .map(|r| r.trim().to_string())
                     .filter(|r| !r.is_empty())
                     .collect();
+                let fixed_urls: Vec<String> = fixed_str
+                    .split(',')
+                    .map(|url| url.trim().to_string())
+                    .filter(|url| !url.is_empty())
+                    .collect();
                 let backport_branches: Vec<String> = backport_str
                     .split(',')
                     .map(|b| b.trim().to_string())
@@ -2173,6 +2191,7 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                     state.pending_action = Some(PendingTuiAction::PrPush {
                         pr_id: pr_number,
                         reviewers,
+                        fixed_urls,
                         backport_branches,
                         autobackport,
                     });
