@@ -584,6 +584,7 @@ source description, and optionally the last N source comments.
 ipatool clone bugzilla:123456 --to jira              # RHBZ → Jira (project from jira-ticket-url)
 ipatool clone jira:RHEL-99 --to bugzilla -c 3 -y     # Jira → Bugzilla, copy 3 comments
 ipatool clone https://issues.redhat.com/browse/RHEL-99 --to gh -n   # URL source, dry run
+ipatool clone jira:25091 --to bugzilla               # Jira number in configured project (RHEL-25091)
 ipatool clone 42 --to jira                           # bare number = configured issue-tracker
 ```
 
@@ -594,6 +595,10 @@ ipatool clone 42 --to jira                           # bare number = configured 
 | `<tracker>:<id>` | `bugzilla:123456`, `bz:1`, `rhbz:1`, `jira:RHEL-99`, `gh:42`, `github:42`, `codeberg:42`, `forgejo:42`, `pagure:42` | explicit tracker |
 | URL | `https://bugzilla.redhat.com/show_bug.cgi?id=123456` | classified against the configured `ticket-url` / `bugzilla-bug-url` / `jira-ticket-url` templates |
 | bare number | `123456` | the tracker selected by `issue-tracker` (or `--profile`) |
+
+For `jira:<number>`, the number is an issue number in the project configured
+by `jira-ticket-url`, not Jira's internal numeric ID. Use `jira:<PROJECT>-<number>`
+to select another project.
 
 **Flags**
 

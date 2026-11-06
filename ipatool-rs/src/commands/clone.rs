@@ -328,12 +328,20 @@ fn fetch(env: &CloneEnv, r: &IssueRef) -> Result<SourceContent> {
                 .jira
                 .as_ref()
                 .ok_or_else(|| err_not_configured("jira"))?;
-            let (title, body, comments) = client.get_issue_text(&r.id)?;
+            let key = if r.id.chars().all(|c| c.is_ascii_digit()) {
+                let project = env.config.jira_project_key().ok_or_else(|| {
+                    anyhow::anyhow!("numeric Jira references require a project in jira-ticket-url")
+                })?;
+                format!("{}-{}", project, r.id)
+            } else {
+                r.id.clone()
+            };
+            let (key, title, body, comments) = client.get_issue_text(&key)?;
             Ok(SourceContent {
                 title,
                 body,
                 comments,
-                origin_url: format!("{}{}", jira_prefix(env), r.id),
+                origin_url: format!("{}{}", jira_prefix(env), key),
             })
         }
     }
@@ -573,6 +581,45 @@ mod tests {
             color: "never".to_string(),
             dry_run: false,
         }
+    }
+
+    #[test]
+    fn jira_numeric_source_uses_project_key_and_canonical_url() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let server = format!("http://{}", listener.local_addr().unwrap());
+        let worker = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 4096];
+                let n = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..n]);
+                assert!(
+                    request.starts_with("GET /rest/api/2/issue/RHEL-25091 "),
+                    "{request}"
+                );
+                let body =
+                    r#"{"key":"RHEL-25091","fields":{"summary":"Issue","description":"Body"}}"#;
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            }
+        });
+        let mut e = env();
+        e.config.jira_ticket_url = format!("{server}/browse/RHEL-");
+        e.jira = Some(Arc::new(JiraClient::new(&server, "token").unwrap()));
+        for input in ["jira:25091", "jira:RHEL-25091"] {
+            let source = fetch(&e, &parse_ref(&e, input).unwrap()).unwrap();
+            assert_eq!(source.origin_url, format!("{server}/browse/RHEL-25091"));
+            assert_eq!(source.title, "Issue");
+        }
+        worker.join().unwrap();
     }
 
     #[test]

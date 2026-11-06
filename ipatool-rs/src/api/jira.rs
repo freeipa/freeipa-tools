@@ -53,8 +53,8 @@ impl JiraClient {
         format!("{}/rest/api/2{}", self.server, path)
     }
 
-    /// Fetch summary, description and comment bodies of an issue.
-    pub fn get_issue_text(&self, issue_key: &str) -> Result<(String, String, Vec<String>)> {
+    /// Fetch the canonical key, summary, description and comment bodies of an issue.
+    pub fn get_issue_text(&self, issue_key: &str) -> Result<(String, String, String, Vec<String>)> {
         let url = self.api_url(&format!("/issue/{}", issue_key));
         let resp = self
             .http
@@ -84,6 +84,11 @@ impl JiraClient {
             }
         }
         Ok((
+            data["key"]
+                .as_str()
+                .filter(|key| !key.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("Jira issue response has no key"))?
+                .to_string(),
             fields["summary"].as_str().unwrap_or("").to_string(),
             fields["description"].as_str().unwrap_or("").to_string(),
             comments,
