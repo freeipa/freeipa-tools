@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct JiraClient {
     pub http: reqwest::blocking::Client,
     token: String,
+    username: Option<String>,
     pub server: String,
 }
 
@@ -35,6 +36,14 @@ struct TransitionRef<'a> {
 
 impl JiraClient {
     pub fn new(server: &str, token: &str) -> Result<Self> {
+        Self::build(server, token, None)
+    }
+
+    pub fn new_with_username(server: &str, username: &str, token: &str) -> Result<Self> {
+        Self::build(server, token, Some(username.to_string()))
+    }
+
+    fn build(server: &str, token: &str, username: Option<String>) -> Result<Self> {
         use std::time::Duration;
         let http = reqwest::blocking::Client::builder()
             .user_agent("ipatool/1.0")
@@ -45,8 +54,20 @@ impl JiraClient {
         Ok(JiraClient {
             http,
             token: token.to_string(),
+            username,
             server: server.trim_end_matches('/').to_string(),
         })
+    }
+
+    fn authorize(
+        &self,
+        request: reqwest::blocking::RequestBuilder,
+    ) -> reqwest::blocking::RequestBuilder {
+        if let Some(username) = &self.username {
+            request.basic_auth(username, Some(&self.token))
+        } else {
+            request.bearer_auth(&self.token)
+        }
     }
 
     fn api_url(&self, path: &str) -> String {
@@ -57,9 +78,7 @@ impl JiraClient {
     pub fn get_issue_text(&self, issue_key: &str) -> Result<(String, String, String, Vec<String>)> {
         let url = self.api_url(&format!("/issue/{}", issue_key));
         let resp = self
-            .http
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
+            .authorize(self.http.get(&url))
             .send()
             .with_context(|| format!("GET {}", url))?;
         if !resp.status().is_success() {
@@ -113,9 +132,7 @@ impl JiraClient {
             }
         });
         let resp = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
+            .authorize(self.http.post(&url))
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -136,9 +153,7 @@ impl JiraClient {
         let url = self.api_url(&format!("/issue/{}/comment", issue_key));
         let body = AddCommentBody { body: text };
         let resp = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
+            .authorize(self.http.post(&url))
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -154,9 +169,7 @@ impl JiraClient {
     pub fn get_transitions(&self, issue_key: &str) -> Result<Vec<JiraTransition>> {
         let url = self.api_url(&format!("/issue/{}/transitions", issue_key));
         let resp = self
-            .http
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
+            .authorize(self.http.get(&url))
             .send()
             .with_context(|| format!("GET {}", url))?;
         let data: TransitionsResponse = resp
@@ -171,9 +184,7 @@ impl JiraClient {
             transition: TransitionRef { id: transition_id },
         };
         let resp = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
+            .authorize(self.http.post(&url))
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -184,5 +195,79 @@ impl JiraClient {
             anyhow::bail!("Jira transition_issue failed ({}): {}", status, body);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    #[test]
+    fn basic_and_bearer_authenticate_jira_reads_and_creates() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let server = format!("http://{}", listener.local_addr().unwrap());
+        let worker = thread::spawn(move || {
+            for (method, authorization, response_body) in [
+                (
+                    "GET",
+                    "Basic dXNlckBleGFtcGxlLmNvbTphcGlfdG9rZW4=",
+                    r#"{"key":"RHEL-1","fields":{"summary":"Issue","description":"Body"}}"#,
+                ),
+                (
+                    "POST",
+                    "Basic dXNlckBleGFtcGxlLmNvbTphcGlfdG9rZW4=",
+                    r#"{"key":"RHEL-2"}"#,
+                ),
+                (
+                    "GET",
+                    "Bearer api_token",
+                    r#"{"key":"RHEL-1","fields":{"summary":"Issue","description":"Body"}}"#,
+                ),
+                ("POST", "Bearer api_token", r#"{"key":"RHEL-2"}"#),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                assert!(line.starts_with(method), "{line}");
+                let mut auth = None;
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if line.to_ascii_lowercase().starts_with("authorization: ") {
+                        auth = Some(line.trim().split_once(": ").unwrap().1.to_string());
+                    }
+                }
+                assert_eq!(auth.as_deref(), Some(authorization));
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                )
+                .unwrap();
+            }
+        });
+
+        let basic =
+            JiraClient::new_with_username(&server, "user@example.com", "api_token").unwrap();
+        let bearer = JiraClient::new(&server, "api_token").unwrap();
+        assert_eq!(basic.get_issue_text("RHEL-1").unwrap().0, "RHEL-1");
+        assert_eq!(
+            basic.create_issue("RHEL", "Bug", "Issue", "Body").unwrap(),
+            "RHEL-2"
+        );
+        assert_eq!(bearer.get_issue_text("RHEL-1").unwrap().0, "RHEL-1");
+        assert_eq!(
+            bearer.create_issue("RHEL", "Bug", "Issue", "Body").unwrap(),
+            "RHEL-2"
+        );
+        worker.join().unwrap();
     }
 }

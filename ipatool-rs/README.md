@@ -119,6 +119,10 @@ close-issue:  ask   # close the issue after a successful push
 # Jira ticket keys are read from the 'rhbz' custom field of Pagure/Forgejo
 # issues and matched against jira-ticket-url above.
 
+# Atlassian Cloud API tokens use Basic auth with your account email:
+# jira-user: user@example.com
+# jira-token: "your-api-token"
+# Jira Data Center PATs use Bearer auth; omit jira-user:
 # jira-token: "your-personal-access-token"
 # update-jira: ask   # post commit-info comment on the Jira issue
 # close-jira:  no    # transition Jira issue (yes/no/ask)
@@ -611,11 +615,13 @@ to select another project.
 
 The target must be configured: Jira needs `jira-token` plus a `jira-ticket-url`
 of the form `…/browse/<PROJECT>-` (the project key is derived from it; the
-issue type comes from `jira-issuetype`, default `Bug`); Bugzilla needs
-`bugzilla-url`, `bugzilla-api-key` and `bugzilla-product`; the other trackers
-need their usual tokens.  `--no-bugzilla` / `--no-jira` / etc. disable a
-backend for the run.  `--dry-run` prints the rendered body without creating
-anything.  A source and target from the same tracker are rejected.
+issue type comes from `jira-issuetype`, default `Bug`). Atlassian Cloud API
+tokens also need `jira-user` set to the account email; Jira Data Center PATs
+use Bearer auth and do not need `jira-user`. Bugzilla needs `bugzilla-url`,
+`bugzilla-api-key` and `bugzilla-product`; the other trackers need their usual
+tokens. `--no-bugzilla` / `--no-jira` / etc. disable a backend for the run.
+`--dry-run` prints the rendered body without creating anything. A source and
+target from the same tracker are rejected.
 
 
 ---

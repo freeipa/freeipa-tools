@@ -66,6 +66,10 @@ close-issue: ask
 # Jira configuration (secondary tracker; ticket keys come from the 'rhbz'
 # custom field of Pagure/Forgejo issues, matched against jira-ticket-url)
 # The Jira server URL is derived automatically from jira-ticket-url.
+# Jira Cloud uses Basic auth with the account email and an API token:
+# jira-user: user@example.com
+# jira-token: "your-api-token"
+# Jira Data Center PATs use Bearer auth; omit jira-user:
 # jira-token: "your-personal-access-token"
 # update-jira options: yes/no/ask
 # update-jira: ask
@@ -491,10 +495,16 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
 
     let jira = if !cli.no_jira && config.has_jira() {
         if let Some(server) = config.jira_server() {
-            Some(Arc::new(api::jira::JiraClient::new(
-                &server,
-                &config.jira_token,
-            )?))
+            let client = if config.jira_user.is_empty() {
+                api::jira::JiraClient::new(&server, &config.jira_token)?
+            } else {
+                api::jira::JiraClient::new_with_username(
+                    &server,
+                    &config.jira_user,
+                    &config.jira_token,
+                )?
+            };
+            Some(Arc::new(client))
         } else {
             None
         }

@@ -128,6 +128,9 @@ pub struct Config {
     // Jira
     #[serde(default)]
     pub jira_token: String,
+    /// Jira account email for Atlassian Cloud API-token Basic authentication.
+    #[serde(default)]
+    pub jira_user: String,
     #[serde(default = "default_ask")]
     pub update_jira: String,
     #[serde(default = "default_no")]
