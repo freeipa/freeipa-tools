@@ -21,6 +21,7 @@ refresh:     r
 review:      c
 sync:        s
 inspect:     i
+clone:       C
 down:        j
 up:          k
 scroll-down: d
@@ -57,6 +58,7 @@ pub struct TuiKeys {
     pub up: char,
     pub scroll_down: char,
     pub scroll_up: char,
+    pub clone: char,
     // Code review diff view
     pub review_comment: char,
     pub review_down: char,
@@ -80,6 +82,7 @@ impl Default for TuiKeys {
             review: 'c',
             sync: 's',
             inspect: 'i',
+            clone: 'C',
             down: 'j',
             up: 'k',
             scroll_down: 'd',
@@ -196,6 +199,7 @@ mod tests {
         assert_eq!(parsed.up, defaults.up);
         assert_eq!(parsed.scroll_down, defaults.scroll_down);
         assert_eq!(parsed.scroll_up, defaults.scroll_up);
+        assert_eq!(parsed.clone, defaults.clone);
         assert_eq!(parsed.review_comment, defaults.review_comment);
         assert_eq!(parsed.review_down, defaults.review_down);
         assert_eq!(parsed.review_up, defaults.review_up);

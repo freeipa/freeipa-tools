@@ -66,6 +66,10 @@ close-issue: ask
 # Jira configuration (secondary tracker; ticket keys come from the 'rhbz'
 # custom field of Pagure/Forgejo issues, matched against jira-ticket-url)
 # The Jira server URL is derived automatically from jira-ticket-url.
+# Jira Cloud uses Basic auth with the account email and an API token:
+# jira-user: user@example.com
+# jira-token: "your-api-token"
+# Jira Data Center PATs use Bearer auth; omit jira-user:
 # jira-token: "your-personal-access-token"
 # update-jira options: yes/no/ask
 # update-jira: ask
@@ -73,6 +77,16 @@ close-issue: ask
 # close-jira: no
 # Transition name to use when closing a Jira issue (default: Fixed)
 # jira-close-transition: Fixed
+# Issue type used when creating Jira issues with `ipatool clone --to jira` (default: Bug)
+# jira-issuetype: Bug
+
+# Bugzilla configuration (only needed to clone bugs with `ipatool clone`)
+# bugzilla-url: https://bugzilla.redhat.com
+# Create an API key at https://bugzilla.redhat.com/userprefs.cgi?tab=apikey
+# bugzilla-api-key: "YOUR_BUGZILLA_API_KEY_HERE"
+# Default product/component for bugs created by `ipatool clone --to bugzilla`
+# bugzilla-product: Red Hat Enterprise Linux
+# bugzilla-component:
 
 # Mapping of logins to Git-style author lines
 trac-username-map:
@@ -194,6 +208,10 @@ struct Cli {
     #[arg(long, global = true)]
     no_jira: bool,
 
+    /// Do not contact Bugzilla
+    #[arg(long, global = true)]
+    no_bugzilla: bool,
+
     /// Do not synchronize before pushing
     #[arg(long, global = true)]
     no_fetch: bool,
@@ -297,6 +315,10 @@ enum Command {
         #[arg(short = 'r', long = "reviewer")]
         reviewers: Vec<String>,
 
+        /// Issue URL to add as a Fixed: trailer to each commit (repeatable)
+        #[arg(long = "fixed")]
+        fixed_urls: Vec<String>,
+
         /// Backport to branch (can be repeated)
         #[arg(short = 'B', long = "backport")]
         backport: Vec<String>,
@@ -380,6 +402,33 @@ enum Command {
         #[arg(long)]
         no_milestones: bool,
     },
+
+    /// Clone an issue into another tracker (e.g. a Bugzilla bug into Jira)
+    Clone {
+        /// Source issue: "bugzilla:1234", "jira:RHEL-99", "gh:42", a full
+        /// issue URL, or a bare number (the tracker from --profile/config)
+        issue: String,
+
+        /// Tracker to create the copy in
+        #[arg(
+            short = 't',
+            long = "to",
+            value_parser = ["jira", "bugzilla", "bz", "pagure", "forgejo", "codeberg", "github", "gh"]
+        )]
+        to: String,
+
+        /// Copy the last N comments of the source into the new issue body
+        #[arg(short = 'c', long = "comments", default_value_t = 0)]
+        comments: usize,
+
+        /// Title for the created issue (defaults to the source title)
+        #[arg(short = 'T', long = "title")]
+        title: Option<String>,
+
+        /// Create without asking
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
 }
 
 fn build_ctx(cli: &Cli) -> Result<Ctx> {
@@ -446,13 +495,28 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
 
     let jira = if !cli.no_jira && config.has_jira() {
         if let Some(server) = config.jira_server() {
-            Some(Arc::new(api::jira::JiraClient::new(
-                &server,
-                &config.jira_token,
-            )?))
+            let client = if config.jira_user.is_empty() {
+                api::jira::JiraClient::new(&server, &config.jira_token)?
+            } else {
+                api::jira::JiraClient::new_with_username(
+                    &server,
+                    &config.jira_user,
+                    &config.jira_token,
+                )?
+            };
+            Some(Arc::new(client))
         } else {
             None
         }
+    } else {
+        None
+    };
+
+    let bugzilla = if !cli.no_bugzilla && config.has_bugzilla() {
+        Some(Arc::new(api::bugzilla::BugzillaClient::new(
+            &config.bugzilla_url,
+            &config.bugzilla_api_key,
+        )?))
     } else {
         None
     };
@@ -510,6 +574,7 @@ fn build_ctx(cli: &Cli) -> Result<Ctx> {
         pagure,
         forgejo,
         jira,
+        bugzilla,
         github,
         verbosity: cli.verbose,
         dry_run: cli.dry_run,
@@ -589,9 +654,10 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
         Command::PrPush {
             pr_id,
             reviewers,
+            fixed_urls,
             backport,
             autobackport,
-        } => commands::pr_push::run(ctx, *pr_id, reviewers, backport, *autobackport),
+        } => commands::pr_push::run(ctx, *pr_id, reviewers, backport, *autobackport, fixed_urls),
 
         Command::Backport { pr_id, branches } => {
             commands::backport::run_backport_cmd(ctx, *pr_id, branches)
@@ -634,6 +700,26 @@ fn run_command(ctx: &mut Ctx, command: &Command) -> Result<()> {
                 repo_path: repo.as_deref(),
             };
             commands::release_notes::run(&*ctx, &params)
+        }
+
+        Command::Clone {
+            issue,
+            to,
+            comments,
+            title,
+            yes,
+        } => {
+            let to = commands::clone::Kind::parse(to)
+                .ok_or_else(|| anyhow::anyhow!("unknown target tracker '{to}'"))?;
+            let env = commands::clone::CloneEnv::from_ctx(ctx);
+            let params = commands::clone::CloneParams {
+                source: issue,
+                to,
+                comments: *comments,
+                title: title.as_deref(),
+                yes: *yes,
+            };
+            commands::clone::run(&env, &params)
         }
     }
 }

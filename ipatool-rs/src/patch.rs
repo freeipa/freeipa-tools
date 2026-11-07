@@ -155,6 +155,29 @@ impl Patch {
         }
     }
 
+    pub fn add_fixed(&mut self, url: &str, ticket_url: &str, legacy_ticket_url: &str) {
+        for number in extract_ticket_numbers(url, ticket_url, legacy_ticket_url) {
+            if !self.ticket_numbers.contains(&number) {
+                self.ticket_numbers.push(number);
+            }
+        }
+        let line = format!("Fixed: {}\n", url);
+        if let Some(index) = self
+            .head_lines
+            .iter()
+            .position(|line| line.to_ascii_lowercase().starts_with("reviewed-by:"))
+        {
+            self.head_lines.insert(index, line);
+        } else {
+            if let Some(last) = self.head_lines.last() {
+                if !reviewer_line_re().is_match(last.trim_end()) {
+                    self.head_lines.push("\n".to_string());
+                }
+            }
+            self.head_lines.push(line);
+        }
+    }
+
     pub fn add_reviewer(&mut self, reviewer: &str) {
         // If last head_line doesn't look like a header field, add blank line first
         if let Some(last) = self.head_lines.last() {
@@ -407,6 +430,68 @@ diff --git a/x b/x
     }
 
     // ── Patch::add_reviewer ───────────────────────────────────────────────────
+
+    #[test]
+    fn fixed_lines_precede_existing_and_added_reviewers() {
+        let mut patch = from_str(SIMPLE_PATCH).unwrap();
+        patch.add_reviewer("Alice <alice@example.com>");
+        patch.add_fixed(
+            "https://pagure.io/freeipa/issue/42",
+            "https://pagure.io/freeipa/issue/",
+            "",
+        );
+        patch.add_fixed(
+            "https://example.com/issues/2",
+            "https://pagure.io/freeipa/issue/",
+            "",
+        );
+        patch.add_reviewer("Bob <bob@example.com>");
+        let content = patch.content();
+        assert!(content.contains("Fixed: https://pagure.io/freeipa/issue/42\nFixed: https://example.com/issues/2\nReviewed-By: Alice <alice@example.com>\nReviewed-By: Bob <bob@example.com>"));
+        assert_eq!(patch.ticket_numbers, vec![42]);
+    }
+
+    #[test]
+    fn fixed_trailers_survive_git_am() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "Test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "Test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["init", "-q"]);
+        std::fs::create_dir(repo.path().join("src")).unwrap();
+        std::fs::write(repo.path().join("src/main.rs"), "old line\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        let mut patch = from_str(SIMPLE_PATCH).unwrap();
+        patch.add_fixed("https://example.com/issues/42", "", "");
+        patch.add_reviewer("Alice <alice@example.com>");
+        std::fs::write(repo.path().join("change.patch"), patch.content()).unwrap();
+        git(&["am", "change.patch"]);
+        let message = String::from_utf8(git(&["log", "-1", "--format=%B"])).unwrap();
+        assert!(message.contains(
+            "Fixed: https://example.com/issues/42\nReviewed-By: Alice <alice@example.com>"
+        ));
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("src/main.rs")).unwrap(),
+            "new line\n"
+        );
+    }
 
     #[test]
     fn test_add_reviewer() {

@@ -119,10 +119,26 @@ close-issue:  ask   # close the issue after a successful push
 # Jira ticket keys are read from the 'rhbz' custom field of Pagure/Forgejo
 # issues and matched against jira-ticket-url above.
 
+# Atlassian Cloud API tokens use Basic auth with your account email:
+# jira-user: user@example.com
+# jira-token: "your-api-token"
+# Jira Data Center PATs use Bearer auth; omit jira-user:
 # jira-token: "your-personal-access-token"
 # update-jira: ask   # post commit-info comment on the Jira issue
 # close-jira:  no    # transition Jira issue (yes/no/ask)
 # jira-close-transition: Fixed   # transition name to use when closing
+
+# ── Bugzilla (clone source/target) ────────────────────────────────────────────
+# Only needed to clone bugs with `ipatool clone`; the REST API lives at
+# <bugzilla-url>/restapi/v1 and needs a key from userprefs.cgi?tab=apikey.
+# bugzilla-url: https://bugzilla.redhat.com
+# bugzilla-api-key: "YOUR_BUGZILLA_API_KEY_HERE"
+# Defaults for bugs created by `ipatool clone --to bugzilla`:
+# bugzilla-product: Red Hat Enterprise Linux
+# bugzilla-component:
+
+# Issue type used for `ipatool clone --to jira` (default: Bug)
+# jira-issuetype: Bug
 
 # ── GitHub pull requests ──────────────────────────────────────────────────────
 # Required token scopes: repo, admin:org, user:email, read:user
@@ -324,6 +340,7 @@ These flags apply to every subcommand.
 | `--no-pagure` | off | Disable all Pagure API calls |
 | `--no-forgejo` | off | Disable all Forgejo API calls |
 | `--no-jira` | off | Disable all Jira API calls |
+| `--no-bugzilla` | off | Disable all Bugzilla API calls |
 | `--color <mode>` | `auto` | Terminal color: `auto`, `always`, `never` |
 | `--offline` | off | Use local cache; queue mutations for later sync |
 
@@ -510,6 +527,7 @@ Full push pipeline for a PR (GitHub or Forgejo):
 ipatool pr-push 8309 -r abbra
 ipatool pr-push 8309 -r abbra -B ipa-4-12
 ipatool pr-push 8309 -r abbra --autobackport   # use labels like 'ipa-4-12'
+ipatool pr-push 8309 -r abbra --fixed https://pagure.io/freeipa/issue/9000 --fixed https://example.com/issues/42
 ```
 
 **Arguments:** `<pr_id>` (required)
@@ -519,8 +537,17 @@ ipatool pr-push 8309 -r abbra --autobackport   # use labels like 'ipa-4-12'
 | Flag | Description |
 |------|-------------|
 | `-r`, `--reviewer <name>` | Reviewer name (repeatable) |
+| `--fixed <url>` | Add a `Fixed: <url>` trailer to every PR commit (repeatable) |
 | `-B`, `--backport <branch>` | Backport target branch (repeatable) |
 | `--autobackport` | Auto-detect backport branches from PR labels matching `ipa-N-N` |
+
+The optional issue URLs are added to each commit applied to the PR's base branch,
+before any `Reviewed-By:` trailers, including when `--no-reviewer` is set. URLs
+matching the configured current or legacy ticket prefix are also processed like
+ticket references already in the patches: they can select reviewers and trigger
+the configured issue updates or closure. The TUI push dialog accepts the same
+URLs as a comma-separated list. Generated backport PRs use the original PR
+patches and do not receive these trailers.
 
 ---
 
@@ -546,6 +573,56 @@ ipatool backport 8309 -b ipa-4-12 -b ipa-4-11
 
 If patch application fails for a branch, a warning is printed and the tool
 continues with the remaining branches.
+
+---
+
+### `clone`
+
+Create an issue in one tracker as a copy of an issue in another — the usual
+flow is a Bugzilla bug → a Jira ticket, but every configured tracker can be a
+source or a target (Pagure, Forgejo/Codeberg, GitHub Issues, Bugzilla, Jira).
+The new issue gets the source title, a `Cloned from: <source URL>` header, the
+source description, and optionally the last N source comments.
+
+```
+ipatool clone bugzilla:123456 --to jira              # RHBZ → Jira (project from jira-ticket-url)
+ipatool clone jira:RHEL-99 --to bugzilla -c 3 -y     # Jira → Bugzilla, copy 3 comments
+ipatool clone https://issues.redhat.com/browse/RHEL-99 --to gh -n   # URL source, dry run
+ipatool clone jira:25091 --to bugzilla               # Jira number in configured project (RHEL-25091)
+ipatool clone 42 --to jira                           # bare number = configured issue-tracker
+```
+
+**Arguments:** `<issue>` (required) — one of
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| `<tracker>:<id>` | `bugzilla:123456`, `bz:1`, `rhbz:1`, `jira:RHEL-99`, `gh:42`, `github:42`, `codeberg:42`, `forgejo:42`, `pagure:42` | explicit tracker |
+| URL | `https://bugzilla.redhat.com/show_bug.cgi?id=123456` | classified against the configured `ticket-url` / `bugzilla-bug-url` / `jira-ticket-url` templates |
+| bare number | `123456` | the tracker selected by `issue-tracker` (or `--profile`) |
+
+For `jira:<number>`, the number is an issue number in the project configured
+by `jira-ticket-url`, not Jira's internal numeric ID. Use `jira:<PROJECT>-<number>`
+to select another project.
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `-t`, `--to <tracker>` | Target: `jira`, `bugzilla`/`bz`, `pagure`, `forgejo`/`codeberg`, `github`/`gh` (required) |
+| `-c`, `--comments <N>` | Append the last N comments of the source to the new body (default 0) |
+| `-T`, `--title <text>` | Override the title of the created issue |
+| `-y`, `--yes` | Create without asking |
+
+The target must be configured: Jira needs `jira-token` plus a `jira-ticket-url`
+of the form `…/browse/<PROJECT>-` (the project key is derived from it; the
+issue type comes from `jira-issuetype`, default `Bug`). Atlassian Cloud API
+tokens also need `jira-user` set to the account email; Jira Data Center PATs
+use Bearer auth and do not need `jira-user`. Bugzilla needs `bugzilla-url`,
+`bugzilla-api-key` and `bugzilla-product`; the other trackers need their usual
+tokens. `--no-bugzilla` / `--no-jira` / etc. disable a backend for the run.
+`--dry-run` prints the rendered body without creating anything. A source and
+target from the same tracker are rejected.
+
 
 ---
 
@@ -583,7 +660,7 @@ ipatool --offline tui        # use cached data (no network)
 #### Layout
 
 ```
-  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  Tab:Focus  j/↓:Down  k/↑:Up  d/u:Scroll  i:Inspect  Enter:Actions
+  a:ACK  x:Reject  c:Review  b:Browser  r:Refresh  q:Quit  Tab:Focus  j/↓:Down  k/↑:Up  d/u:Scroll  i:Inspect  C:Clone  Enter:Actions
 ┌── 47 PRs ────────────────────┐┌── Details ──────────────────────────────────┐
 │ #8309 ○ Fix LDAP timeout  …  ││ PR #8309: Fix LDAP connection timeout        │
 │ #8308 ○ Add KDC support   …  ││                                              │
@@ -659,6 +736,7 @@ All keys listed below are the defaults.  Every key can be remapped in
 | `c` | Open diff review for selected PR |
 | `b` | Open PR in browser |
 | `i` | Open CI job results viewer (only available for PRs with completed CI jobs) |
+| `C` | Clone an issue from another tracker into a configured tracker (see [Clone dialog](#clone-dialog-c)) |
 | `r` | Refresh PR list from the forge |
 | `s` | Sync queued offline actions to the forge |
 | `q` | Quit |
@@ -722,6 +800,25 @@ returns you to the TUI afterwards.
 
 Collects target branches (comma-separated), then quits the TUI, runs the
 backport pipeline in the terminal, and returns.
+
+#### Clone dialog (`C`)
+
+Same operation as the [`clone` subcommand](#clone): creates a copy of an issue
+from another tracker.  Issue references found in the selected PR's body
+(`Resolves: https://bugzilla…id=123456`, Jira links, …) are extracted and the
+first one pre-fills the source field.  The target selector lists only the
+trackers the current configuration can create issues in, defaulting to Jira,
+then Bugzilla.
+
+| Button | Action |
+|--------|--------|
+| Preview | Fetch the source and show the exact title/body that would be created; nothing is created |
+| Create | Fetch and create the issue, then report the new id |
+| Cancel / `Esc` | Dismiss |
+
+Both fetch and create run in the background with a loading dialog.  Cloning
+always needs network access to the source tracker; it is not queued in offline
+mode.
 
 #### CI job results viewer (`i`)
 
@@ -1072,6 +1169,7 @@ down:        j
 up:          k
 scroll-down: d
 scroll-up:   u
+clone:       C
 
 # Code review diff view
 review-comment: c

@@ -17,10 +17,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use super::pr_client::PrClient;
-use super::Ctx;
-use crate::api::pagure::PagureClient;
 use crate::api::types::{CiStatus, IssueComment, Label, PrFile, PullRequest, ReviewComment};
+use crate::commands::clone;
+use crate::commands::pr_client::PrClient;
+use crate::commands::{Ctx, PagureClient};
 use crate::tui_keys::TuiKeys;
 
 const FORGEJO_OFFLINE_MSG: &str =
@@ -43,6 +43,7 @@ enum PendingTuiAction {
     PrPush {
         pr_id: u64,
         reviewers: Vec<String>,
+        fixed_urls: Vec<String>,
         backport_branches: Vec<String>,
         autobackport: bool,
     },
@@ -73,6 +74,8 @@ struct TuiState {
     ci_statuses: HashMap<String, CiStatus>,
     /// Bug tracker client for filing issues from the CI viewer.
     pagure: Option<Arc<PagureClient>>,
+    /// Cross-tracker issue cloning (the `clone` subcommand's client set).
+    clone_env: Option<Arc<crate::commands::clone::CloneEnv>>,
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -86,12 +89,18 @@ pub fn run(ctx: &mut Ctx, state: &str) -> Result<()> {
             Some(PendingTuiAction::PrPush {
                 pr_id,
                 reviewers,
+                fixed_urls,
                 backport_branches,
                 autobackport,
             }) => {
-                if let Err(e) =
-                    super::pr_push::run(ctx, pr_id, &reviewers, &backport_branches, autobackport)
-                {
+                if let Err(e) = super::pr_push::run(
+                    ctx,
+                    pr_id,
+                    &reviewers,
+                    &backport_branches,
+                    autobackport,
+                    &fixed_urls,
+                ) {
                     eprintln!("\x1b[31mPush failed: {:#}\x1b[0m", e);
                 }
                 crate::output::prompt("Press Enter to return to the TUI…");
@@ -131,6 +140,7 @@ fn run_tui_once(ctx: &Ctx, state: &str) -> Result<Option<PendingTuiAction>> {
         focus_right: false,
         ci_statuses: HashMap::new(),
         pagure: ctx.pagure.clone(),
+        clone_env: Some(Arc::new(crate::commands::clone::CloneEnv::from_ctx(ctx))),
     });
 
     siv.add_global_callback(ctx.tui_keys.quit, |s| s.quit());
@@ -248,8 +258,9 @@ fn compute_left_width(screen_width: usize) -> usize {
 }
 
 fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<PullRequest>) {
-    // Preserve offline/db/state/profile/keys/focus/pagure from existing user_data (set during run()) or use defaults.
-    let (offline, db, current_state, profile, tui_keys, focus_right, pagure) = siv
+    // Preserve offline/db/state/profile/keys/focus/pagure/clone_env from existing
+    // user_data (set during run()) or use defaults.
+    let (offline, db, current_state, profile, tui_keys, focus_right, pagure, clone_env) = siv
         .user_data::<TuiState>()
         .map(|t| {
             (
@@ -260,6 +271,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<PullRequest>) {
                 t.tui_keys.clone(),
                 t.focus_right,
                 t.pagure.clone(),
+                t.clone_env.clone(),
             )
         })
         .unwrap_or_else(|| {
@@ -270,6 +282,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<PullRequest>) {
                 String::new(),
                 TuiKeys::default(),
                 false,
+                None,
                 None,
             )
         });
@@ -288,6 +301,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<PullRequest>) {
         focus_right,
         ci_statuses: HashMap::new(),
         pagure,
+        clone_env,
     });
 
     let left_width = compute_left_width(siv.screen_size().x);
@@ -331,6 +345,7 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<PullRequest>) {
     let key_scroll_down = tui_keys.scroll_down;
     let key_scroll_up = tui_keys.scroll_up;
     let key_inspect = tui_keys.inspect;
+    let key_clone = tui_keys.clone;
 
     let select_with_keys = OnEventView::new(ScrollView::new(select.with_name("pr_list")))
         .on_event(key_ack, move |s| {
@@ -392,6 +407,12 @@ fn build_two_pane(siv: &mut Cursive, gh: Arc<PrClient>, prs: Vec<PullRequest>) {
         .on_event(key_inspect, |s| {
             if let Some(pr) = selected_pr(s) {
                 show_ci_job_selector(s, pr);
+            }
+        })
+        // C: copy an issue from another tracker into a configured tracker.
+        .on_event(key_clone, move |s| {
+            if let Some(pr) = selected_pr(s) {
+                show_clone_dialog(s, pr);
             }
         });
 
@@ -458,7 +479,7 @@ fn build_help_content(
 ) -> StyledString {
     let keys = format!(
         "  {}:ACK  {}:Reject  {}:Review  {}:Browser  {}:Refresh  {}:Quit  \
-         {}/↓:Down  {}/↑:Up  {}/{}:Scroll  Tab:Pane  {}:Inspect  Enter:Actions",
+         {}/↓:Down  {}/↑:Up  {}/{}:Scroll  Tab:Pane  {}:Inspect  {}:Clone  Enter:Actions",
         tui_keys.ack,
         tui_keys.reject,
         tui_keys.review,
@@ -470,6 +491,7 @@ fn build_help_content(
         tui_keys.scroll_down,
         tui_keys.scroll_up,
         tui_keys.inspect,
+        tui_keys.clone,
     );
     let mut s = StyledString::new();
     if offline {
@@ -2117,6 +2139,9 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                     ))
                     .child(EditView::new().with_name("push_reviewer").min_width(64))
                     .child(TextView::new(""))
+                    .child(TextView::new("Fixed issue URLs — comma-separated:"))
+                    .child(EditView::new().with_name("push_fixed").min_width(64))
+                    .child(TextView::new(""))
                     .child(TextView::new(
                         "Backport to branches — comma-separated (e.g. ipa-4-12,ipa-4-11):",
                     ))
@@ -2134,6 +2159,9 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                         v.get_content().to_string()
                     })
                     .unwrap_or_default();
+                let fixed_str = s
+                    .call_on_name("push_fixed", |v: &mut EditView| v.get_content().to_string())
+                    .unwrap_or_default();
                 let backport_str = s
                     .call_on_name("push_backport", |v: &mut EditView| {
                         v.get_content().to_string()
@@ -2148,6 +2176,11 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                     .map(|r| r.trim().to_string())
                     .filter(|r| !r.is_empty())
                     .collect();
+                let fixed_urls: Vec<String> = fixed_str
+                    .split(',')
+                    .map(|url| url.trim().to_string())
+                    .filter(|url| !url.is_empty())
+                    .collect();
                 let backport_branches: Vec<String> = backport_str
                     .split(',')
                     .map(|b| b.trim().to_string())
@@ -2158,6 +2191,7 @@ fn show_push_dialog(siv: &mut Cursive, pr_number: u64) {
                     state.pending_action = Some(PendingTuiAction::PrPush {
                         pr_id: pr_number,
                         reviewers,
+                        fixed_urls,
                         backport_branches,
                         autobackport,
                     });
@@ -2343,10 +2377,11 @@ fn apply_queued_action(gh: &Arc<PrClient>, action: &crate::db::QueuedAction) -> 
 
 // ─── Background action helper ─────────────────────────────────────────────────
 
-fn do_in_background<A, D>(siv: &mut Cursive, msg: &str, action: A, on_done: D)
+fn do_in_background<A, D, T>(siv: &mut Cursive, msg: &str, action: A, on_done: D)
 where
-    A: FnOnce() -> Result<()> + Send + 'static,
-    D: FnOnce(&mut Cursive, Result<()>) + Send + 'static,
+    A: FnOnce() -> Result<T> + Send + 'static,
+    D: FnOnce(&mut Cursive, Result<T>) + Send + 'static,
+    T: Send + 'static,
 {
     siv.add_layer(loading_dialog(msg));
     let cb = siv.cb_sink().clone();
@@ -3294,6 +3329,222 @@ fn show_file_bug_dialog(
                         }
                     }
                 });
+            }),
+    );
+}
+
+// ─── Cross-tracker clone ─────────────────────────────────────────────────────
+
+/// Create a copy of an issue from another tracker (Bugzilla/Jira/GitHub/…) in
+/// one of the configured trackers.  Source candidates are extracted from the
+/// selected PR's body so the usual flow is two keystrokes.
+fn show_clone_dialog(siv: &mut Cursive, pr: PullRequest) {
+    let env = match siv
+        .user_data::<TuiState>()
+        .and_then(|t| t.clone_env.clone())
+    {
+        Some(e) => e,
+        None => {
+            show_error(siv, "Internal error: clone support unavailable.");
+            return;
+        }
+    };
+    let targets = clone::available_targets(&env);
+    if targets.is_empty() {
+        show_info(
+            siv,
+            "No target tracker is configured for cloning.\n\
+             Set jira-token, bugzilla-url + bugzilla-product, gh-*, forgejo-* or pagure-*.",
+        );
+        return;
+    }
+
+    let found = pr
+        .body
+        .as_deref()
+        .map(|b| clone::find_refs(&env, b))
+        .unwrap_or_default();
+    let default_source = found
+        .first()
+        .map(|r| format!("{}:{}", r.kind.keyword(), r.id))
+        .unwrap_or_default();
+    let found_summary = if found.is_empty() {
+        "No issue references found in this PR body — enter one manually.".to_string()
+    } else {
+        format!(
+            "Found in PR body: {}",
+            found
+                .iter()
+                .map(|r| format!("{}:{}", r.kind.keyword(), r.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    let mut select = SelectView::<clone::Kind>::new();
+    for k in &targets {
+        select.add_item(k.label().to_string(), *k);
+    }
+    if let Some(p) = clone::preferred_target(&env).filter(|k| targets.contains(k)) {
+        if let Some(pos) = targets.iter().position(|k| *k == p) {
+            select.set_selection(pos);
+        }
+    }
+
+    let env_preview = Arc::clone(&env);
+    let env_create = Arc::clone(&env);
+    siv.add_layer(
+        Dialog::new()
+            .title(format!(
+                "Clone an issue into another tracker (PR #{})",
+                pr.number
+            ))
+            .content(
+                LinearLayout::vertical()
+                    .child(TextView::new(
+                        "Source issue (bugzilla:1234, jira:RHEL-99, gh:42, …):",
+                    ))
+                    .child(
+                        EditView::new()
+                            .content(default_source)
+                            .with_name("clone_source")
+                            .min_width(64),
+                    )
+                    .child(TextView::new(found_summary))
+                    .child(TextView::new("Create the copy in:"))
+                    .child(
+                        Panel::new(select.with_name("clone_target"))
+                            .title("Target tracker")
+                            .min_height(3),
+                    )
+                    .child(TextView::new("Copy the last N comments (0 = none):"))
+                    .child(
+                        EditView::new()
+                            .content("0")
+                            .with_name("clone_comments")
+                            .min_width(8),
+                    ),
+            )
+            .button("Preview", move |s| {
+                let (source, comments, target) = match read_clone_form(s) {
+                    Ok(v) => v,
+                    Err(msg) => {
+                        show_error(s, &msg);
+                        return;
+                    }
+                };
+                let env2 = Arc::clone(&env_preview);
+                do_in_background(
+                    s,
+                    "Fetching source issue…",
+                    move || {
+                        let params = clone::CloneParams {
+                            source: &source,
+                            to: target,
+                            comments,
+                            title: None,
+                            yes: true,
+                        };
+                        clone::prepare(&env2, &params)
+                    },
+                    move |s, result| match result {
+                        Ok(prepared) => show_clone_preview(s, &prepared, target),
+                        Err(e) => show_error(s, &format!("Clone preview failed:\n{:#}", e)),
+                    },
+                );
+            })
+            .button("Create", move |s| {
+                let (source, comments, target) = match read_clone_form(s) {
+                    Ok(v) => v,
+                    Err(msg) => {
+                        show_error(s, &msg);
+                        return;
+                    }
+                };
+                let env2 = Arc::clone(&env_create);
+                s.pop_layer();
+                do_in_background(
+                    s,
+                    "Creating the issue…",
+                    move || -> Result<String> {
+                        let params = clone::CloneParams {
+                            source: &source,
+                            to: target,
+                            comments,
+                            title: None,
+                            yes: true,
+                        };
+                        let prepared = clone::prepare(&env2, &params)?;
+                        let id = clone::create(&env2, target, &prepared.title, &prepared.body)?;
+                        Ok(format!(
+                            "{}{} (cloned from {} {})",
+                            target.label(),
+                            id,
+                            prepared.src_kind.label(),
+                            prepared.src_id
+                        ))
+                    },
+                    move |s, result| match result {
+                        Ok(msg) => show_info(s, &format!("Created {}.", msg)),
+                        Err(e) => show_error(s, &format!("Clone failed:\n{:#}", e)),
+                    },
+                );
+            })
+            .button("Cancel", |s| {
+                s.pop_layer();
+            }),
+    );
+}
+
+/// Read + validate the clone form.
+fn read_clone_form(s: &mut Cursive) -> Result<(String, usize, clone::Kind), String> {
+    let source = s
+        .call_on_name("clone_source", |v: &mut EditView| {
+            v.get_content().to_string()
+        })
+        .unwrap_or_default();
+    let comments_str = s
+        .call_on_name("clone_comments", |v: &mut EditView| {
+            v.get_content().to_string()
+        })
+        .unwrap_or_default();
+    let target = s
+        .call_on_name("clone_target", |v: &mut SelectView<clone::Kind>| {
+            v.selection().map(|k| *k)
+        })
+        .flatten();
+    let source = source.trim().to_string();
+    if source.is_empty() {
+        return Err("Enter a source issue, e.g. bugzilla:1234 or jira:RHEL-99.".to_string());
+    }
+    let comments = match comments_str.trim().parse::<usize>() {
+        Ok(n) => n,
+        Err(_) => return Err("The comment count must be a number.".to_string()),
+    };
+    let target = target.ok_or_else(|| "Select a target tracker.".to_string())?;
+    Ok((source, comments, target))
+}
+
+/// Read-only preview layer for a prepared copy.
+fn show_clone_preview(siv: &mut Cursive, prepared: &clone::Prepared, target: clone::Kind) {
+    let head = format!(
+        "New {} issue (cloned from {} {})\nTitle: {}\n{} comment(s) included\n{}\n\n",
+        target.label(),
+        prepared.src_kind.label(),
+        prepared.src_id,
+        prepared.title,
+        prepared.comments_copied,
+        "─".repeat(60),
+    );
+    let mut content = StyledString::new();
+    content.append_styled(head, bold());
+    content.append_plain(&prepared.body);
+    siv.add_layer(
+        Dialog::new()
+            .title("Clone preview")
+            .content(ScrollView::new(TextView::new(content)).min_size(cursive::Vec2::new(76, 20)))
+            .button("Close", |s| {
+                s.pop_layer();
             }),
     );
 }

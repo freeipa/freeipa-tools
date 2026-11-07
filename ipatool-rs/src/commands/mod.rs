@@ -17,6 +17,7 @@ pub(crate) use crate::api::types::TicketOps;
 pub mod am;
 pub mod backport;
 pub mod cache_update;
+pub mod clone;
 pub mod interactive;
 pub mod pr_ack;
 pub mod pr_client;
@@ -214,6 +215,7 @@ pub struct Ctx {
     pub pagure: Option<Arc<PagureClient>>,
     pub forgejo: Option<Arc<ForgejoClient>>,
     pub jira: Option<Arc<JiraClient>>,
+    pub bugzilla: Option<Arc<crate::api::bugzilla::BugzillaClient>>,
     pub github: Option<Arc<GitHubClient>>,
     pub verbosity: u8,
     pub dry_run: bool,

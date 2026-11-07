@@ -96,6 +96,15 @@ pub struct Config {
     pub bugzilla_bug_url: String,
     #[serde(default)]
     pub jira_ticket_url: String,
+    #[serde(default)]
+    pub bugzilla_url: String,
+    #[serde(default)]
+    pub bugzilla_api_key: String,
+    /// Default Bugzilla product/component used when creating bugs.
+    #[serde(default)]
+    pub bugzilla_product: String,
+    #[serde(default)]
+    pub bugzilla_component: String,
 
     // Pagure
     #[serde(default)]
@@ -119,12 +128,18 @@ pub struct Config {
     // Jira
     #[serde(default)]
     pub jira_token: String,
+    /// Jira account email for Atlassian Cloud API-token Basic authentication.
+    #[serde(default)]
+    pub jira_user: String,
     #[serde(default = "default_ask")]
     pub update_jira: String,
     #[serde(default = "default_no")]
     pub close_jira: String,
     #[serde(default = "default_fixed")]
     pub jira_close_transition: String,
+    /// Default Jira issue type used when creating issues.
+    #[serde(default = "default_bug_issuetype")]
+    pub jira_issuetype: String,
 
     // git am
     #[serde(default)]
@@ -197,6 +212,9 @@ fn default_fixed() -> String {
 fn default_db_path() -> String {
     "~/.ipa/ipatool-cache.db".to_string()
 }
+fn default_bug_issuetype() -> String {
+    "Bug".to_string()
+}
 
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
@@ -226,6 +244,22 @@ impl Config {
 
     pub fn has_github(&self) -> bool {
         !self.gh_token.is_empty() && !self.gh_repo.is_empty()
+    }
+
+    pub fn has_bugzilla(&self) -> bool {
+        !self.bugzilla_url.is_empty()
+    }
+
+    /// Project key derived from jira-ticket-url, e.g.
+    /// "https://issues.redhat.com/browse/RHEL-" → "RHEL".
+    pub fn jira_project_key(&self) -> Option<String> {
+        let tail = self.jira_ticket_url.split("/browse/").nth(1)?;
+        let key = tail.trim_end_matches('-');
+        if key.is_empty() {
+            None
+        } else {
+            Some(key.to_string())
+        }
     }
 
     pub fn jira_server(&self) -> Option<String> {

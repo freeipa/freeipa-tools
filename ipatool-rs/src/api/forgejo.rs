@@ -138,6 +138,33 @@ impl ForgejoClient {
             .with_context(|| format!("Parsing forgejo issue {}", number))?;
         Ok(issue)
     }
+    /// Create an issue; returns its number.
+    pub fn create_issue(&self, title: &str, body: &str) -> Result<u64> {
+        let url = self.api_url(&format!("/repos/{}/{}/issues", self.owner, self.repo));
+        #[derive(Serialize)]
+        struct NewIssue<'a> {
+            title: &'a str,
+            body: &'a str,
+        }
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .json(&NewIssue { title, body })
+            .send()
+            .with_context(|| format!("POST {}", url))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            anyhow::bail!("Forgejo create_issue failed ({}): {}", status, body);
+        }
+        let data: serde_json::Value = resp
+            .json()
+            .context("Parsing Forgejo create_issue response")?;
+        data["number"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Forgejo create_issue response has no number"))
+    }
 
     pub fn comment_issue(&self, number: u64, text: &str) -> Result<()> {
         let url = self.api_url(&format!(
